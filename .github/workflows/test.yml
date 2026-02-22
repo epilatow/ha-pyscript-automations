@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:  # Run on all branches including main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Run all tests
+        run: tests/run_all.py

@@ -1,0 +1,170 @@
+blueprint:
+  name: Sensor Threshold Switch Controller
+  description: >
+    Controls a switch based on sensor value spikes (e.g., humidity for a
+    bathroom fan). Turns switch ON when sensor readings spike above a
+    trigger threshold, OFF when they drop below a release threshold.
+    Includes manual override protection, double-off disable, auto-off
+    timer for manual activation, and optional notifications.
+  domain: automation
+
+  input:
+    target_switch_entity:
+      name: Target Switch Entity
+      description: >
+        The switch, fan, or light entity to control.
+      selector:
+        entity:
+          domain:
+            - switch
+            - fan
+            - light
+            - input_boolean
+
+    sensor_entities:
+      name: Sensor Entities
+      description: >
+        One or more sensors to monitor (e.g., humidity
+        sensors). All sensors feed into a shared sampling
+        window. Any sensor spike triggers the switch; all
+        must settle to release.
+      selector:
+        entity:
+          domain: sensor
+          multiple: true
+
+    trigger_threshold:
+      name: Trigger Threshold
+      description: >
+        Sensor spike amount (max - min) to turn switch ON.
+      default: 10
+      selector:
+        number:
+          mode: box
+
+    release_threshold:
+      name: Release Threshold
+      description: >
+        Amount above baseline to keep switch ON. Must be
+        less than or equal to trigger threshold.
+      default: 5
+      selector:
+        number:
+          mode: box
+
+    sampling_window_s:
+      name: Sampling Window (seconds)
+      description: >
+        Rolling window for sensor min/max calculation.
+      default: 300
+      selector:
+        number:
+          min: 10
+          max: 3600
+          unit_of_measurement: seconds
+          mode: box
+
+    disable_window_s:
+      name: Disable Window (seconds)
+      description: >
+        Time window for double-off detection. Two manual
+        switch-off operations within this window disable the
+        sensor override. Set to 0 to disable this feature.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: seconds
+          mode: box
+
+    auto_off_min:
+      name: Auto-Off Timeout (minutes)
+      description: >
+        Minutes before auto-off after manual switch activation.
+        Set to 0 to disable auto-off.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: minutes
+          mode: box
+
+    notification_service:
+      name: Notification Service (optional)
+      description: >
+        Service name for notifications (e.g., "notify" or
+        "notify.mobile_app_phone"). Leave empty to disable
+        notifications.
+      default: ""
+      selector:
+        text:
+
+    notification_prefix:
+      name: Notification Prefix (optional)
+      description: >
+        Text prepended to notifications. Supports timestamp
+        tokens: YYYY, YY, MM, DD, HH, mm, ss.
+      default: "STSC: "
+      selector:
+        text:
+
+    notification_suffix:
+      name: Notification Suffix (optional)
+      description: >
+        Text appended to notifications. Supports timestamp
+        tokens: YYYY, YY, MM, DD, HH, mm, ss.
+      default: " at YYYY-MM-DD HH:mm:ss"
+      selector:
+        text:
+
+    debug:
+      name: Debug Logging
+      description: >
+        Enable debug logging. When enabled, emits a
+        log.warning message with full decision context
+        on every invocation. Check Settings > System >
+        Logs to view output.
+      default: false
+      selector:
+        boolean:
+
+variables:
+  target_switch_entity: !input target_switch_entity
+
+triggers:
+  - id: sensor_change
+    trigger: state
+    entity_id: !input sensor_entities
+  - id: switch_change
+    trigger: state
+    entity_id: !input target_switch_entity
+  - id: timer
+    trigger: time_pattern
+    minutes: "/1"
+
+actions:
+  - action: pyscript.sensor_threshold_switch_controller
+    data:
+      instance_id: "{{ this.entity_id }}"
+      target_switch_entity: "{{ target_switch_entity }}"
+      sensor_value: >-
+        {{ trigger.to_state.state
+           if trigger.to_state is defined
+           else '' }}
+      switch_state: "{{ states(target_switch_entity) }}"
+      trigger_entity: >-
+        {{ trigger.entity_id | default('timer', true) }}
+      trigger_threshold: !input trigger_threshold
+      release_threshold: !input release_threshold
+      sampling_window_s: !input sampling_window_s
+      disable_window_s: !input disable_window_s
+      auto_off_min: !input auto_off_min
+      notification_service: !input notification_service
+      notification_prefix: !input notification_prefix
+      notification_suffix: !input notification_suffix
+      debug: !input debug
+
+mode: queued
+max: 10
