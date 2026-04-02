@@ -1,7 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# ///
 # This is AI generated code
 """PyScript service wrappers.
 
