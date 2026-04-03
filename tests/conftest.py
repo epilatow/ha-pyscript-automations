@@ -4,6 +4,7 @@
 import atexit
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -126,3 +127,83 @@ def run_tests(
         pytest_args.append("-v")
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     raise SystemExit(pytest.main(pytest_args))
+
+
+class CodeQualityBase:
+    """Base for per-file code quality checks.
+
+    Subclass as ``TestCodeQuality`` in each test file
+    and set ``ruff_targets`` and ``mypy_targets`` to
+    the files that test file covers.
+    """
+
+    ruff_targets: list[str] = []
+    mypy_targets: list[str] = []
+
+    def test_ruff_lint(self) -> None:
+        """Ruff linter passes on all target files."""
+        for target in self.ruff_targets:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    target,
+                ],
+                cwd=_REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, (
+                f"ruff lint failed on {target}."
+                ' Run "uvx ruff check --fix ."'
+                " to auto-fix.\n\n"
+                f"{result.stdout}{result.stderr}"
+            )
+
+    def test_ruff_format(self) -> None:
+        """Ruff formatting passes on all target files."""
+        for target in self.ruff_targets:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "format",
+                    "--check",
+                    target,
+                ],
+                cwd=_REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, (
+                f"ruff format failed on {target}."
+                ' Run "uvx ruff format ."'
+                " to auto-fix.\n\n"
+                f"{result.stdout}{result.stderr}"
+            )
+
+    def test_mypy_strict(self) -> None:
+        """Mypy strict passes on all target files."""
+        import pytest  # type: ignore[import-not-found]
+
+        if not self.mypy_targets:
+            pytest.skip("no mypy targets")
+        for target in self.mypy_targets:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "mypy",
+                    target,
+                    "--strict",
+                ],
+                cwd=_REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, (
+                f"mypy failed on {target}.\n\n{result.stdout}{result.stderr}"
+            )

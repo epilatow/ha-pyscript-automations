@@ -7,7 +7,6 @@
 """Tests for sensor_threshold_switch_controller module."""
 
 import json
-import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,6 +23,7 @@ _SCRIPT_PATH = (
 sys.path.insert(0, str(_SCRIPT_PATH.parent))
 
 import pytest  # noqa: E402
+from conftest import CodeQualityBase  # noqa: E402
 from sensor_threshold_switch_controller import (  # noqa: E402
     Action,
     Config,
@@ -1291,61 +1291,14 @@ class TestHandleServiceCall:
         assert result.sensor_value is None
 
 
-class TestCodeQuality:
-    def test_ruff_lint(self) -> None:
-        """All files pass ruff linter checks."""
-        result = subprocess.run(
-            [sys.executable, "-m", "ruff", "check", "."],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, (
-            "ruff found lint issues."
-            ' Run "uvx ruff check --fix ."'
-            " to auto-fix.\n\n"
-            f"{result.stdout}{result.stderr}"
-        )
-
-    def test_ruff_format(self) -> None:
-        """All files pass ruff formatting checks."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "ruff",
-                "format",
-                "--check",
-                ".",
-            ],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, (
-            "ruff found formatting issues."
-            ' Run "uvx ruff format ."'
-            " to auto-fix.\n\n"
-            f"{result.stdout}{result.stderr}"
-        )
-
-    def test_mypy_strict(self) -> None:
-        """All logic modules pass mypy strict checks."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "mypy",
-                "pyscript/modules/",
-                "--strict",
-            ],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, (
-            f"mypy found type errors.\n\n{result.stdout}{result.stderr}"
-        )
+class TestCodeQuality(CodeQualityBase):
+    ruff_targets = [
+        "pyscript/modules/sensor_threshold_switch_controller.py",
+        "tests/test_sensor_threshold_switch_controller.py",
+    ]
+    mypy_targets = [
+        "pyscript/modules/sensor_threshold_switch_controller.py",
+    ]
 
 
 if __name__ == "__main__":

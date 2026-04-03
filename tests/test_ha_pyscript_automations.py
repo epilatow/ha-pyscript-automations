@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pytest", "pytest-cov", "ruff"]
+# dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
 """Tests for the pyscript/ha_pyscript_automations.py bridge.
@@ -22,7 +22,6 @@ the function will see our controllable replacement.
 import ast
 import json
 import re
-import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,6 +40,7 @@ _PYSCRIPT_DIR = REPO_ROOT / "pyscript"
 sys.path.insert(0, str(REPO_ROOT / "pyscript" / "modules"))
 
 import pytest  # noqa: E402
+from conftest import CodeQualityBase  # noqa: E402
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
 
@@ -817,51 +817,12 @@ class TestDebugLogging:
         assert len(env.mock_log.warning_calls) == 2
 
 
-class TestCodeQuality:
-    """Ruff lint and format checks for service file."""
-
-    def test_ruff_lint(self) -> None:
-        """Service file passes ruff linter."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "ruff",
-                "check",
-                str(_SCRIPT_PATH),
-            ],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, (
-            "ruff found lint issues."
-            ' Run "uvx ruff check --fix ."'
-            " to auto-fix.\n\n"
-            f"{result.stdout}{result.stderr}"
-        )
-
-    def test_ruff_format(self) -> None:
-        """Service file passes ruff formatting."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "ruff",
-                "format",
-                "--check",
-                str(_SCRIPT_PATH),
-            ],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, (
-            "ruff found formatting issues."
-            ' Run "uvx ruff format ."'
-            " to auto-fix.\n\n"
-            f"{result.stdout}{result.stderr}"
-        )
+class TestCodeQuality(CodeQualityBase):
+    ruff_targets = [
+        "pyscript/ha_pyscript_automations.py",
+        "tests/test_ha_pyscript_automations.py",
+    ]
+    mypy_targets: list[str] = []
 
 
 class TestPyScriptCompatibility:

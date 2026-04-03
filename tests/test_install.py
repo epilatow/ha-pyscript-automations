@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pytest", "pytest-cov", "ruff"]
+# dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
 """Tests for scripts/install.sh.
@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import CodeQualityBase
 
 REPO_ROOT = Path(__file__).parent.parent
 INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install.sh"
@@ -468,8 +469,15 @@ class TestSymlinkedConfigDir:
         assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
 
 
-class TestCodeQuality:
-    """Lint and format checks for install.sh."""
+class TestCodeQuality(CodeQualityBase):
+    ruff_targets = [
+        "tests/test_install.py",
+    ]
+    mypy_targets: list[str] = []
+
+
+class TestInstallScriptQuality:
+    """Install script-specific quality checks."""
 
     def test_bash_syntax(self) -> None:
         """Verify install.sh has valid bash syntax."""
