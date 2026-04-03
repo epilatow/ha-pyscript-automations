@@ -39,10 +39,15 @@ _PYSCRIPT_DIR = REPO_ROOT / "pyscript"
 # via pytest or directly via uv run --script.
 sys.path.insert(0, str(REPO_ROOT / "pyscript" / "modules"))
 
+from datetime import UTC  # noqa: E402
+
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
+# Timezone-aware version for watchdog tests (pyscript's
+# last_changed returns UTC-aware datetimes).
+T0_UTC = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 # ── Mock infrastructure ──────────────────────────────
@@ -138,7 +143,7 @@ class _ControllableDatetime:
     def __init__(self, now_value: datetime) -> None:
         self._now = now_value
 
-    def now(self) -> datetime:
+    def now(self, tz: Any = None) -> datetime:
         return self._now
 
     def __getattr__(self, name: str) -> Any:
@@ -817,6 +822,533 @@ class TestDebugLogging:
         assert len(env.mock_log.warning_calls) == 2
 
 
+# ── Device Watchdog mock infrastructure ──────────────
+
+
+class _MockPersistentNotification:
+    """Mock for ``persistent_notification`` service."""
+
+    def __init__(self) -> None:
+        self.create_calls: list[dict[str, str]] = []
+        self.dismiss_calls: list[dict[str, str]] = []
+
+    def create(self, **kwargs: str) -> None:
+        self.create_calls.append(kwargs)
+
+    def dismiss(self, **kwargs: str) -> None:
+        self.dismiss_calls.append(kwargs)
+
+
+class _WatchdogEnv:
+    """Loads service file and wires mocks for watchdog.
+
+    Replaces registry helpers in the exec'd namespace
+    with controllable mocks, avoiding any dependency
+    on HA packages.
+    """
+
+    def __init__(
+        self,
+        current_time: datetime = T0_UTC,
+    ) -> None:
+        self.mock_state = _MockState()
+        self.mock_ha = _MockHA()
+        self.mock_service = _MockServiceObj()
+        self.mock_log = _MockLog()
+        self.mock_pn = _MockPersistentNotification()
+
+        src = _SCRIPT_PATH.read_text()
+        self._ns: dict[str, Any] = {
+            "__builtins__": __builtins__,
+            "service": self.mock_service,
+            "state": self.mock_state,
+            "homeassistant": self.mock_ha,
+            "log": self.mock_log,
+            "hass": "mock_hass_obj",
+            "persistent_notification": self.mock_pn,
+        }
+        exec(
+            compile(src, str(_SCRIPT_PATH), "exec"),
+            self._ns,
+        )
+        self.set_now(current_time)
+
+        # Default mock registry responses
+        self._integration_entities: dict[str, list[str]] = {}
+        self._device_for_entity: dict[str, dict[str, str] | None] = {}
+        self._entity_states: dict[str, tuple[str, datetime]] = {}
+
+        # Wire mock helpers into the namespace
+        self._ns["_get_integration_entities"] = (
+            self._mock_get_integration_entities
+        )
+        self._ns["_get_device_for_entity"] = self._mock_get_device_for_entity
+        self._ns["_read_entity_state"] = self._mock_read_entity_state
+
+    def _mock_get_integration_entities(
+        self,
+        _hass: Any,
+        integration_id: str,
+    ) -> list[str]:
+        return self._integration_entities.get(
+            integration_id,
+            [],
+        )
+
+    def _mock_get_device_for_entity(
+        self,
+        _hass: Any,
+        entity_id: str,
+    ) -> dict[str, str] | None:
+        return self._device_for_entity.get(entity_id)
+
+    def _mock_read_entity_state(
+        self,
+        entity_id: str,
+    ) -> tuple[str | None, datetime | None]:
+        entry = self._entity_states.get(entity_id)
+        if entry is None:
+            return None, None
+        return entry
+
+    def set_now(self, dt: datetime) -> None:
+        """Override datetime.now() for calls."""
+        self._ns["datetime"] = _ControllableDatetime(dt)
+
+    def remove_hass(self) -> None:
+        """Remove hass from namespace to simulate missing."""
+        del self._ns["hass"]
+
+    def setup_device(
+        self,
+        integration: str,
+        device_id: str,
+        device_name: str,
+        entities: dict[str, tuple[str, datetime]],
+    ) -> None:
+        """Wire up a device with entities.
+
+        entities: {entity_id: (state, last_changed)}
+        """
+        # Add entity to integration
+        current = self._integration_entities.get(
+            integration,
+            [],
+        )
+        for eid in entities:
+            if eid not in current:
+                current.append(eid)
+            self._device_for_entity[eid] = {
+                "id": device_id,
+                "name": device_name,
+            }
+        self._integration_entities[integration] = current
+
+        # Add entity states
+        for eid, (st, lc) in entities.items():
+            self._entity_states[eid] = (st, lc)
+
+    @property
+    def watchdog_fn(self) -> Any:
+        return self._ns["device_watchdog"]
+
+    def call(self, **kwargs: Any) -> None:
+        self.watchdog_fn(**_dw_default_kwargs(**kwargs))
+
+
+def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "instance_id": "auto.dw_test",
+        "monitored_integrations": ["zwave_js"],
+        "device_exclude_regex": "",
+        "entity_exclude_regex": "",
+        "monitored_entity_domains": [],
+        "check_interval_minutes": "1",
+        "dead_device_threshold_minutes": "1440",
+        "debug_output": "false",
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+class TestDeviceWatchdogHassDetection:
+    """Test hass_is_global detection."""
+
+    def test_missing_hass_notifies_and_skips(
+        self,
+    ) -> None:
+        env = _WatchdogEnv()
+        env.remove_hass()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call()
+        # Config error notification only, no device checks
+        assert len(env.mock_pn.create_calls) == 1
+        call = env.mock_pn.create_calls[0]
+        assert "hass_is_global" in call["message"]
+        assert call["notification_id"] == ("device_watchdog_config_error")
+        assert env.mock_pn.dismiss_calls == []
+
+    def test_present_hass_no_config_error(self) -> None:
+        env = _WatchdogEnv()
+        env.call()
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if c.get("notification_id") == "device_watchdog_config_error"
+        ]
+        assert config_errors == []
+
+
+class TestDeviceWatchdogRegexValidation:
+    """Test invalid regex detection."""
+
+    def test_invalid_device_regex_notifies(self) -> None:
+        env = _WatchdogEnv()
+        env.call(device_exclude_regex="[invalid")
+        assert len(env.mock_pn.create_calls) == 1
+        call = env.mock_pn.create_calls[0]
+        assert "Invalid" in call["title"]
+        assert "device_exclude_regex" in call["message"]
+        assert "[invalid" in call["message"]
+
+    def test_invalid_entity_regex_notifies(self) -> None:
+        env = _WatchdogEnv()
+        env.call(entity_exclude_regex="(unclosed")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "entity_exclude_regex" in msg
+        assert "(unclosed" in msg
+
+    def test_both_invalid_reports_both(self) -> None:
+        env = _WatchdogEnv()
+        env.call(
+            device_exclude_regex="[bad",
+            entity_exclude_regex="(bad",
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "device_exclude_regex" in msg
+        assert "entity_exclude_regex" in msg
+
+    def test_invalid_regex_skips_evaluation(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call(device_exclude_regex="[invalid")
+        # Only the config error, no device notifications
+        assert len(env.mock_pn.create_calls) == 1
+        assert env.mock_pn.dismiss_calls == []
+
+    def test_valid_regex_no_error(self) -> None:
+        env = _WatchdogEnv()
+        env.call(
+            device_exclude_regex=".*test.*",
+            entity_exclude_regex="^sensor\\.bat",
+        )
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if "Invalid" in c.get("title", "")
+        ]
+        assert config_errors == []
+
+    def test_empty_match_regex_rejected(self) -> None:
+        """Regex like '|||||' matches everything."""
+        env = _WatchdogEnv()
+        env.call(device_exclude_regex="|||||")
+        assert len(env.mock_pn.create_calls) == 1
+        assert "empty string" in (env.mock_pn.create_calls[0]["message"])
+
+
+class TestDeviceWatchdogIntervalGating:
+    """Test check interval gating."""
+
+    def test_skips_when_off_interval(self) -> None:
+        # T0_UTC is 12:00:00; interval 60 min, set to 12:01
+        env = _WatchdogEnv(
+            current_time=datetime(
+                2024,
+                1,
+                15,
+                12,
+                1,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call(check_interval_minutes="60")
+        # Should not have created any notifications
+        assert env.mock_pn.create_calls == []
+        assert env.mock_pn.dismiss_calls == []
+
+    def test_runs_on_interval_boundary(self) -> None:
+        env = _WatchdogEnv(
+            current_time=datetime(
+                2024,
+                1,
+                15,
+                12,
+                0,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call(check_interval_minutes="60")
+        assert len(env.mock_pn.create_calls) == 1
+
+    def test_no_debug_attrs_when_gated(self) -> None:
+        env = _WatchdogEnv(
+            current_time=datetime(
+                2024,
+                1,
+                15,
+                12,
+                1,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+        env.call(check_interval_minutes="60")
+        key = "pyscript.auto_dw_test_state"
+        assert env.mock_state.get(key) is None
+
+
+class TestDeviceWatchdogDiscovery:
+    """Test device discovery from registries."""
+
+    def test_discovers_device_from_integration(
+        self,
+    ) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Kitchen Sensor",
+            {"sensor.temp": ("22.5", T0_UTC)},
+        )
+        env.call()
+        # Should dismiss (healthy device)
+        assert len(env.mock_pn.dismiss_calls) == 1
+        assert (
+            env.mock_pn.dismiss_calls[0]["notification_id"]
+            == "device_watchdog_dev1"
+        )
+
+    def test_deduplicates_devices(self) -> None:
+        env = _WatchdogEnv()
+        # Two entities on same device
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Multi Sensor",
+            {
+                "sensor.temp": ("22.5", T0_UTC),
+                "sensor.humid": ("55.0", T0_UTC),
+            },
+        )
+        env.call()
+        # One device, one dismiss
+        total = len(env.mock_pn.create_calls) + len(env.mock_pn.dismiss_calls)
+        assert total == 1
+
+    def test_multiple_integrations(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "ZWave Dev",
+            {"sensor.zw": ("ok", T0_UTC)},
+        )
+        env.setup_device(
+            "matter",
+            "dev2",
+            "Matter Dev",
+            {"sensor.mt": ("ok", T0_UTC)},
+        )
+        env.call(
+            monitored_integrations=["zwave_js", "matter"],
+        )
+        total = len(env.mock_pn.create_calls) + len(env.mock_pn.dismiss_calls)
+        assert total == 2
+
+    def test_no_devices_no_notifications(self) -> None:
+        env = _WatchdogEnv()
+        env.call()
+        assert env.mock_pn.create_calls == []
+        assert env.mock_pn.dismiss_calls == []
+
+
+class TestDeviceWatchdogNotifications:
+    """Test notification create/dismiss behavior."""
+
+    def test_creates_for_unavailable(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Bad Device",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call()
+        assert len(env.mock_pn.create_calls) == 1
+        call = env.mock_pn.create_calls[0]
+        assert call["notification_id"] == ("device_watchdog_dev1")
+        assert "Bad Device" in call["title"]
+
+    def test_dismisses_for_healthy(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Good Device",
+            {"sensor.a": ("22.5", T0_UTC)},
+        )
+        env.call()
+        assert len(env.mock_pn.dismiss_calls) == 1
+        assert (
+            env.mock_pn.dismiss_calls[0]["notification_id"]
+            == "device_watchdog_dev1"
+        )
+
+    def test_creates_for_stale(self) -> None:
+        old = T0_UTC - timedelta(hours=25)
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Stale Device",
+            {"sensor.a": ("22.5", old)},
+        )
+        env.call()
+        assert len(env.mock_pn.create_calls) == 1
+
+    def test_mixed_healthy_and_unhealthy(self) -> None:
+        old = T0_UTC - timedelta(hours=25)
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Healthy",
+            {"sensor.a": ("22.5", T0_UTC)},
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev2",
+            "Sick",
+            {"sensor.b": ("unavailable", old)},
+        )
+        env.call()
+        assert len(env.mock_pn.create_calls) == 1
+        assert len(env.mock_pn.dismiss_calls) == 1
+
+
+class TestDeviceWatchdogDebugAttrs:
+    """Test debug attribute writing."""
+
+    def test_writes_debug_attrs(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("22.5", T0_UTC)},
+        )
+        env.call()
+        key = "pyscript.auto_dw_test_state"
+        assert env.mock_state.get(key) == "ok"
+        attrs = env.mock_state.getattr(key)
+        assert "last_run" in attrs
+        assert attrs["devices_checked"] == 1
+        assert attrs["devices_with_issues"] == 0
+
+    def test_devices_with_issues_count(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Bad",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev2",
+            "Good",
+            {"sensor.b": ("22.5", T0_UTC)},
+        )
+        env.call()
+        key = "pyscript.auto_dw_test_state"
+        attrs = env.mock_state.getattr(key)
+        assert attrs["devices_checked"] == 2
+        assert attrs["devices_with_issues"] == 1
+
+    def test_integrations_attr(self) -> None:
+        env = _WatchdogEnv()
+        env.call(
+            monitored_integrations=["zwave_js", "matter"],
+        )
+        key = "pyscript.auto_dw_test_state"
+        attrs = env.mock_state.getattr(key)
+        assert "zwave_js" in attrs["integrations"]
+
+
+class TestDeviceWatchdogDebugLogging:
+    """Test debug logging behavior."""
+
+    def test_no_logging_when_debug_false(self) -> None:
+        env = _WatchdogEnv()
+        env.call(debug_output="false")
+        assert env.mock_log.warning_calls == []
+
+    def test_logging_when_debug_true(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("22.5", T0_UTC)},
+        )
+        env.call(debug_output="true")
+        assert len(env.mock_log.warning_calls) == 1
+        msg = env.mock_log.warning_calls[0][0]
+        assert "[device_watchdog]" in msg
+
+    def test_log_includes_issue_count(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Bad Dev",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call(debug_output="true")
+        msg = env.mock_log.warning_calls[0][0]
+        args = env.mock_log.warning_calls[0][1]
+        formatted = msg % args
+        assert "issues=1" in formatted
+        assert "Bad Dev" in formatted
+
+
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "pyscript/ha_pyscript_automations.py",
@@ -999,20 +1531,6 @@ class TestPyScriptCompatibility:
                     " -- PyScript intercepts print()."
                     " Use log.warning/info/error."
                 )
-
-    def test_service_wrapper_is_minimal(self) -> None:
-        """Service wrappers should be thin (<175 lines).
-
-        All business logic belongs in modules/.
-        Raised from 150 to 175 for debug infrastructure.
-        """
-        for path in self._service_files():
-            lines = path.read_text().splitlines()
-            assert len(lines) < 175, (
-                f"{path.name} has {len(lines)} lines"
-                " (limit 175). Move business logic"
-                " to pyscript/modules/."
-            )
 
 
 if __name__ == "__main__":

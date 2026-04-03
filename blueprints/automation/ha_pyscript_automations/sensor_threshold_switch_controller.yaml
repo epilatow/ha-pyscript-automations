@@ -7,6 +7,7 @@ blueprint:
     Includes manual override protection, double-off disable, auto-off
     timer for manual activation, and optional notifications.
   domain: automation
+  author: epilatow
 
   input:
     target_switch_entity:

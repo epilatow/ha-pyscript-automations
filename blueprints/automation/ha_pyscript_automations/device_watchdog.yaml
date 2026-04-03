@@ -1,0 +1,130 @@
+blueprint:
+  name: Device Watchdog
+  description: >
+    Monitor device health across integrations. Raises a
+    persistent notification whenever monitored devices have
+    unavailable entities or stop reporting state changes
+    within the configured window. Clears notifications
+    automatically when devices recover.
+  domain: automation
+  author: epilatow
+
+  input:
+    monitored_integrations:
+      name: Monitored integrations
+      description: >
+        Choose the integrations whose devices should be
+        monitored. Enable "Add custom value" to type
+        additional integration IDs.
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options:
+            - zwave_js
+            - matter
+            - bthome
+            - shelly
+            - roomba
+      default:
+        - zwave_js
+        - matter
+        - bthome
+        - shelly
+        - roomba
+
+    device_exclude_regex:
+      name: Device exclude regex
+      description: >
+        Devices whose name contains a match for this
+        regular expression are ignored. A partial match
+        is sufficient (use ^...$ to require a full match).
+      default: ""
+      selector:
+        text:
+          multiline: false
+
+    entity_exclude_regex:
+      name: Entity exclude regex
+      description: >
+        Entities whose ID contains a match for this
+        regular expression are ignored. A partial match
+        is sufficient (use ^...$ to require a full match).
+      default: ""
+      selector:
+        text:
+          multiline: false
+
+    monitored_entity_domains:
+      name: Monitored entity domains
+      description: >
+        Domain names (e.g., sensor, binary_sensor) that
+        count toward device health. Leave empty to include
+        all domains.
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options:
+            - sensor
+            - binary_sensor
+            - device_tracker
+      default:
+        - sensor
+        - binary_sensor
+        - device_tracker
+
+    check_interval_minutes:
+      name: Check interval (minutes)
+      description: Minutes between watchdog evaluations.
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 10080
+          unit_of_measurement: minutes
+          mode: box
+
+    dead_device_threshold_minutes:
+      name: Dead device threshold (minutes)
+      description: >
+        If no entity associated with the device changes
+        state within this many minutes the device is
+        considered offline.
+      default: 1440
+      selector:
+        number:
+          min: 1
+          max: 10080
+          unit_of_measurement: minutes
+          mode: box
+
+    debug_output:
+      name: Debug output
+      description: >
+        Include detailed debug information in HA logs.
+        Check Settings > System > Logs to view output.
+      default: false
+      selector:
+        boolean: {}
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+
+actions:
+  - action: pyscript.device_watchdog
+    data:
+      instance_id: "{{ this.entity_id }}"
+      monitored_integrations: !input monitored_integrations
+      device_exclude_regex: !input device_exclude_regex
+      entity_exclude_regex: !input entity_exclude_regex
+      monitored_entity_domains: !input monitored_entity_domains
+      check_interval_minutes: !input check_interval_minutes
+      dead_device_threshold_minutes: !input dead_device_threshold_minutes
+      debug_output: !input debug_output
+
+# Triggers every minute but most invocations exit
+# immediately (interval gate). If a real evaluation
+# overlaps the next tick, dropping it is fine.
+mode: single

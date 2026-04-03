@@ -12,6 +12,11 @@ dependencies, making it fully testable with pytest.
   for a bathroom fan). Includes manual override protection,
   double-off disable, and auto-off timer.
 
+- [Device Watchdog](docs/device_watchdog.md) -
+  Monitors device health across integrations. Raises persistent
+  notifications for unavailable or stale devices, clears them
+  automatically on recovery.
+
 ## Prerequisites
 
 - Home Assistant with the

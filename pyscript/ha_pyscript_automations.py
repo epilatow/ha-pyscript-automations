@@ -10,7 +10,9 @@ reactive: trigger -> evaluate -> act -> exit.
 """
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
+
+# ── Shared helpers ──────────────────────────────────
 
 
 def _state_key(instance_id: str) -> str:
@@ -19,7 +21,84 @@ def _state_key(instance_id: str) -> str:
     return f"pyscript.{safe}_state"
 
 
-def _debug_dict(result, now, sensor_value):
+def _normalize_list(value):
+    """Ensure value is a list of strings.
+
+    Blueprint select with multiple: true sends a list,
+    but handle comma-separated strings defensively.
+    """
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str) and value:
+        return [s.strip() for s in value.split(",")]
+    return []
+
+
+def _validate_regex(pattern):
+    """Return error string if pattern is invalid regex.
+
+    Returns None if pattern is empty or valid.
+    Rejects patterns that match the empty string (e.g.,
+    "|||||") since those would exclude everything.
+    """
+    import re
+
+    if not pattern:
+        return None
+    try:
+        compiled = re.compile(pattern)
+    except re.error as exc:
+        return str(exc)
+    if compiled.match(""):
+        return "pattern matches empty string"
+    return None
+
+
+def _get_integration_entities(hass_obj, integration_id):
+    """Entity IDs for an integration."""
+    import homeassistant.helpers.template as ha_tmpl  # noqa: F821
+
+    return list(
+        ha_tmpl.integration_entities(
+            hass_obj,
+            integration_id,
+        ),
+    )
+
+
+def _get_device_for_entity(hass_obj, entity_id):
+    """Return {id, name} for the device owning entity_id.
+
+    Returns None if entity has no device.
+    """
+    import homeassistant.helpers.device_registry as dr  # noqa: F821
+    import homeassistant.helpers.entity_registry as er  # noqa: F821
+
+    ent_reg = er.async_get(hass_obj)
+    dev_reg = dr.async_get(hass_obj)
+    entry = ent_reg.async_get(entity_id)
+    if not entry or not entry.device_id:
+        return None
+    device = dev_reg.async_get(entry.device_id)
+    if not device:
+        return None
+    name = device.name_by_user or device.name or ""
+    return {"id": entry.device_id, "name": name}
+
+
+def _read_entity_state(entity_id):
+    """Read entity state + last_changed."""
+    entity_state = state.get(entity_id)  # noqa: F821
+    last_changed = state.get(  # noqa: F821
+        entity_id + ".last_changed",
+    )
+    return entity_state, last_changed
+
+
+# ── Sensor Threshold Switch Controller ──────────────
+
+
+def _stsc_debug_dict(result, now, sensor_value):
     """Build debug info dict from a ServiceResult."""
     sv = result.sensor_value
     return {
@@ -125,7 +204,7 @@ def sensor_threshold_switch_controller(
         )
 
     # 6. Save state + debug attributes to entity
-    info = _debug_dict(result, now, sensor_value)
+    info = _stsc_debug_dict(result, now, sensor_value)
     state.set(key, "ok")  # noqa: F821
     state.setattr(  # noqa: F821
         key + ".data",
@@ -153,4 +232,214 @@ def sensor_threshold_switch_controller(
             len(result.state_dict.get("samples", [])),
             info["last_action"],
             info["last_reason"],
+        )
+
+
+# ── Device Watchdog ─────────────────────────────────
+
+
+@service  # noqa: F821
+def device_watchdog(
+    instance_id,
+    monitored_integrations,
+    device_exclude_regex="",
+    entity_exclude_regex="",
+    monitored_entity_domains=None,
+    check_interval_minutes="60",
+    dead_device_threshold_minutes="1440",
+    debug_output="false",
+):
+    """Evaluate device health across integrations.
+
+    Called by blueprint-generated automation.
+    Purely reactive: evaluate -> act -> exit.
+    No sleeping, no waiting.
+    """
+    from device_watchdog import (  # noqa: F821
+        Config,
+        DeviceInfo,
+        EntityInfo,
+        evaluate_devices,
+        should_run,
+    )
+
+    now = datetime.now(tz=UTC)
+
+    # 1. Verify hass is available
+    try:
+        hass  # noqa: F821, B018
+    except NameError:
+        persistent_notification.create(  # noqa: F821
+            title="Device Watchdog: Configuration Error",
+            message=(
+                "pyscript must have hass_is_global"
+                " enabled. Add to configuration.yaml:\n"
+                "pyscript:\n"
+                "  hass_is_global: true\n"
+                "  allow_all_imports: true"
+            ),
+            notification_id="device_watchdog_config_error",
+        )
+        return
+
+    # 2. Interval gating
+    interval = int(check_interval_minutes)
+    assert interval >= 1, f"check_interval_minutes must be >= 1, got {interval}"
+    if not should_run(interval, now):
+        return
+
+    # 3. Parse config
+    integrations = _normalize_list(
+        monitored_integrations,
+    )
+    domains = _normalize_list(
+        monitored_entity_domains,
+    )
+    threshold_m = int(dead_device_threshold_minutes)
+    assert threshold_m >= 1, (
+        f"dead_device_threshold_minutes must be >= 1, got {threshold_m}"
+    )
+    threshold_s = threshold_m * 60
+    debug_logging = str(debug_output).lower() == "true"
+
+    dev_regex = str(device_exclude_regex or "")
+    ent_regex = str(entity_exclude_regex or "")
+
+    # 3a. Validate regex patterns
+    errors = []
+    err = _validate_regex(dev_regex)
+    if err:
+        errors.append(
+            'device_exclude_regex: "' + dev_regex + '": ' + err,
+        )
+    err = _validate_regex(ent_regex)
+    if err:
+        errors.append(
+            'entity_exclude_regex: "' + ent_regex + '": ' + err,
+        )
+    if errors:
+        persistent_notification.create(  # noqa: F821
+            title="Device Watchdog: Invalid Regex",
+            message="\n".join(
+                ["Invalid regular expression for " + e for e in errors]
+            ),
+            notification_id=("device_watchdog_config_error"),
+        )
+        return
+
+    config = Config(
+        device_exclude_regex=dev_regex,
+        entity_exclude_regex=ent_regex,
+        monitored_entity_domains=domains,
+        dead_threshold_seconds=threshold_s,
+    )
+
+    # 4. Discover devices and their entities from
+    #    monitored integrations. Only entities belonging
+    #    to configured integrations are checked — we do
+    #    not re-query the device registry for all entities.
+    device_map = {}
+    for integration_id in integrations:
+        try:
+            entities = _get_integration_entities(
+                hass,  # noqa: F821
+                integration_id,
+            )
+        except Exception:
+            continue
+        for entity_id in entities:
+            try:
+                info = _get_device_for_entity(
+                    hass,  # noqa: F821
+                    entity_id,
+                )
+            except Exception:
+                continue
+            if not info:
+                continue
+            dev_id = info["id"]
+            if dev_id not in device_map:
+                device_map[dev_id] = {
+                    "name": info["name"],
+                    "entity_ids": [],
+                }
+            device_map[dev_id]["entity_ids"].append(
+                entity_id,
+            )
+
+    # 5. Read entity state and build DeviceInfo list
+    devices = []
+    for dev_id, dev_info in device_map.items():
+        entity_infos = []
+        for eid in dev_info["entity_ids"]:
+            try:
+                ent_state, last_changed = _read_entity_state(eid)
+                if ent_state is not None:
+                    entity_infos.append(
+                        EntityInfo(
+                            entity_id=eid,
+                            state=str(ent_state),
+                            last_changed=last_changed,
+                        ),
+                    )
+            except Exception:
+                continue
+
+        url = "/config/devices/device/" + dev_id
+        devices.append(
+            DeviceInfo(
+                device_id=dev_id,
+                device_name=dev_info["name"],
+                device_url=url,
+                entities=entity_infos,
+            ),
+        )
+
+    # 6. Evaluate (pure logic)
+    results = evaluate_devices(config, devices, now)
+
+    # 7. Create/dismiss notifications
+    for result in results:
+        if result.has_issue:
+            persistent_notification.create(  # noqa: F821
+                title=result.notification_title,
+                message=result.notification_message,
+                notification_id=result.notification_id,
+            )
+        else:
+            persistent_notification.dismiss(  # noqa: F821
+                notification_id=result.notification_id,
+            )
+
+    # 8. Write debug attributes
+    key = _state_key(instance_id)
+    issues = [r for r in results if r.has_issue]
+    state.set(key, "ok")  # noqa: F821
+    state.setattr(  # noqa: F821
+        key + ".last_run",
+        now.isoformat(),
+    )
+    state.setattr(  # noqa: F821
+        key + ".devices_checked",
+        len(results),
+    )
+    state.setattr(  # noqa: F821
+        key + ".devices_with_issues",
+        len(issues),
+    )
+    state.setattr(  # noqa: F821
+        key + ".integrations",
+        json.dumps(integrations),
+    )
+
+    # 9. Debug logging
+    if debug_logging:
+        issue_names = [r.device_name for r in issues]
+        log.warning(  # noqa: F821
+            "[device_watchdog] checked=%d issues=%d"
+            " integrations=%s devices_with_issues=%s",
+            len(results),
+            len(issues),
+            integrations,
+            issue_names,
         )
