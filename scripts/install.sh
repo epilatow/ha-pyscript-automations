@@ -50,16 +50,18 @@ echo "  Repo: $REPO_REL"
 # Ensure repo files are readable by all containers
 chmod -R a+rX "$REPO_DIR"
 
-# ── Files to install ────────────────────────────────
-# Paths are relative to both the repo and the HA config
-# directory (repo layout mirrors the HA config layout).
-#
-# Add new files here as automations are added.
-FILES=(
-    "pyscript/ha_pyscript_automations.py"
-    "pyscript/modules/sensor_threshold_switch_controller.py"
-    "blueprints/automation/ha_pyscript_automations/sensor_threshold_switch_controller.yaml"
-)
+# ── Discover files to install ───────────────────────
+# Auto-discover all .py files under pyscript/ and all
+# .yaml files under blueprints/. Paths are relative to
+# both the repo and HA config directory (repo layout
+# mirrors the HA config layout).
+FILES=()
+while IFS= read -r -d '' f; do
+    FILES+=("${f#"$REPO_DIR/"}")
+done < <(find "$REPO_DIR/pyscript" -name '*.py' -print0)
+while IFS= read -r -d '' f; do
+    FILES+=("${f#"$REPO_DIR/"}")
+done < <(find "$REPO_DIR/blueprints" -name '*.yaml' -print0)
 
 # ── Helpers ─────────────────────────────────────────
 
@@ -94,14 +96,7 @@ relative_target() {
 errors=0
 
 for file_rel in "${FILES[@]}"; do
-    src_abs="$REPO_DIR/$file_rel"
     dst_abs="$HA_CONFIG/$file_rel"
-
-    if [ ! -f "$src_abs" ]; then
-        echo "Error: source not found: $src_abs"
-        errors=$((errors + 1))
-        continue
-    fi
 
     mkdir -p "$(dirname "$dst_abs")"
 

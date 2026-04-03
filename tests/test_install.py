@@ -24,13 +24,19 @@ from conftest import CodeQualityBase
 REPO_ROOT = Path(__file__).parent.parent
 INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install.sh"
 
-# The FILES array from install.sh — keep in sync.
-INSTALLED_FILES = [
-    "pyscript/ha_pyscript_automations.py",
-    "pyscript/modules/sensor_threshold_switch_controller.py",
-    "blueprints/automation/ha_pyscript_automations/"
-    "sensor_threshold_switch_controller.yaml",
-]
+# Discover installable files the same way install.sh does.
+INSTALLED_FILES = sorted(
+    [
+        str(p.relative_to(REPO_ROOT))
+        for p in REPO_ROOT.joinpath("pyscript").rglob("*.py")
+    ]
+    + [
+        str(p.relative_to(REPO_ROOT))
+        for p in REPO_ROOT.joinpath("blueprints").rglob(
+            "*.yaml",
+        )
+    ],
+)
 
 
 # ── Helpers ─────────────────────────────────────────
@@ -306,33 +312,6 @@ class TestErrorWrongSymlink:
 class TestErrorDanglingSymlink:
     """Symlink whose target doesn't exist on disk."""
 
-    def test_correct_dangling_link_succeeds(
-        self,
-        ha_env: tuple[Path, Path],
-    ) -> None:
-        """A dangling symlink with the right target is OK.
-
-        This can happen if install runs before the repo
-        files are fully written (e.g., during a git clone).
-        The symlink target string is correct even though
-        it doesn't resolve yet.
-        """
-        ha_config, repo_dir = ha_env
-        file_rel = INSTALLED_FILES[0]
-        target = ha_config / file_rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        expected = _expected_target(
-            repo_dir.name,
-            file_rel,
-        )
-        target.symlink_to(expected)
-        # Remove the source so the link dangles
-        (repo_dir / file_rel).unlink()
-        r = _run_install(repo_dir, ha_config)
-        # Source missing → error for that file, but the
-        # symlink target check itself is not the failure
-        assert "source not found" in r.stdout
-
     def test_wrong_dangling_link_fails(
         self,
         ha_env: tuple[Path, Path],
@@ -345,39 +324,6 @@ class TestErrorDanglingSymlink:
         r = _run_install(repo_dir, ha_config)
         assert r.returncode != 0
         assert "links to" in r.stdout
-
-
-class TestErrorMissingSource:
-    """Source file does not exist in the repo."""
-
-    def test_fails(
-        self,
-        ha_env: tuple[Path, Path],
-    ) -> None:
-        ha_config, repo_dir = ha_env
-        (repo_dir / INSTALLED_FILES[0]).unlink()
-        r = _run_install(repo_dir, ha_config)
-        assert r.returncode != 0
-
-    def test_error_message(
-        self,
-        ha_env: tuple[Path, Path],
-    ) -> None:
-        ha_config, repo_dir = ha_env
-        (repo_dir / INSTALLED_FILES[0]).unlink()
-        r = _run_install(repo_dir, ha_config)
-        assert "source not found" in r.stdout
-
-    def test_other_files_still_installed(
-        self,
-        ha_env: tuple[Path, Path],
-    ) -> None:
-        ha_config, repo_dir = ha_env
-        (repo_dir / INSTALLED_FILES[0]).unlink()
-        _run_install(repo_dir, ha_config)
-        for file_rel in INSTALLED_FILES[1:]:
-            dst = ha_config / file_rel
-            assert dst.is_symlink(), f"{file_rel} should still be installed"
 
 
 class TestErrorRepoNotInsideConfig:
@@ -415,11 +361,14 @@ class TestMultipleErrors:
         ha_env: tuple[Path, Path],
     ) -> None:
         ha_config, repo_dir = ha_env
-        # Make two files fail: one missing, one regular
-        (repo_dir / INSTALLED_FILES[0]).unlink()
-        target = ha_config / INSTALLED_FILES[1]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("not a symlink")
+        # Make two files fail: both regular files
+        for file_rel in INSTALLED_FILES[:2]:
+            target = ha_config / file_rel
+            target.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            target.write_text("not a symlink")
         r = _run_install(repo_dir, ha_config)
         assert r.returncode != 0
         assert "2 error(s)" in r.stdout
