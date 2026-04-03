@@ -424,6 +424,50 @@ class TestMultipleErrors:
         assert "2 error(s)" in r.stdout
 
 
+class TestSymlinkedConfigDir:
+    """HA config dir reached through a symlink."""
+
+    def test_succeeds_when_config_is_symlink(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Reproduces HA container layout where
+        /config is a symlink to /root/config.
+        """
+        real_config = tmp_path / "real_config"
+        ha_env = _make_ha_env(tmp_path)
+        # _make_ha_env puts config at tmp_path/config
+        ha_config, repo_dir = ha_env
+
+        # Move real dir and create symlink
+        ha_config.rename(real_config)
+        ha_config.symlink_to(real_config)
+
+        r = _run_install(repo_dir, ha_config)
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        for file_rel in INSTALLED_FILES:
+            dst = ha_config / file_rel
+            assert dst.is_symlink()
+
+    def test_succeeds_when_repo_parent_is_symlink(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Config dir is real but reached via a symlinked
+        parent (e.g., /root/config -> /config, script
+        run from /root/config/repo).
+        """
+        ha_config, repo_dir = _make_ha_env(tmp_path)
+
+        # Create an alias to the config dir
+        alias = tmp_path / "alias"
+        alias.symlink_to(ha_config)
+
+        # Run install using the alias as the config path
+        r = _run_install(repo_dir, alias)
+        assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
+
+
 class TestCodeQuality:
     """Lint and format checks for install.sh."""
 

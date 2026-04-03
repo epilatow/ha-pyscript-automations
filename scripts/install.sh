@@ -15,8 +15,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 HA_CONFIG="${1:-/config}"
 
 if [ ! -d "$HA_CONFIG" ]; then
@@ -24,6 +24,11 @@ if [ ! -d "$HA_CONFIG" ]; then
     echo "Usage: $0 [/path/to/ha/config]"
     exit 1
 fi
+
+# Resolve to real path so the prefix check works even
+# when HA_CONFIG or REPO_DIR traverse symlinks
+# (e.g., /config -> /root/config in HA containers).
+HA_CONFIG="$(cd "$HA_CONFIG" && pwd -P)"
 
 # Repo must be inside the HA config directory for
 # relative symlinks to work.
