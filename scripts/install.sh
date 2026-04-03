@@ -7,10 +7,7 @@
 #
 # Creates relative symlinks for individual files (not
 # whole directories) to avoid conflicts with other
-# pyscript deployments:
-#   - pyscript/ha_pyscript_automations.py
-#   - pyscript/modules/*.py (each file individually)
-#   - blueprints/automation/ha_pyscript_automations/*.yaml
+# pyscript deployments.
 #
 # Symlinks use relative paths so they resolve correctly
 # across Docker containers that may mount the config
@@ -48,56 +45,93 @@ echo "  Repo: $REPO_REL"
 # Ensure repo files are readable by all containers
 chmod -R a+rX "$REPO_DIR"
 
-# Ensure pyscript directories exist
-mkdir -p "$HA_CONFIG/pyscript/modules"
+# ── Files to install ────────────────────────────────
+# Paths are relative to both the repo and the HA config
+# directory (repo layout mirrors the HA config layout).
+#
+# Add new files here as automations are added.
+FILES=(
+    "pyscript/ha_pyscript_automations.py"
+    "pyscript/modules/sensor_threshold_switch_controller.py"
+    "blueprints/automation/ha_pyscript_automations/sensor_threshold_switch_controller.yaml"
+)
 
-# Symlink service file (from pyscript/, ../$REPO_REL/...)
-SVC="ha_pyscript_automations.py"
-if [ -e "$HA_CONFIG/pyscript/$SVC" ]; then
-    echo "  $SVC already exists, skipping"
-else
-    ln -s "../$REPO_REL/pyscript/$SVC" \
-        "$HA_CONFIG/pyscript/$SVC"
-    echo "  Linked pyscript/$SVC"
+# ── Helpers ─────────────────────────────────────────
+
+# Compute relative symlink target for a file.
+# The path is relative to both the repo and HA config.
+#
+# Example: file_rel="pyscript/modules/foo.py" (depth 2)
+#   => "../../$REPO_REL/pyscript/modules/foo.py"
+relative_target() {
+    local file_rel="$1"
+    local file_dir
+    file_dir="$(dirname "$file_rel")"
+
+    local depth=0
+    local d="$file_dir"
+    while [ "$d" != "." ]; do
+        depth=$((depth + 1))
+        d="$(dirname "$d")"
+    done
+
+    local prefix=""
+    local i
+    for ((i = 0; i < depth; i++)); do
+        prefix="../$prefix"
+    done
+
+    echo "${prefix}${REPO_REL}/${file_rel}"
+}
+
+# ── Install loop ────────────────────────────────────
+
+errors=0
+
+for file_rel in "${FILES[@]}"; do
+    src_abs="$REPO_DIR/$file_rel"
+    dst_abs="$HA_CONFIG/$file_rel"
+
+    if [ ! -f "$src_abs" ]; then
+        echo "Error: source not found: $src_abs"
+        errors=$((errors + 1))
+        continue
+    fi
+
+    mkdir -p "$(dirname "$dst_abs")"
+
+    target="$(relative_target "$file_rel")"
+
+    if [ -e "$dst_abs" ] || [ -L "$dst_abs" ]; then
+        if [ ! -L "$dst_abs" ]; then
+            echo "Error: $file_rel exists but is" \
+                "not a symlink"
+            errors=$((errors + 1))
+            continue
+        fi
+        existing="$(readlink "$dst_abs")"
+        if [ "$existing" != "$target" ]; then
+            echo "Error: $file_rel links to" \
+                "'$existing', expected '$target'"
+            errors=$((errors + 1))
+            continue
+        fi
+        echo "  $file_rel (already linked)"
+    else
+        ln -s "$target" "$dst_abs"
+        echo "  $file_rel (linked)"
+    fi
+done
+
+if [ "$errors" -gt 0 ]; then
+    echo ""
+    echo "Failed: $errors error(s). Fix the above" \
+        "issues and re-run."
+    exit 1
 fi
-
-# Symlink individual module files
-# (from pyscript/modules/, ../../$REPO_REL/...)
-for mod in "$REPO_DIR"/pyscript/modules/*.py; do
-    [ -f "$mod" ] || continue
-    name="$(basename "$mod")"
-    [ "$name" = "__init__.py" ] && continue
-    if [ -e "$HA_CONFIG/pyscript/modules/$name" ]; then
-        echo "  modules/$name already exists, skipping"
-    else
-        ln -s "../../$REPO_REL/pyscript/modules/$name" \
-            "$HA_CONFIG/pyscript/modules/$name"
-        echo "  Linked pyscript/modules/$name"
-    fi
-done
-
-# Symlink individual blueprint files
-# (from blueprints/automation/ha_pyscript_automations/,
-#  ../../../$REPO_REL/...)
-BP_DIR="$HA_CONFIG/blueprints/automation"
-BP_DIR="$BP_DIR/ha_pyscript_automations"
-mkdir -p "$BP_DIR"
-
-for bp in "$REPO_DIR"/blueprints/*.yaml; do
-    [ -f "$bp" ] || continue
-    name="$(basename "$bp")"
-    if [ -e "$BP_DIR/$name" ]; then
-        echo "  blueprints/$name already exists, skipping"
-    else
-        ln -s "../../../$REPO_REL/blueprints/$name" \
-            "$BP_DIR/$name"
-        echo "  Linked blueprints/$name"
-    fi
-done
 
 echo ""
 echo "Done. Next steps:"
 echo "  1. Restart Home Assistant or reload PyScript"
 echo "  2. Go to Settings > Automations > Blueprints"
-echo "  3. Create automation from"
-echo "     'Sensor Threshold Switch Controller'"
+echo "  3. Create automations from installed blueprints"
