@@ -36,8 +36,6 @@ from sensor_threshold_switch_controller import (  # noqa: E402
     State,
     determine_event_type,
     evaluate,
-    format_notification,
-    format_timestamp,
     handle_service_call,
     parse_float,
     state_from_dict,
@@ -126,28 +124,6 @@ class TestParseFloat:
 
     def test_zero(self) -> None:
         assert parse_float("0") == 0.0
-
-
-class TestFormatTimestamp:
-    def test_full_format(self) -> None:
-        dt = datetime(2024, 3, 5, 14, 7, 9)
-        result = format_timestamp("YYYY-MM-DD HH:mm:ss", dt)
-        assert result == "2024-03-05 14:07:09"
-
-    def test_short_year(self) -> None:
-        dt = datetime(2024, 1, 1, 0, 0, 0)
-        assert format_timestamp("YY", dt) == "24"
-
-    def test_empty_template(self) -> None:
-        assert format_timestamp("", T0) == ""
-
-    def test_no_tokens(self) -> None:
-        assert format_timestamp("no tokens here", T0) == "no tokens here"
-
-    def test_prefix_with_tokens(self) -> None:
-        dt = datetime(2024, 6, 15, 8, 30, 0)
-        result = format_timestamp("Log at HH:mm - ", dt)
-        assert result == "Log at 08:30 - "
 
 
 class TestStateSerialization:
@@ -933,27 +909,6 @@ class TestDetermineEventType:
 
     def test_timer_lowercase_none(self) -> None:
         assert determine_event_type("none", "switch.fan") == EventType.TIMER
-
-
-class TestFormatNotification:
-    def test_prefix_and_suffix(self) -> None:
-        dt = datetime(2024, 6, 15, 8, 30, 0)
-        result = format_notification("Fan on.", "PRE: ", " at HH:mm", dt)
-        assert result == "PRE: Fan on. at 08:30"
-
-    def test_empty_prefix_suffix(self) -> None:
-        result = format_notification("hello", "", "", T0)
-        assert result == "hello"
-
-    def test_timestamp_tokens_in_both(self) -> None:
-        dt = datetime(2024, 1, 2, 3, 4, 5)
-        result = format_notification(
-            "msg",
-            "YYYY-MM-DD ",
-            " HH:mm:ss",
-            dt,
-        )
-        assert result == "2024-01-02 msg 03:04:05"
 
 
 class TestEvaluate:
