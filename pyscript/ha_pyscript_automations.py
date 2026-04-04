@@ -11,6 +11,7 @@ reactive: trigger -> evaluate -> act -> exit.
 
 import json
 from datetime import UTC, datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -172,6 +173,137 @@ def _read_entity_state(
     return entity_state, last_changed
 
 
+def _automation_name(instance_id: str) -> str:
+    """Resolve the user-assigned automation name.
+
+    Falls back to instance_id if unavailable.
+    """
+    try:
+        attrs = state.getattr(instance_id)  # noqa: F821
+        name = attrs.get("friendly_name", "")
+        if name:
+            return name
+    except Exception:
+        pass
+    return instance_id
+
+
+# Domains that support homeassistant.turn_on/turn_off.
+CONTROLLABLE_DOMAINS = frozenset(
+    [
+        "automation",
+        "climate",
+        "cover",
+        "fan",
+        "humidifier",
+        "input_boolean",
+        "light",
+        "lock",
+        "media_player",
+        "switch",
+        "vacuum",
+        "water_heater",
+    ]
+)
+
+# Domains with binary on/off state.
+BINARY_DOMAINS = frozenset(
+    [
+        "binary_sensor",
+        "input_boolean",
+    ]
+)
+
+
+class EntityType(Enum):
+    """Entity type for domain validation."""
+
+    ANY = "any"
+    CONTROLLABLE = "controllable"
+    BINARY = "binary"
+
+
+_DOMAIN_MAP = {
+    EntityType.CONTROLLABLE: (
+        CONTROLLABLE_DOMAINS,
+        "does not support on/off",
+    ),
+    EntityType.BINARY: (
+        BINARY_DOMAINS,
+        "is not a binary entity",
+    ),
+}
+
+
+def _entity_domain(entity_id: str) -> str:
+    """Extract domain from an entity ID."""
+    return entity_id.split(".")[0] if "." in entity_id else ""
+
+
+def _validate_entities(
+    entities: list[str],
+    entity_type: EntityType,
+) -> list[str]:
+    """Validate entities exist and check domain type.
+
+    Returns list of error strings.
+
+    entities: flat list of entity IDs.
+    entity_type: EntityType.ANY for existence-only,
+      CONTROLLABLE or BINARY for domain checks.
+    """
+    errors = []
+    for eid in entities:
+        try:
+            val = state.get(eid)  # noqa: F821
+        except NameError:
+            val = None
+        if val is None:
+            errors.append(
+                eid + " does not exist",
+            )
+        elif entity_type in _DOMAIN_MAP:
+            allowed, msg = _DOMAIN_MAP[entity_type]
+            domain = _entity_domain(eid)
+            if domain not in allowed:
+                errors.append(
+                    eid + " (domain: " + domain + ") " + msg,
+                )
+    return errors
+
+
+def _update_persistent_error_notifications(
+    errors: list[str],
+    instance_id: str,
+    service_label: str,
+) -> None:
+    """Create or dismiss a config error notification.
+
+    service_label: label used in the notification ID
+      prefix.
+    """
+    safe_id = instance_id.replace(".", "_")
+    prefix = service_label.lower().replace(" ", "_")
+    notif_id = prefix + "_config_error_" + safe_id
+
+    if errors:
+        name = _automation_name(instance_id)
+        persistent_notification.create(  # noqa: F821
+            title=(name + ": Invalid Configuration"),
+            message=(
+                "Configuration errors:\n\n- "
+                + "\n- ".join(errors)
+                + "\n\nPlease fix the automation"
+                " configuration."
+            ),
+            notification_id=notif_id,
+        )
+    else:
+        persistent_notification.dismiss(  # noqa: F821
+            notification_id=notif_id,
+        )
+
+
 # ── Sensor Threshold Switch Controller ──────────────
 
 
@@ -220,6 +352,24 @@ def sensor_threshold_switch_controller(
     )
 
     now = datetime.now()
+
+    # Validate entities
+    errors = _validate_entities(
+        [target_switch_entity],
+        EntityType.CONTROLLABLE,
+    )
+    _update_persistent_error_notifications(
+        errors,
+        instance_id,
+        "Sensor Threshold Switch Controller",
+    )
+    if errors:
+        if str(debug).lower() == "true":
+            log.warning(  # noqa: F821
+                "[sensor_threshold_switch_controller] invalid config: %s",
+                errors,
+            )
+        return
 
     # Load state from HA entity attribute
     #    (entity state is limited to 255 chars; attributes

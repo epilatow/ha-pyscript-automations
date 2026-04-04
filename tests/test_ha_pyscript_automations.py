@@ -165,6 +165,7 @@ class _ServiceEnv:
         self.mock_ha = _MockHA()
         self.mock_service = _MockServiceObj()
         self.mock_log = _MockLog()
+        self.mock_pn = _MockPersistentNotification()
 
         src = _SCRIPT_PATH.read_text()
         self._ns: dict[str, Any] = {
@@ -173,6 +174,7 @@ class _ServiceEnv:
             "state": self.mock_state,
             "homeassistant": self.mock_ha,
             "log": self.mock_log,
+            "persistent_notification": self.mock_pn,
         }
         exec(
             compile(src, str(_SCRIPT_PATH), "exec"),
@@ -180,9 +182,19 @@ class _ServiceEnv:
         )
         self.set_now(current_time)
 
+        # Seed default entity so _validate_entities passes
+        self.mock_state._store["switch.test_fan"] = "off"
+
     def set_now(self, dt: datetime) -> None:
         """Override datetime.now() for calls."""
         self._ns["datetime"] = _ControllableDatetime(dt)
+
+    def set_entity_state(
+        self,
+        entity_id: str,
+        entity_state: str,
+    ) -> None:
+        self.mock_state._store[entity_id] = entity_state
 
     @property
     def state_key_fn(self) -> Any:
@@ -820,6 +832,166 @@ class TestDebugLogging:
         env.set_now(T0 + timedelta(seconds=30))
         env.call(debug="true")
         assert len(env.mock_log.warning_calls) == 2
+
+
+class TestAutomationName:
+    def test_returns_friendly_name(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_automation_name"]
+        env.mock_state._attrs["automation.test"] = {
+            "friendly_name": "My Automation",
+        }
+        assert fn("automation.test") == "My Automation"
+
+    def test_falls_back_to_instance_id(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_automation_name"]
+        assert fn("automation.unknown") == "automation.unknown"
+
+    def test_empty_friendly_name_falls_back(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_automation_name"]
+        env.mock_state._attrs["automation.test"] = {
+            "friendly_name": "",
+        }
+        assert fn("automation.test") == "automation.test"
+
+    def test_getattr_error_falls_back(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_automation_name"]
+        env.mock_state._getattr_error = True
+        assert fn("automation.test") == "automation.test"
+
+
+class TestStscEntityValidation:
+    def test_missing_entity_creates_notification(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        # Remove the default entity so validation fails
+        del env.mock_state._store["switch.test_fan"]
+        env.call()
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "switch.test_fan" in msg
+
+    def test_missing_entity_no_action(self) -> None:
+        env = _ServiceEnv()
+        del env.mock_state._store["switch.test_fan"]
+        env.call()
+        assert len(env.mock_ha.turn_on_calls) == 0
+        assert len(env.mock_ha.turn_off_calls) == 0
+
+    def test_valid_entity_dismisses_notification(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        env.call()
+        assert len(env.mock_pn.dismiss_calls) == 1
+
+    def test_notification_title_uses_friendly_name(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        env.mock_state._attrs["auto.test_instance"] = {
+            "friendly_name": "My Fan Controller"
+        }
+        del env.mock_state._store["switch.test_fan"]
+        env.call()
+        title = env.mock_pn.create_calls[0]["title"]
+        assert "My Fan Controller" in title
+
+    def test_unsupported_domain_creates_notification(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        env.set_entity_state("sensor.temperature", "22")
+        env.call(
+            target_switch_entity="sensor.temperature",
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "does not support on/off" in msg
+
+    def test_unsupported_domain_no_action(self) -> None:
+        env = _ServiceEnv()
+        env.set_entity_state("sensor.temperature", "22")
+        env.call(
+            target_switch_entity="sensor.temperature",
+        )
+        assert len(env.mock_ha.turn_on_calls) == 0
+
+
+class TestValidateEntitiesDomainChecks:
+    """Test _validate_entities domain validation."""
+
+    def test_controllable_domain_accepted(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_validate_entities"]
+        et = env._ns["EntityType"]
+        env.set_entity_state("light.test", "off")
+        errors = fn(["light.test"], et.CONTROLLABLE)
+        assert errors == []
+
+    def test_non_controllable_domain_rejected(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_validate_entities"]
+        et = env._ns["EntityType"]
+        env.set_entity_state("sensor.temp", "22")
+        errors = fn(["sensor.temp"], et.CONTROLLABLE)
+        assert len(errors) == 1
+        assert "does not support on/off" in errors[0]
+
+    def test_binary_domain_accepted(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_validate_entities"]
+        et = env._ns["EntityType"]
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        errors = fn(
+            ["binary_sensor.motion"],
+            et.BINARY,
+        )
+        assert errors == []
+
+    def test_non_binary_domain_rejected(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_validate_entities"]
+        et = env._ns["EntityType"]
+        env.set_entity_state("sensor.temp", "22")
+        errors = fn(["sensor.temp"], et.BINARY)
+        assert len(errors) == 1
+        assert "not a binary entity" in errors[0]
+
+    def test_missing_entity_skips_domain_check(
+        self,
+    ) -> None:
+        """A missing entity produces one 'does not exist'
+        error, not an additional domain error."""
+        env = _ServiceEnv()
+        fn = env._ns["_validate_entities"]
+        et = env._ns["EntityType"]
+        # sensor.gone does not exist in mock state
+        errors = fn(["sensor.gone"], et.CONTROLLABLE)
+        assert len(errors) == 1
+        assert "does not exist" in errors[0]
+
+    def test_any_checks_existence_only(self) -> None:
+        """EntityType.ANY skips domain checks."""
+        env = _ServiceEnv()
+        fn = env._ns["_validate_entities"]
+        et = env._ns["EntityType"]
+        env.set_entity_state("sensor.temp", "22")
+        errors = fn(["sensor.temp"], et.ANY)
+        assert errors == []
 
 
 # ── Device Watchdog mock infrastructure ──────────────
