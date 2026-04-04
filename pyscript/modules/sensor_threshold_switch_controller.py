@@ -633,13 +633,13 @@ def handle_service_call(
 
     Remaining kwargs are passed through to evaluate().
     """
-    # 1. Parse state
+    # Parse state
     try:
         s = state_from_dict(state_data) if state_data else State()
     except Exception:
         s = State()
 
-    # 2. Determine event type and parse sensor value
+    # Determine event type and parse sensor value
     event_type = determine_event_type(
         kwargs.get("trigger_entity", "timer"),
         target_switch_entity,
@@ -650,7 +650,7 @@ def handle_service_call(
             kwargs.get("sensor_value", ""),
         )
 
-    # 3. Evaluate (pure logic)
+    # Evaluate (pure logic)
     result = evaluate(
         current_time=current_time,
         switch_name=switch_name,
@@ -659,7 +659,7 @@ def handle_service_call(
         **kwargs,
     )
 
-    # 4. Normalise notification service name
+    # Normalise notification service name
     svc = ""
     if result.notification and notification_service:
         svc = notification_service

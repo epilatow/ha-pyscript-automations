@@ -140,7 +140,7 @@ def sensor_threshold_switch_controller(
 
     now = datetime.now()
 
-    # 1. Load state from HA entity attribute
+    # Load state from HA entity attribute
     #    (entity state is limited to 255 chars; attributes
     #    have no practical limit)
     key = _state_key(instance_id)
@@ -153,7 +153,7 @@ def sensor_threshold_switch_controller(
     except Exception:
         pass
 
-    # 2. Resolve friendly name
+    # Resolve friendly name
     switch_name = target_switch_entity
     try:
         attrs = state.getattr(  # noqa: F821
@@ -165,7 +165,7 @@ def sensor_threshold_switch_controller(
     except Exception:
         pass
 
-    # 3. Evaluate (pure logic)
+    # Evaluate (pure logic)
     result = handle_service_call(
         state_data=state_data,
         switch_name=switch_name,
@@ -184,7 +184,7 @@ def sensor_threshold_switch_controller(
         notification_suffix=notification_suffix,
     )
 
-    # 4. Execute action
+    # Execute action
     if result.action == Action.TURN_ON:
         homeassistant.turn_on(  # noqa: F821
             entity_id=target_switch_entity,
@@ -194,7 +194,7 @@ def sensor_threshold_switch_controller(
             entity_id=target_switch_entity,
         )
 
-    # 5. Send notification
+    # Send notification
     if result.notification and result.notification_service:
         parts = result.notification_service.split(".")
         service.call(  # noqa: F821
@@ -203,7 +203,7 @@ def sensor_threshold_switch_controller(
             message=result.notification,
         )
 
-    # 6. Save state + debug attributes to entity
+    # Save state + debug attributes to entity
     info = _stsc_debug_dict(result, now, sensor_value)
     state.set(key, "ok")  # noqa: F821
     state.setattr(  # noqa: F821
@@ -216,7 +216,7 @@ def sensor_threshold_switch_controller(
             attr_val,
         )
 
-    # 7. Debug logging (opt-in via blueprint)
+    # Debug logging (opt-in via blueprint)
     #    debug may arrive as bool or string depending on
     #    how HA resolves the blueprint !input tag.
     if str(debug).lower() == "true":
@@ -265,7 +265,7 @@ def device_watchdog(
 
     now = datetime.now(tz=UTC)
 
-    # 1. Verify hass is available
+    # Verify hass is available
     try:
         hass  # noqa: F821, B018
     except NameError:
@@ -282,13 +282,13 @@ def device_watchdog(
         )
         return
 
-    # 2. Interval gating
+    # Interval gating
     interval = int(check_interval_minutes)
     assert interval >= 1, f"check_interval_minutes must be >= 1, got {interval}"
     if not should_run(interval, now):
         return
 
-    # 3. Parse config
+    # Parse config
     integrations = _normalize_list(
         monitored_integrations,
     )
@@ -305,7 +305,7 @@ def device_watchdog(
     dev_regex = str(device_exclude_regex or "")
     ent_regex = str(entity_exclude_regex or "")
 
-    # 3a. Validate regex patterns
+    # Validate regex patterns
     errors = []
     err = _validate_regex(dev_regex)
     if err:
@@ -334,7 +334,7 @@ def device_watchdog(
         dead_threshold_seconds=threshold_s,
     )
 
-    # 4. Discover devices and their entities from
+    # Discover devices and their entities from
     #    monitored integrations. Only entities belonging
     #    to configured integrations are checked — we do
     #    not re-query the device registry for all entities.
@@ -367,7 +367,7 @@ def device_watchdog(
                 entity_id,
             )
 
-    # 5. Read entity state and build DeviceInfo list
+    # Read entity state and build DeviceInfo list
     devices = []
     for dev_id, dev_info in device_map.items():
         entity_infos = []
@@ -395,10 +395,10 @@ def device_watchdog(
             ),
         )
 
-    # 6. Evaluate (pure logic)
+    # Evaluate (pure logic)
     results = evaluate_devices(config, devices, now)
 
-    # 7. Create/dismiss notifications
+    # Create/dismiss notifications
     for result in results:
         if result.has_issue:
             persistent_notification.create(  # noqa: F821
@@ -411,7 +411,7 @@ def device_watchdog(
                 notification_id=result.notification_id,
             )
 
-    # 8. Write debug attributes
+    # Write debug attributes
     key = _state_key(instance_id)
     issues = [r for r in results if r.has_issue]
     state.set(key, "ok")  # noqa: F821
@@ -432,7 +432,7 @@ def device_watchdog(
         json.dumps(integrations),
     )
 
-    # 9. Debug logging
+    # Debug logging
     if debug_logging:
         issue_names = [r.device_name for r in issues]
         log.warning(  # noqa: F821
