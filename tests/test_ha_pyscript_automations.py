@@ -223,15 +223,15 @@ def _default_kwargs(**overrides: Any) -> dict[str, Any]:
         "sensor_value": "",
         "switch_state": "off",
         "trigger_entity": "timer",
-        "trigger_threshold": "5.0",
-        "release_threshold": "2.0",
-        "sampling_window_s": "300",
-        "disable_window_s": "10",
-        "auto_off_min": "30",
+        "trigger_threshold_raw": "5.0",
+        "release_threshold_raw": "2.0",
+        "sampling_window_s_raw": "300",
+        "disable_window_s_raw": "10",
+        "auto_off_min_raw": "30",
         "notification_service": "",
         "notification_prefix": "",
         "notification_suffix": "",
-        "debug": "false",
+        "debug_raw": "false",
     }
     defaults.update(overrides)
     return defaults
@@ -530,28 +530,28 @@ class TestInputTypeConversion:
         """String thresholds cast to float."""
         env = _ServiceEnv()
         env.call(
-            trigger_threshold="7.5",
-            release_threshold="3.0",
+            trigger_threshold_raw="7.5",
+            release_threshold_raw="3.0",
         )
 
     def test_int_windows(self) -> None:
         """String window values cast to int."""
         env = _ServiceEnv()
         env.call(
-            sampling_window_s="120",
-            disable_window_s="5",
-            auto_off_min="15",
+            sampling_window_s_raw="120",
+            disable_window_s_raw="5",
+            auto_off_min_raw="15",
         )
 
     def test_all_types_convert(self) -> None:
         """Full call with all string params."""
         env = _ServiceEnv()
         env.call(
-            trigger_threshold="10.0",
-            release_threshold="5.0",
-            sampling_window_s="600",
-            disable_window_s="0",
-            auto_off_min="0",
+            trigger_threshold_raw="10.0",
+            release_threshold_raw="5.0",
+            sampling_window_s_raw="600",
+            disable_window_s_raw="0",
+            auto_off_min_raw="0",
         )
 
 
@@ -595,7 +595,7 @@ class TestMultiStepScenarios:
         env.call(
             sensor_value="60.0",
             trigger_entity="sensor.humidity",
-            sampling_window_s="30",
+            sampling_window_s_raw="30",
         )
 
         # Spike
@@ -604,7 +604,7 @@ class TestMultiStepScenarios:
         env.call(
             sensor_value="70.0",
             trigger_entity="sensor.humidity",
-            sampling_window_s="30",
+            sampling_window_s_raw="30",
         )
         assert len(env.mock_ha.turn_on_calls) == 1
 
@@ -615,7 +615,7 @@ class TestMultiStepScenarios:
             sensor_value="61.0",
             switch_state="on",
             trigger_entity="sensor.humidity",
-            sampling_window_s="30",
+            sampling_window_s_raw="30",
         )
         assert len(env.mock_ha.turn_off_calls) == 1
 
@@ -629,7 +629,7 @@ class TestMultiStepScenarios:
         env.call(
             switch_state="off",
             trigger_entity="switch.test_fan",
-            auto_off_min="1",
+            auto_off_min_raw="1",
         )
 
         # Manual on
@@ -638,20 +638,20 @@ class TestMultiStepScenarios:
         env.call(
             switch_state="on",
             trigger_entity="switch.test_fan",
-            auto_off_min="1",
+            auto_off_min_raw="1",
         )
 
         # Timer before timeout (start rounded up to 12:01,
         # so 60s timeout fires at 12:02+)
         t += timedelta(seconds=55)  # 12:01:00
         env.set_now(t)
-        env.call(switch_state="on", auto_off_min="1")
+        env.call(switch_state="on", auto_off_min_raw="1")
         assert len(env.mock_ha.turn_off_calls) == 0
 
         # Timer at timeout (61s past rounded-up start)
         t += timedelta(seconds=61)  # 12:02:01
         env.set_now(t)
-        env.call(switch_state="on", auto_off_min="1")
+        env.call(switch_state="on", auto_off_min_raw="1")
         assert len(env.mock_ha.turn_off_calls) == 1
 
     def test_independent_instances(self) -> None:
@@ -794,31 +794,31 @@ class TestDebugLogging:
     def test_no_logging_when_debug_false(self) -> None:
         """No log.warning when debug is disabled."""
         env = _ServiceEnv()
-        env.call(debug="false")
+        env.call(debug_raw="false")
         assert len(env.mock_log.warning_calls) == 0
 
     def test_logging_when_debug_true(self) -> None:
         """log.warning emitted when debug is enabled."""
         env = _ServiceEnv()
-        env.call(debug="true")
+        env.call(debug_raw="true")
         assert len(env.mock_log.warning_calls) == 1
 
     def test_logging_with_bool_true(self) -> None:
-        """debug=True (bool) also triggers logging."""
+        """debug_raw=True (bool) also triggers logging."""
         env = _ServiceEnv()
-        env.call(debug=True)
+        env.call(debug_raw=True)
         assert len(env.mock_log.warning_calls) == 1
 
     def test_no_logging_with_bool_false(self) -> None:
-        """debug=False (bool) does not trigger logging."""
+        """debug_raw=False (bool) does not trigger logging."""
         env = _ServiceEnv()
-        env.call(debug=False)
+        env.call(debug_raw=False)
         assert len(env.mock_log.warning_calls) == 0
 
     def test_log_message_contains_context(self) -> None:
         """Log message includes event, action, and label."""
         env = _ServiceEnv()
-        env.call(debug="true")
+        env.call(debug_raw="true")
         msg, args = env.mock_log.warning_calls[0]
         formatted = msg % args
         assert "[STSC:" in formatted
@@ -828,9 +828,9 @@ class TestDebugLogging:
     def test_log_emitted_every_call(self) -> None:
         """Each call emits a log line when debug is on."""
         env = _ServiceEnv()
-        env.call(debug="true")
+        env.call(debug_raw="true")
         env.set_now(T0 + timedelta(seconds=30))
-        env.call(debug="true")
+        env.call(debug_raw="true")
         assert len(env.mock_log.warning_calls) == 2
 
 
@@ -1131,13 +1131,13 @@ class _WatchdogEnv:
 def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
     defaults: dict[str, Any] = {
         "instance_id": "auto.dw_test",
-        "monitored_integrations": ["zwave_js"],
-        "device_exclude_regex": "",
-        "entity_exclude_regex": "",
-        "monitored_entity_domains": [],
-        "check_interval_minutes": "1",
-        "dead_device_threshold_minutes": "1440",
-        "debug_output": "false",
+        "monitored_integrations_raw": ["zwave_js"],
+        "device_exclude_regex_raw": "",
+        "entity_exclude_regex_raw": "",
+        "monitored_entity_domains_raw": [],
+        "check_interval_minutes_raw": "1",
+        "dead_device_threshold_minutes_raw": "1440",
+        "debug_output_raw": "false",
     }
     defaults.update(overrides)
     return defaults
@@ -1181,7 +1181,7 @@ class TestDeviceWatchdogRegexValidation:
 
     def test_invalid_device_regex_notifies(self) -> None:
         env = _WatchdogEnv()
-        env.call(device_exclude_regex="[invalid")
+        env.call(device_exclude_regex_raw="[invalid")
         assert len(env.mock_pn.create_calls) == 1
         call = env.mock_pn.create_calls[0]
         assert "Invalid" in call["title"]
@@ -1190,7 +1190,7 @@ class TestDeviceWatchdogRegexValidation:
 
     def test_invalid_entity_regex_notifies(self) -> None:
         env = _WatchdogEnv()
-        env.call(entity_exclude_regex="(unclosed")
+        env.call(entity_exclude_regex_raw="(unclosed")
         assert len(env.mock_pn.create_calls) == 1
         msg = env.mock_pn.create_calls[0]["message"]
         assert "entity_exclude_regex" in msg
@@ -1199,8 +1199,8 @@ class TestDeviceWatchdogRegexValidation:
     def test_both_invalid_reports_both(self) -> None:
         env = _WatchdogEnv()
         env.call(
-            device_exclude_regex="[bad",
-            entity_exclude_regex="(bad",
+            device_exclude_regex_raw="[bad",
+            entity_exclude_regex_raw="(bad",
         )
         assert len(env.mock_pn.create_calls) == 1
         msg = env.mock_pn.create_calls[0]["message"]
@@ -1215,7 +1215,7 @@ class TestDeviceWatchdogRegexValidation:
             "Dev",
             {"sensor.a": ("unavailable", T0_UTC)},
         )
-        env.call(device_exclude_regex="[invalid")
+        env.call(device_exclude_regex_raw="[invalid")
         # Only the config error, no device notifications
         assert len(env.mock_pn.create_calls) == 1
         assert env.mock_pn.dismiss_calls == []
@@ -1223,8 +1223,8 @@ class TestDeviceWatchdogRegexValidation:
     def test_valid_regex_no_error(self) -> None:
         env = _WatchdogEnv()
         env.call(
-            device_exclude_regex=".*test.*",
-            entity_exclude_regex="^sensor\\.bat",
+            device_exclude_regex_raw=".*test.*",
+            entity_exclude_regex_raw="^sensor\\.bat",
         )
         config_errors = [
             c
@@ -1236,7 +1236,7 @@ class TestDeviceWatchdogRegexValidation:
     def test_empty_match_regex_rejected(self) -> None:
         """Regex like '|||||' matches everything."""
         env = _WatchdogEnv()
-        env.call(device_exclude_regex="|||||")
+        env.call(device_exclude_regex_raw="|||||")
         assert len(env.mock_pn.create_calls) == 1
         assert "empty string" in (env.mock_pn.create_calls[0]["message"])
 
@@ -1263,7 +1263,7 @@ class TestDeviceWatchdogIntervalGating:
             "Dev",
             {"sensor.a": ("unavailable", T0_UTC)},
         )
-        env.call(check_interval_minutes="60")
+        env.call(check_interval_minutes_raw="60")
         # Should not have created any notifications
         assert env.mock_pn.create_calls == []
         assert env.mock_pn.dismiss_calls == []
@@ -1286,7 +1286,7 @@ class TestDeviceWatchdogIntervalGating:
             "Dev",
             {"sensor.a": ("unavailable", T0_UTC)},
         )
-        env.call(check_interval_minutes="60")
+        env.call(check_interval_minutes_raw="60")
         assert len(env.mock_pn.create_calls) == 1
 
     def test_no_debug_attrs_when_gated(self) -> None:
@@ -1301,7 +1301,7 @@ class TestDeviceWatchdogIntervalGating:
                 tzinfo=UTC,
             ),
         )
-        env.call(check_interval_minutes="60")
+        env.call(check_interval_minutes_raw="60")
         key = "pyscript.auto_dw_test_state"
         assert env.mock_state.get(key) is None
 
@@ -1359,7 +1359,7 @@ class TestDeviceWatchdogDiscovery:
             {"sensor.mt": ("ok", T0_UTC)},
         )
         env.call(
-            monitored_integrations=["zwave_js", "matter"],
+            monitored_integrations_raw=["zwave_js", "matter"],
         )
         total = len(env.mock_pn.create_calls) + len(env.mock_pn.dismiss_calls)
         assert total == 2
@@ -1477,7 +1477,7 @@ class TestDeviceWatchdogDebugAttrs:
     def test_integrations_attr(self) -> None:
         env = _WatchdogEnv()
         env.call(
-            monitored_integrations=["zwave_js", "matter"],
+            monitored_integrations_raw=["zwave_js", "matter"],
         )
         key = "pyscript.auto_dw_test_state"
         attrs = env.mock_state.getattr(key)
@@ -1489,7 +1489,7 @@ class TestDeviceWatchdogDebugLogging:
 
     def test_no_logging_when_debug_false(self) -> None:
         env = _WatchdogEnv()
-        env.call(debug_output="false")
+        env.call(debug_output_raw="false")
         assert env.mock_log.warning_calls == []
 
     def test_logging_when_debug_true(self) -> None:
@@ -1500,7 +1500,7 @@ class TestDeviceWatchdogDebugLogging:
             "Dev",
             {"sensor.a": ("22.5", T0_UTC)},
         )
-        env.call(debug_output="true")
+        env.call(debug_output_raw="true")
         assert len(env.mock_log.warning_calls) == 1
         msg = env.mock_log.warning_calls[0][0]
         args = env.mock_log.warning_calls[0][1]
@@ -1515,7 +1515,7 @@ class TestDeviceWatchdogDebugLogging:
             "Bad Dev",
             {"sensor.a": ("unavailable", T0_UTC)},
         )
-        env.call(debug_output="true")
+        env.call(debug_output_raw="true")
         msg = env.mock_log.warning_calls[0][0]
         args = env.mock_log.warning_calls[0][1]
         formatted = msg % args

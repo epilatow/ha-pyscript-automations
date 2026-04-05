@@ -157,15 +157,15 @@ actions:
       switch_state: "{{ states(target_switch_entity) }}"
       trigger_entity: >-
         {{ trigger.entity_id | default('timer', true) }}
-      trigger_threshold: !input trigger_threshold
-      release_threshold: !input release_threshold
-      sampling_window_s: !input sampling_window_s
-      disable_window_s: !input disable_window_s
-      auto_off_min: !input auto_off_min
+      trigger_threshold_raw: !input trigger_threshold
+      release_threshold_raw: !input release_threshold
+      sampling_window_s_raw: !input sampling_window_s
+      disable_window_s_raw: !input disable_window_s
+      auto_off_min_raw: !input auto_off_min
       notification_service: !input notification_service
       notification_prefix: !input notification_prefix
       notification_suffix: !input notification_suffix
-      debug: !input debug
+      debug_raw: !input debug
 
 mode: queued
 max: 10

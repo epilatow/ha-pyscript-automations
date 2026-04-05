@@ -332,15 +332,15 @@ def sensor_threshold_switch_controller(
     sensor_value: str,
     switch_state: str,
     trigger_entity: str,
-    trigger_threshold: str,
-    release_threshold: str,
-    sampling_window_s: str,
-    disable_window_s: str,
-    auto_off_min: str,
+    trigger_threshold_raw: str,
+    release_threshold_raw: str,
+    sampling_window_s_raw: str,
+    disable_window_s_raw: str,
+    auto_off_min_raw: str,
     notification_service: str,
     notification_prefix: str,
     notification_suffix: str,
-    debug: str,
+    debug_raw: str,
 ) -> None:
     """Evaluate sensor threshold switch controller.
 
@@ -368,7 +368,7 @@ def sensor_threshold_switch_controller(
         "Sensor Threshold Switch Controller",
     )
     if errors:
-        if str(debug).lower() == "true":
+        if str(debug_raw).lower() == "true":
             log.warning(  # noqa: F821
                 "%s invalid config: %s",
                 tag,
@@ -410,11 +410,11 @@ def sensor_threshold_switch_controller(
         sensor_value=sensor_value,
         switch_state=switch_state,
         trigger_entity=trigger_entity,
-        trigger_threshold=float(trigger_threshold),
-        release_threshold=float(release_threshold),
-        sampling_window_s=int(sampling_window_s),
-        disable_window_s=int(disable_window_s),
-        auto_off_min=int(auto_off_min),
+        trigger_threshold=float(trigger_threshold_raw),
+        release_threshold=float(release_threshold_raw),
+        sampling_window_s=int(sampling_window_s_raw),
+        disable_window_s=int(disable_window_s_raw),
+        auto_off_min=int(auto_off_min_raw),
         notification_service=notification_service,
         notification_prefix=notification_prefix,
         notification_suffix=notification_suffix,
@@ -455,7 +455,7 @@ def sensor_threshold_switch_controller(
     # Debug logging (opt-in via blueprint)
     #    debug may arrive as bool or string depending on
     #    how HA resolves the blueprint !input tag.
-    if str(debug).lower() == "true":
+    if str(debug_raw).lower() == "true":
         log.warning(  # noqa: F821
             "%s event=%s sw=%s baseline=%s auto_off=%s samples=%s -> %s %r",
             tag,
@@ -477,13 +477,13 @@ def sensor_threshold_switch_controller(
 @service  # noqa: F821
 def device_watchdog(
     instance_id: str,
-    monitored_integrations: str,
-    device_exclude_regex: str,
-    entity_exclude_regex: str,
-    monitored_entity_domains: object,
-    check_interval_minutes: str,
-    dead_device_threshold_minutes: str,
-    debug_output: str,
+    monitored_integrations_raw: object,
+    device_exclude_regex_raw: str,
+    entity_exclude_regex_raw: str,
+    monitored_entity_domains_raw: object,
+    check_interval_minutes_raw: str,
+    dead_device_threshold_minutes_raw: str,
+    debug_output_raw: str,
 ) -> None:
     """Evaluate device health across integrations.
 
@@ -521,39 +521,50 @@ def device_watchdog(
         return
 
     # Interval gating
-    interval = int(check_interval_minutes)
-    assert interval >= 1, f"check_interval_minutes must be >= 1, got {interval}"
-    if not should_run(interval, now):
+    check_interval_minutes = int(
+        check_interval_minutes_raw,
+    )
+    assert check_interval_minutes >= 1, (
+        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
+    )
+    if not should_run(check_interval_minutes, now):
         return
 
     # Parse config
-    integrations = _normalize_list(
-        monitored_integrations,
+    monitored_integrations = _normalize_list(
+        monitored_integrations_raw,
     )
-    domains = _normalize_list(
-        monitored_entity_domains,
+    monitored_entity_domains = _normalize_list(
+        monitored_entity_domains_raw,
     )
-    threshold_m = int(dead_device_threshold_minutes)
-    assert threshold_m >= 1, (
-        f"dead_device_threshold_minutes must be >= 1, got {threshold_m}"
+    dead_device_threshold_minutes = int(
+        dead_device_threshold_minutes_raw,
     )
-    threshold_s = threshold_m * 60
-    debug_logging = str(debug_output).lower() == "true"
+    assert dead_device_threshold_minutes >= 1, (
+        "dead_device_threshold_minutes must be >= 1,"
+        f" got {dead_device_threshold_minutes}"
+    )
+    dead_threshold_seconds = dead_device_threshold_minutes * 60
+    debug_logging = str(debug_output_raw).lower() == "true"
 
-    dev_regex = str(device_exclude_regex or "")
-    ent_regex = str(entity_exclude_regex or "")
+    device_exclude_regex = str(
+        device_exclude_regex_raw or "",
+    )
+    entity_exclude_regex = str(
+        entity_exclude_regex_raw or "",
+    )
 
     # Validate regex patterns
     errors = []
-    err = _validate_regex(dev_regex)
+    err = _validate_regex(device_exclude_regex)
     if err:
         errors.append(
-            'device_exclude_regex: "' + dev_regex + '": ' + err,
+            'device_exclude_regex: "' + device_exclude_regex + '": ' + err,
         )
-    err = _validate_regex(ent_regex)
+    err = _validate_regex(entity_exclude_regex)
     if err:
         errors.append(
-            'entity_exclude_regex: "' + ent_regex + '": ' + err,
+            'entity_exclude_regex: "' + entity_exclude_regex + '": ' + err,
         )
     if errors:
         persistent_notification.create(  # noqa: F821
@@ -566,10 +577,10 @@ def device_watchdog(
         return
 
     config = Config(
-        device_exclude_regex=dev_regex,
-        entity_exclude_regex=ent_regex,
-        monitored_entity_domains=domains,
-        dead_threshold_seconds=threshold_s,
+        device_exclude_regex=device_exclude_regex,
+        entity_exclude_regex=entity_exclude_regex,
+        monitored_entity_domains=monitored_entity_domains,
+        dead_threshold_seconds=dead_threshold_seconds,
     )
 
     # Discover devices and their entities from
@@ -577,7 +588,7 @@ def device_watchdog(
     #    to configured integrations are checked — we do
     #    not re-query the device registry for all entities.
     device_map: dict[str, dict[str, Any]] = {}
-    for integration_id in integrations:
+    for integration_id in monitored_integrations:
         try:
             entities = _get_integration_entities(
                 hass,  # noqa: F821
@@ -667,7 +678,7 @@ def device_watchdog(
     )
     state.setattr(  # noqa: F821
         key + ".integrations",
-        json.dumps(integrations),
+        json.dumps(monitored_integrations),
     )
 
     # Debug logging
@@ -678,6 +689,6 @@ def device_watchdog(
             tag,
             len(results),
             len(issues),
-            integrations,
+            monitored_integrations,
             issue_names,
         )

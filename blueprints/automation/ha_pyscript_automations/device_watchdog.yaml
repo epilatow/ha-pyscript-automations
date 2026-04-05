@@ -116,13 +116,13 @@ actions:
   - action: pyscript.device_watchdog
     data:
       instance_id: "{{ this.entity_id }}"
-      monitored_integrations: !input monitored_integrations
-      device_exclude_regex: !input device_exclude_regex
-      entity_exclude_regex: !input entity_exclude_regex
-      monitored_entity_domains: !input monitored_entity_domains
-      check_interval_minutes: !input check_interval_minutes
-      dead_device_threshold_minutes: !input dead_device_threshold_minutes
-      debug_output: !input debug_output
+      monitored_integrations_raw: !input monitored_integrations
+      device_exclude_regex_raw: !input device_exclude_regex
+      entity_exclude_regex_raw: !input entity_exclude_regex
+      monitored_entity_domains_raw: !input monitored_entity_domains
+      check_interval_minutes_raw: !input check_interval_minutes
+      dead_device_threshold_minutes_raw: !input dead_device_threshold_minutes
+      debug_output_raw: !input debug_output
 
 # Triggers every minute but most invocations exit
 # immediately (interval gate). If a real evaluation
