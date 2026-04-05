@@ -231,7 +231,7 @@ def _default_kwargs(**overrides: Any) -> dict[str, Any]:
         "notification_service": "",
         "notification_prefix": "",
         "notification_suffix": "",
-        "debug_raw": "false",
+        "debug_logging_raw": "false",
     }
     defaults.update(overrides)
     return defaults
@@ -794,31 +794,31 @@ class TestDebugLogging:
     def test_no_logging_when_debug_false(self) -> None:
         """No log.warning when debug is disabled."""
         env = _ServiceEnv()
-        env.call(debug_raw="false")
+        env.call(debug_logging_raw="false")
         assert len(env.mock_log.warning_calls) == 0
 
     def test_logging_when_debug_true(self) -> None:
         """log.warning emitted when debug is enabled."""
         env = _ServiceEnv()
-        env.call(debug_raw="true")
+        env.call(debug_logging_raw="true")
         assert len(env.mock_log.warning_calls) == 1
 
     def test_logging_with_bool_true(self) -> None:
-        """debug_raw=True (bool) also triggers logging."""
+        """debug_logging_raw=True (bool) also triggers logging."""
         env = _ServiceEnv()
-        env.call(debug_raw=True)
+        env.call(debug_logging_raw=True)
         assert len(env.mock_log.warning_calls) == 1
 
     def test_no_logging_with_bool_false(self) -> None:
-        """debug_raw=False (bool) does not trigger logging."""
+        """debug_logging_raw=False (bool) does not trigger logging."""
         env = _ServiceEnv()
-        env.call(debug_raw=False)
+        env.call(debug_logging_raw=False)
         assert len(env.mock_log.warning_calls) == 0
 
     def test_log_message_contains_context(self) -> None:
         """Log message includes event, action, and label."""
         env = _ServiceEnv()
-        env.call(debug_raw="true")
+        env.call(debug_logging_raw="true")
         msg, args = env.mock_log.warning_calls[0]
         formatted = msg % args
         assert "[STSC:" in formatted
@@ -828,9 +828,9 @@ class TestDebugLogging:
     def test_log_emitted_every_call(self) -> None:
         """Each call emits a log line when debug is on."""
         env = _ServiceEnv()
-        env.call(debug_raw="true")
+        env.call(debug_logging_raw="true")
         env.set_now(T0 + timedelta(seconds=30))
-        env.call(debug_raw="true")
+        env.call(debug_logging_raw="true")
         assert len(env.mock_log.warning_calls) == 2
 
 
@@ -1137,7 +1137,7 @@ def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
         "monitored_entity_domains_raw": [],
         "check_interval_minutes_raw": "1",
         "dead_device_threshold_minutes_raw": "1440",
-        "debug_output_raw": "false",
+        "debug_logging_raw": "false",
     }
     defaults.update(overrides)
     return defaults
@@ -1489,7 +1489,7 @@ class TestDeviceWatchdogDebugLogging:
 
     def test_no_logging_when_debug_false(self) -> None:
         env = _WatchdogEnv()
-        env.call(debug_output_raw="false")
+        env.call(debug_logging_raw="false")
         assert env.mock_log.warning_calls == []
 
     def test_logging_when_debug_true(self) -> None:
@@ -1500,7 +1500,7 @@ class TestDeviceWatchdogDebugLogging:
             "Dev",
             {"sensor.a": ("22.5", T0_UTC)},
         )
-        env.call(debug_output_raw="true")
+        env.call(debug_logging_raw="true")
         assert len(env.mock_log.warning_calls) == 1
         msg = env.mock_log.warning_calls[0][0]
         args = env.mock_log.warning_calls[0][1]
@@ -1515,7 +1515,7 @@ class TestDeviceWatchdogDebugLogging:
             "Bad Dev",
             {"sensor.a": ("unavailable", T0_UTC)},
         )
-        env.call(debug_output_raw="true")
+        env.call(debug_logging_raw="true")
         msg = env.mock_log.warning_calls[0][0]
         args = env.mock_log.warning_calls[0][1]
         formatted = msg % args

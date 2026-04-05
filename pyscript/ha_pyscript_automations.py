@@ -91,6 +91,16 @@ def _state_key(instance_id: str) -> str:
     return f"pyscript.{safe}_state"
 
 
+def _parse_bool(value: object) -> bool:
+    """Parse a boolean from a blueprint input.
+
+    Handles bool values and string "true"/"false".
+    """
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() == "true"
+
+
 def _normalize_list(value: object) -> list[str]:
     """Ensure value is a list of strings.
 
@@ -340,7 +350,7 @@ def sensor_threshold_switch_controller(
     notification_service: str,
     notification_prefix: str,
     notification_suffix: str,
-    debug_raw: str,
+    debug_logging_raw: str,
 ) -> None:
     """Evaluate sensor threshold switch controller.
 
@@ -354,6 +364,7 @@ def sensor_threshold_switch_controller(
     )
 
     now = datetime.now()
+    debug_logging = _parse_bool(debug_logging_raw)
     auto_name = _automation_name(instance_id)
     tag = "[STSC: " + auto_name + "]"
 
@@ -368,7 +379,7 @@ def sensor_threshold_switch_controller(
         "Sensor Threshold Switch Controller",
     )
     if errors:
-        if str(debug_raw).lower() == "true":
+        if debug_logging:
             log.warning(  # noqa: F821
                 "%s invalid config: %s",
                 tag,
@@ -453,9 +464,7 @@ def sensor_threshold_switch_controller(
         )
 
     # Debug logging (opt-in via blueprint)
-    #    debug may arrive as bool or string depending on
-    #    how HA resolves the blueprint !input tag.
-    if str(debug_raw).lower() == "true":
+    if debug_logging:
         log.warning(  # noqa: F821
             "%s event=%s sw=%s baseline=%s auto_off=%s samples=%s -> %s %r",
             tag,
@@ -483,7 +492,7 @@ def device_watchdog(
     monitored_entity_domains_raw: object,
     check_interval_minutes_raw: str,
     dead_device_threshold_minutes_raw: str,
-    debug_output_raw: str,
+    debug_logging_raw: str,
 ) -> None:
     """Evaluate device health across integrations.
 
@@ -545,7 +554,7 @@ def device_watchdog(
         f" got {dead_device_threshold_minutes}"
     )
     dead_threshold_seconds = dead_device_threshold_minutes * 60
-    debug_logging = str(debug_output_raw).lower() == "true"
+    debug_logging = _parse_bool(debug_logging_raw)
 
     device_exclude_regex = str(
         device_exclude_regex_raw or "",

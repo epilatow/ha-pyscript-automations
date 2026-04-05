@@ -120,7 +120,7 @@ blueprint:
       selector:
         text:
 
-    debug:
+    debug_logging:
       name: Debug Logging
       description: >
         Enable debug logging. When enabled, emits a
@@ -165,7 +165,7 @@ actions:
       notification_service: !input notification_service
       notification_prefix: !input notification_prefix
       notification_suffix: !input notification_suffix
-      debug_raw: !input debug
+      debug_logging_raw: !input debug_logging
 
 mode: queued
 max: 10

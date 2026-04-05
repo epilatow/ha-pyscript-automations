@@ -99,11 +99,13 @@ blueprint:
           unit_of_measurement: minutes
           mode: box
 
-    debug_output:
-      name: Debug output
+    debug_logging:
+      name: Debug Logging
       description: >
-        Include detailed debug information in HA logs.
-        Check Settings > System > Logs to view output.
+        Enable debug logging. When enabled, emits a
+        log.warning message with full decision context
+        on every invocation. Check Settings > System >
+        Logs to view output.
       default: false
       selector:
         boolean: {}
@@ -122,7 +124,7 @@ actions:
       monitored_entity_domains_raw: !input monitored_entity_domains
       check_interval_minutes_raw: !input check_interval_minutes
       dead_device_threshold_minutes_raw: !input dead_device_threshold_minutes
-      debug_output_raw: !input debug_output
+      debug_logging_raw: !input debug_logging
 
 # Triggers every minute but most invocations exit
 # immediately (interval gate). If a real evaluation
