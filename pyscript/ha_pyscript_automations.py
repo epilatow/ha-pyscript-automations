@@ -352,6 +352,8 @@ def sensor_threshold_switch_controller(
     )
 
     now = datetime.now()
+    auto_name = _automation_name(instance_id)
+    tag = "[STSC: " + auto_name + "]"
 
     # Validate entities
     errors = _validate_entities(
@@ -366,7 +368,8 @@ def sensor_threshold_switch_controller(
     if errors:
         if str(debug).lower() == "true":
             log.warning(  # noqa: F821
-                "[sensor_threshold_switch_controller] invalid config: %s",
+                "%s invalid config: %s",
+                tag,
                 errors,
             )
         return
@@ -452,10 +455,8 @@ def sensor_threshold_switch_controller(
     #    how HA resolves the blueprint !input tag.
     if str(debug).lower() == "true":
         log.warning(  # noqa: F821
-            "[sensor_threshold_switch_controller]"
-            " event=%s sw=%s baseline=%s"
-            " auto_off=%s samples=%s"
-            " -> %s %r",
+            "%s event=%s sw=%s baseline=%s auto_off=%s samples=%s -> %s %r",
+            tag,
             info["last_event"],
             switch_state,
             result.state_dict.get("baseline"),
@@ -495,6 +496,8 @@ def device_watchdog(
     )
 
     now = datetime.now(tz=UTC)
+    auto_name = _automation_name(instance_id)
+    tag = "[DW: " + auto_name + "]"
 
     # Verify hass is available
     try:
@@ -667,8 +670,8 @@ def device_watchdog(
     if debug_logging:
         issue_names = [r.device_name for r in issues]
         log.warning(  # noqa: F821
-            "[device_watchdog] checked=%d issues=%d"
-            " integrations=%s devices_with_issues=%s",
+            "%s checked=%d issues=%d integrations=%s devices_with_issues=%s",
+            tag,
             len(results),
             len(issues),
             integrations,

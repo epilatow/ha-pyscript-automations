@@ -165,9 +165,9 @@ To view logs:
   `sensor_threshold_switch_controller`.
 - Or via SSH: `ha core logs 2>&1 | grep sensor_threshold`.
 
-Log format (single line per invocation):
+Example output for an automation named "Main Bath Fan Controller":
 ```
-[sensor_threshold_switch_controller] event=TIMER sw=on baseline=None
+[STSC: Main Bath Fan Controller] event=TIMER sw=on baseline=None
   auto_off=2026-02-21T15:19:00 samples=5 -> TURN_OFF
   "Auto-off after 1 minute(s)"
 ```

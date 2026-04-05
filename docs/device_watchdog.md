@@ -91,10 +91,10 @@ Enable the **Debug Logging** toggle in the blueprint. Debug
 output appears in **Settings > System > Logs**. Uses
 `log.warning` level (HA's default for custom components).
 
-Example output:
+Example output for an automation named "Device Watchdog":
 
 ```
-[device_watchdog] checked=12 issues=2
+[DW: Device Watchdog] checked=12 issues=2
   integrations=['zwave_js', 'matter']
   devices_with_issues=['Kitchen Sensor', 'Garage Door']
 ```

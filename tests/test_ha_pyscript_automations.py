@@ -821,7 +821,7 @@ class TestDebugLogging:
         env.call(debug="true")
         msg, args = env.mock_log.warning_calls[0]
         formatted = msg % args
-        assert "sensor_threshold_switch_controller" in formatted
+        assert "[STSC:" in formatted
         assert "TIMER" in formatted
         assert "NONE" in formatted
 
@@ -1503,7 +1503,9 @@ class TestDeviceWatchdogDebugLogging:
         env.call(debug_output="true")
         assert len(env.mock_log.warning_calls) == 1
         msg = env.mock_log.warning_calls[0][0]
-        assert "[device_watchdog]" in msg
+        args = env.mock_log.warning_calls[0][1]
+        formatted = msg % args
+        assert "[DW:" in formatted
 
     def test_log_includes_issue_count(self) -> None:
         env = _WatchdogEnv()
