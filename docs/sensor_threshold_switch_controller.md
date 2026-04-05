@@ -19,48 +19,6 @@ override protection, auto-off functionality, and notification support.
 - **Notifications**: Optionally sends notifications for all actions via
   a configurable notification service.
 
-## How It Works
-
-1. **Monitors one or more sensors** for value changes.
-2. **Tracks min/max** values over a rolling sampling window
-   (all sensors share a single window).
-3. **Triggers ON** when `max - min > trigger_threshold`.
-4. **Sets a baseline** to the min value at the time of triggering.
-5. **Releases OFF** when `max <= baseline + release_threshold`.
-6. **Handles manual control**:
-   - Manual ON: Starts auto-off timer (if no sensor baseline is
-     active).
-   - Manual OFF while baseline active: Re-activates the switch.
-   - Double manual OFF within disable window: Disables the sensor
-     override entirely.
-
-### Execution Model
-
-The automation is purely reactive. Every trigger fires the PyScript
-action, which evaluates the current state, takes an action (or not),
-saves state, and exits. There is no sleeping, waiting, or background
-processing.
-
-Time-based logic (auto-off) works by recording a timestamp when the
-timer starts, then checking elapsed time on each invocation. A
-`time_pattern` trigger fires every minute to ensure timely evaluation.
-
-The start time is rounded UP to the next minute boundary so the actual
-auto-off delay is never shorter than configured (it may be up to ~1
-minute longer).
-
-```
-Timeline (auto-off example, 5 minute timeout):
-
-12:00:50  Manual switch ON -> round up to 12:01, exit
-12:01     time_pattern fires -> elapsed 0s < 300s, exit
-12:02     time_pattern fires -> elapsed 60s < 300s, exit
-12:03     time_pattern fires -> elapsed 120s, exit
-12:04     time_pattern fires -> elapsed 180s, exit
-12:05     time_pattern fires -> elapsed 240s, exit
-12:06     time_pattern fires -> elapsed 300s >= 300s, turn OFF, exit
-```
-
 ## Configuration
 
 ### Required

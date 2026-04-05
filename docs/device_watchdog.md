@@ -18,24 +18,6 @@ devices recover.
 - Configurable check interval and staleness threshold
 - Optional debug logging
 
-## How It Works
-
-The automation triggers every minute via a time pattern. An
-interval gate checks whether enough time has passed since the
-last evaluation (configurable, default 60 minutes).
-
-When the gate passes, the watchdog:
-
-1. Discovers all devices across configured integrations using
-   the HA entity and device registries
-2. Filters devices and entities by name pattern, entity ID
-   pattern, and entity domain
-3. For each device, evaluates health:
-   - Are any entities in `unavailable` or `unknown` state?
-   - Has any entity changed state within the dead threshold?
-4. Creates a persistent notification for unhealthy devices
-5. Dismisses notifications for devices that have recovered
-
 ## Configuration
 
 | Parameter | Description |

@@ -594,9 +594,26 @@ def handle_service_call(
 
     Accepts pre-loaded data (no HA dependencies) and
     returns a ``ServiceResult`` describing what the caller
-    should do.  The caller (ha_pyscript_automations.py) handles all HA
-    interactions: state persistence, service calls, and
-    notifications.
+    should do.  The caller handles all HA interactions:
+    state persistence, service calls, and notifications.
+
+    The evaluation flow:
+    1. Parse state from persisted JSON
+    2. Determine event type (SENSOR, SWITCH, or TIMER)
+    3. Parse sensor value (for SENSOR events)
+    4. Evaluate via Controller:
+       - SENSOR: track min/max in rolling window,
+         detect spike (turn on) or release (turn off)
+       - SWITCH: handle manual on (start auto-off),
+         manual off (re-activate or double-off disable)
+       - TIMER: check auto-off expiry
+    5. Format notification with prefix/suffix
+    6. Normalise notification service name
+
+    Purely reactive: no sleeping, no waiting.  Auto-off
+    records a start timestamp rounded up to the next
+    minute boundary; the time_pattern trigger fires
+    every minute to check expiry.
 
     Remaining kwargs are passed through to evaluate().
     """

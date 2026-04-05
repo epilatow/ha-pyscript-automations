@@ -273,6 +273,26 @@ def evaluate_devices(
     """Evaluate health of all devices.
 
     Main entry point for the pure logic module.
+
+    The service wrapper triggers every minute via a time
+    pattern.  An interval gate checks whether enough time
+    has passed since the last evaluation.
+
+    When the gate passes, the wrapper:
+    1. Discovers devices across configured integrations
+       using the HA entity and device registries
+    2. Reads entity state for each device
+    3. Calls this function with the device list
+
+    For each device, this function:
+    1. Filters entities by domain and exclude regex
+    2. Checks for unavailable/unknown entity states
+    3. Checks for staleness (no state change within
+       threshold)
+    4. Returns a DeviceResult per device
+
+    The wrapper then creates persistent notifications
+    for unhealthy devices and dismisses them on recovery.
     """
     results: list[DeviceResult] = []
     for device in devices:
