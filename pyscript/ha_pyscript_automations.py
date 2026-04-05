@@ -91,6 +91,28 @@ def _state_key(instance_id: str) -> str:
     return f"pyscript.{safe}_state"
 
 
+def _save_state(
+    key: str,
+    now: datetime,
+    attrs: dict[str, Any],
+) -> None:
+    """Persist state and debug attributes.
+
+    Sets the entity state to "ok", writes last_run,
+    and writes all attrs as entity attributes.
+    """
+    state.set(key, "ok")  # noqa: F821
+    state.setattr(  # noqa: F821
+        key + ".last_run",
+        now.isoformat(),
+    )
+    for name, value in attrs.items():
+        state.setattr(  # noqa: F821
+            key + "." + name,
+            value,
+        )
+
+
 def _parse_bool(value: object) -> bool:
     """Parse a boolean from a blueprint input.
 
@@ -450,18 +472,10 @@ def sensor_threshold_switch_controller(
             message=result.notification,
         )
 
-    # Save state + debug attributes to entity
+    # Save state + debug attributes
     info = _stsc_debug_dict(result, now, sensor_value)
-    state.set(key, "ok")  # noqa: F821
-    state.setattr(  # noqa: F821
-        key + ".data",
-        json.dumps(result.state_dict),
-    )
-    for attr_name, attr_val in info.items():
-        state.setattr(  # noqa: F821
-            key + "." + attr_name,
-            attr_val,
-        )
+    info["data"] = json.dumps(result.state_dict)
+    _save_state(key, now, info)
 
     # Debug logging (opt-in via blueprint)
     if debug_logging:
@@ -672,22 +686,16 @@ def device_watchdog(
     # Write debug attributes
     key = _state_key(instance_id)
     issues = [r for r in results if r.has_issue]
-    state.set(key, "ok")  # noqa: F821
-    state.setattr(  # noqa: F821
-        key + ".last_run",
-        now.isoformat(),
-    )
-    state.setattr(  # noqa: F821
-        key + ".devices_checked",
-        len(results),
-    )
-    state.setattr(  # noqa: F821
-        key + ".devices_with_issues",
-        len(issues),
-    )
-    state.setattr(  # noqa: F821
-        key + ".integrations",
-        json.dumps(monitored_integrations),
+    _save_state(
+        key,
+        now,
+        {
+            "devices_checked": len(results),
+            "devices_with_issues": len(issues),
+            "integrations": json.dumps(
+                monitored_integrations,
+            ),
+        },
     )
 
     # Debug logging
