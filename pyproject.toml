@@ -26,7 +26,3 @@ cache_dir = "/tmp/mypy_cache"
 module = ["homeassistant.*"]
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = ["ha_pyscript_automations"]
-disallow_untyped_defs = false
-disallow_untyped_calls = false

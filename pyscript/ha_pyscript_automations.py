@@ -90,7 +90,7 @@ def _state_key(instance_id: str) -> str:
     return f"pyscript.{safe}_state"
 
 
-def _normalize_list(value):
+def _normalize_list(value: object) -> list[str]:
     """Ensure value is a list of strings.
 
     Blueprint select with multiple: true sends a list,
@@ -103,7 +103,7 @@ def _normalize_list(value):
     return []
 
 
-def _validate_regex(pattern):
+def _validate_regex(pattern: str) -> str | None:
     """Return error string if pattern is invalid regex.
 
     Returns None if pattern is empty or valid.
@@ -123,7 +123,10 @@ def _validate_regex(pattern):
     return None
 
 
-def _get_integration_entities(hass_obj, integration_id):
+def _get_integration_entities(
+    hass_obj: object,
+    integration_id: str,
+) -> list[str]:
     """Entity IDs for an integration."""
     import homeassistant.helpers.template as ha_tmpl  # noqa: F821
 
@@ -135,7 +138,10 @@ def _get_integration_entities(hass_obj, integration_id):
     )
 
 
-def _get_device_for_entity(hass_obj, entity_id):
+def _get_device_for_entity(
+    hass_obj: object,
+    entity_id: str,
+) -> dict[str, str] | None:
     """Return {id, name} for the device owning entity_id.
 
     Returns None if entity has no device.
@@ -155,7 +161,9 @@ def _get_device_for_entity(hass_obj, entity_id):
     return {"id": entry.device_id, "name": name}
 
 
-def _read_entity_state(entity_id):
+def _read_entity_state(
+    entity_id: str,
+) -> tuple[Any, Any]:
     """Read entity state + last_changed."""
     entity_state = state.get(entity_id)  # noqa: F821
     last_changed = state.get(  # noqa: F821
@@ -167,7 +175,11 @@ def _read_entity_state(entity_id):
 # ── Sensor Threshold Switch Controller ──────────────
 
 
-def _stsc_debug_dict(result, now, sensor_value):
+def _stsc_debug_dict(
+    result: Any,
+    now: datetime,
+    sensor_value: str,
+) -> dict[str, str]:
     """Build debug info dict from a ServiceResult."""
     sv = result.sensor_value
     return {
@@ -181,21 +193,21 @@ def _stsc_debug_dict(result, now, sensor_value):
 
 @service  # noqa: F821
 def sensor_threshold_switch_controller(
-    instance_id,
-    target_switch_entity,
-    sensor_value,
-    switch_state,
-    trigger_entity,
-    trigger_threshold,
-    release_threshold,
-    sampling_window_s,
-    disable_window_s,
-    auto_off_min,
-    notification_service,
-    notification_prefix,
-    notification_suffix,
-    debug="false",
-):
+    instance_id: str,
+    target_switch_entity: str,
+    sensor_value: str,
+    switch_state: str,
+    trigger_entity: str,
+    trigger_threshold: str,
+    release_threshold: str,
+    sampling_window_s: str,
+    disable_window_s: str,
+    auto_off_min: str,
+    notification_service: str,
+    notification_prefix: str,
+    notification_suffix: str,
+    debug: str = "false",
+) -> None:
     """Evaluate sensor threshold switch controller.
 
     Called by blueprint-generated automation.
@@ -309,15 +321,15 @@ def sensor_threshold_switch_controller(
 
 @service  # noqa: F821
 def device_watchdog(
-    instance_id,
-    monitored_integrations,
-    device_exclude_regex="",
-    entity_exclude_regex="",
-    monitored_entity_domains=None,
-    check_interval_minutes="60",
-    dead_device_threshold_minutes="1440",
-    debug_output="false",
-):
+    instance_id: str,
+    monitored_integrations: str,
+    device_exclude_regex: str = "",
+    entity_exclude_regex: str = "",
+    monitored_entity_domains: object = None,
+    check_interval_minutes: str = "60",
+    dead_device_threshold_minutes: str = "1440",
+    debug_output: str = "false",
+) -> None:
     """Evaluate device health across integrations.
 
     Called by blueprint-generated automation.
@@ -407,7 +419,7 @@ def device_watchdog(
     #    monitored integrations. Only entities belonging
     #    to configured integrations are checked — we do
     #    not re-query the device registry for all entities.
-    device_map = {}
+    device_map: dict[str, dict[str, Any]] = {}
     for integration_id in integrations:
         try:
             entities = _get_integration_entities(
