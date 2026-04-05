@@ -1523,6 +1523,420 @@ class TestDeviceWatchdogDebugLogging:
         assert "Bad Dev" in formatted
 
 
+# ── Trigger Entity Controller ─────────────────────
+
+
+class _TecEnv:
+    """Loads service file and wires mocks for TEC."""
+
+    def __init__(
+        self,
+        current_time: datetime = T0,
+    ) -> None:
+        self.mock_state = _MockState()
+        self.mock_ha = _MockHA()
+        self.mock_service = _MockServiceObj()
+        self.mock_log = _MockLog()
+        self.mock_pn = _MockPersistentNotification()
+
+        src = _SCRIPT_PATH.read_text()
+        self._ns: dict[str, Any] = {
+            "__builtins__": __builtins__,
+            "service": self.mock_service,
+            "state": self.mock_state,
+            "homeassistant": self.mock_ha,
+            "log": self.mock_log,
+            "persistent_notification": self.mock_pn,
+        }
+        exec(
+            compile(src, str(_SCRIPT_PATH), "exec"),
+            self._ns,
+        )
+        self.set_now(current_time)
+
+    def set_now(self, dt: datetime) -> None:
+        self._ns["datetime"] = _ControllableDatetime(dt)
+
+    def set_entity_state(
+        self,
+        entity_id: str,
+        entity_state: str,
+    ) -> None:
+        self.mock_state._store[entity_id] = entity_state
+
+    @property
+    def tec_fn(self) -> Any:
+        return self._ns["trigger_entity_controller"]
+
+    @property
+    def state_key_fn(self) -> Any:
+        return self._ns["_state_key"]
+
+    def call(self, **kwargs: Any) -> None:
+        self.tec_fn(**_tec_defaults(**kwargs))
+
+
+def _tec_defaults(**overrides: Any) -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "instance_id": "auto.tec_test",
+        "controlled_entities_raw": ["light.hallway"],
+        "trigger_entity_id": "timer",
+        "trigger_to_state": "",
+        "auto_off_minutes_raw": "0",
+        "trigger_entities_raw": ["binary_sensor.motion"],
+        "trigger_period_raw": "always",
+        "trigger_forces_on_raw": "false",
+        "trigger_disabling_entities_raw": [],
+        "trigger_disabling_period_raw": "always",
+        "auto_off_disabling_entities_raw": [],
+        "notification_service": "",
+        "notification_prefix_raw": "",
+        "notification_suffix_raw": "",
+        "notification_events_raw": [],
+        "debug_logging_raw": "false",
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+class TestTecServiceLoads:
+    def test_exec_succeeds(self) -> None:
+        _TecEnv()
+
+    def test_function_callable(self) -> None:
+        env = _TecEnv()
+        assert callable(env.tec_fn)
+
+    def test_timer_event_no_crash(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call()
+
+
+class TestTecEntityValidation:
+    def test_missing_entity_creates_notification(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        # light.hallway not in state -> missing
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call()
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "light.hallway" in msg
+
+    def test_missing_entity_no_action(self) -> None:
+        env = _TecEnv()
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+        )
+        assert len(env.mock_ha.turn_on_calls) == 0
+
+    def test_valid_entities_dismiss_notification(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call()
+        assert len(env.mock_pn.dismiss_calls) == 1
+
+
+class TestTecEntityOverlap:
+    def test_controlled_and_trigger_overlap_error(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call(
+            controlled_entities_raw=["light.hallway"],
+            trigger_entities_raw=["light.hallway"],
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "controlled and trigger" in msg
+
+    def test_trigger_and_disabling_overlap_error(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call(
+            trigger_disabling_entities_raw=[
+                "binary_sensor.motion",
+            ],
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "trigger and disabling" in msg
+
+    def test_disabling_overlap_allowed(self) -> None:
+        """Same entity in both trigger_disabling and
+        auto_off_disabling is allowed.
+        """
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.set_entity_state(
+            "input_boolean.occupied",
+            "off",
+        )
+        env.call(
+            trigger_disabling_entities_raw=[
+                "input_boolean.occupied",
+            ],
+            auto_off_disabling_entities_raw=[
+                "input_boolean.occupied",
+            ],
+        )
+        assert len(env.mock_pn.dismiss_calls) == 1
+        assert len(env.mock_pn.create_calls) == 0
+
+
+class TestTecEventRouting:
+    def test_trigger_on_turns_on(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+        )
+        assert len(env.mock_ha.turn_on_calls) == 1
+        assert env.mock_ha.turn_on_calls[0]["entity_id"] == "light.hallway"
+
+    def test_unavailable_state_ignored(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "unavailable",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="unavailable",
+        )
+        assert len(env.mock_ha.turn_on_calls) == 0
+        assert len(env.mock_ha.turn_off_calls) == 0
+
+
+class TestTecPreComputedBooleans:
+    def test_sun_above_horizon_is_daytime(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.set_entity_state(
+            "sun.sun",
+            "above_horizon",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+            trigger_period_raw="night-time",
+        )
+        # night-time period + daytime = suppressed
+        assert len(env.mock_ha.turn_on_calls) == 0
+
+    def test_disabling_entity_suppresses(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.set_entity_state(
+            "input_boolean.occupied",
+            "on",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+            trigger_disabling_entities_raw=[
+                "input_boolean.occupied",
+            ],
+            trigger_disabling_period_raw="always",
+        )
+        assert len(env.mock_ha.turn_on_calls) == 0
+
+
+class TestTecActions:
+    def test_turn_on_multiple_entities(self) -> None:
+        env = _TecEnv()
+        entities = [
+            "light.hallway",
+            "light.hallway_2",
+        ]
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state("light.hallway_2", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.call(
+            controlled_entities_raw=entities,
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+        )
+        assert len(env.mock_ha.turn_on_calls) == 2
+
+    def test_timer_turn_off(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "on")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        # Pre-set auto_off_at in the past
+        key = env.state_key_fn("auto.tec_test")
+        past = (T0 - timedelta(seconds=1)).isoformat()
+        env.mock_state.set(key, "ok")
+        env.mock_state.setattr(
+            key + ".auto_off_at",
+            past,
+        )
+        env.call()
+        assert len(env.mock_ha.turn_off_calls) == 1
+
+
+class TestTecNotifications:
+    def test_notification_sent(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+            notification_service="notify",
+            notification_events_raw=["triggered-on"],
+        )
+        assert len(env.mock_service.call_log) == 1
+        domain, svc, kwargs = env.mock_service.call_log[0]
+        assert domain == "notify"
+        assert svc == "notify"
+        assert "Triggered on" in kwargs["message"]
+
+    def test_no_notification_without_service(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+            notification_service="",
+            notification_events_raw=["triggered-on"],
+        )
+        assert len(env.mock_service.call_log) == 0
+
+
+class TestTecStatePersistence:
+    def test_auto_off_at_persisted(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "on")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="off",
+            auto_off_minutes_raw="2",
+        )
+        key = env.state_key_fn("auto.tec_test")
+        attrs = env.mock_state.getattr(key)
+        raw = attrs.get("auto_off_at", "")
+        assert raw != ""
+        expected = T0 + timedelta(minutes=2)
+        assert raw == expected.isoformat()
+
+    def test_auto_off_at_cleared(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+        )
+        key = env.state_key_fn("auto.tec_test")
+        attrs = env.mock_state.getattr(key)
+        assert attrs.get("auto_off_at", "") == ""
+
+
+class TestTecDebug:
+    def test_debug_attributes_written(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call()
+        key = env.state_key_fn("auto.tec_test")
+        attrs = env.mock_state.getattr(key)
+        assert "last_run" in attrs
+        assert "last_action" in attrs
+        assert "last_reason" in attrs
+        assert "last_event" in attrs
+
+    def test_debug_logging_opt_in(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call(debug_logging_raw="true")
+        assert len(env.mock_log.warning_calls) == 1
+
+    def test_debug_logging_off_by_default(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.call()
+        assert len(env.mock_log.warning_calls) == 0
+
+
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "pyscript/ha_pyscript_automations.py",

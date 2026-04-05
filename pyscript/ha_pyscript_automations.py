@@ -709,3 +709,269 @@ def device_watchdog(
             monitored_integrations,
             issue_names,
         )
+
+
+# ── Trigger Entity Controller ────────────────────
+
+
+# Parameter defaults are defined in the blueprint YAML,
+# so don't duplicate them here.
+@service  # noqa: F821
+def trigger_entity_controller(
+    instance_id: str,
+    controlled_entities_raw: object,
+    trigger_entity_id: str,
+    trigger_to_state: str,
+    auto_off_minutes_raw: str,
+    trigger_entities_raw: object,
+    trigger_period_raw: str,
+    trigger_forces_on_raw: str,
+    trigger_disabling_entities_raw: object,
+    trigger_disabling_period_raw: str,
+    auto_off_disabling_entities_raw: object,
+    notification_service: str,
+    notification_prefix_raw: str,
+    notification_suffix_raw: str,
+    notification_events_raw: object,
+    debug_logging_raw: str,
+) -> None:
+    """Control entities with trigger-based activation.
+
+    Called by blueprint-generated automation.
+    Purely reactive: evaluate -> act -> exit.
+    No sleeping, no waiting.
+    """
+    from trigger_entity_controller import (  # noqa: F821
+        ActionType,
+        Config,
+        Inputs,
+        determine_event_type,
+        evaluate,
+        parse_notification_events,
+        parse_period,
+    )
+
+    now = datetime.now()
+    debug_logging = _parse_bool(debug_logging_raw)
+    auto_name = _automation_name(instance_id)
+    tag = "[TEC: " + auto_name + "]"
+
+    # Parse inputs
+    controlled_entities = _normalize_list(
+        controlled_entities_raw,
+    )
+    trigger_entities = _normalize_list(
+        trigger_entities_raw,
+    )
+    trigger_disabling_entities = _normalize_list(
+        trigger_disabling_entities_raw,
+    )
+    auto_off_disabling_entities = _normalize_list(
+        auto_off_disabling_entities_raw,
+    )
+    auto_off_minutes = int(auto_off_minutes_raw)
+    assert auto_off_minutes >= 0, "auto_off_minutes must be >= 0, got " + str(
+        auto_off_minutes
+    )
+    notification_events = parse_notification_events(
+        _normalize_list(notification_events_raw),
+    )
+
+    # Validate entities
+    errors = _validate_entities(
+        controlled_entities,
+        EntityType.CONTROLLABLE,
+    )
+    all_disabling = trigger_disabling_entities + auto_off_disabling_entities
+    errors += _validate_entities(
+        trigger_entities + all_disabling,
+        EntityType.BINARY,
+    )
+
+    # Check for overlapping entity sets
+    ctrl_set = set(controlled_entities)
+    trig_set = set(trigger_entities)
+    dis_set = set(all_disabling)
+    for eid in ctrl_set & trig_set:
+        errors.append(
+            eid + " is in both controlled and trigger entities",
+        )
+    for eid in ctrl_set & dis_set:
+        errors.append(
+            eid + " is in both controlled and disabling entities",
+        )
+    for eid in trig_set & dis_set:
+        errors.append(
+            eid + " is in both trigger and disabling entities",
+        )
+
+    _update_persistent_error_notifications(
+        errors,
+        instance_id,
+        "Trigger Entity Controller",
+    )
+    if errors:
+        if debug_logging:
+            log.warning(  # noqa: F821
+                "%s invalid config: %s",
+                tag,
+                errors,
+            )
+        return
+
+    # Determine event type
+    event_type = determine_event_type(
+        str(trigger_entity_id or ""),
+        str(trigger_to_state or ""),
+        trigger_entities,
+        controlled_entities,
+        all_disabling,
+    )
+    if event_type is None:
+        return
+
+    # Read current entity states for the pure logic
+    triggers_on = False
+    for eid in trigger_entities:
+        if state.get(eid) == "on":  # noqa: F821
+            triggers_on = True
+            break
+
+    controlled_on = False
+    for eid in controlled_entities:
+        if state.get(eid) == "on":  # noqa: F821
+            controlled_on = True
+            break
+
+    sun_state = state.get("sun.sun")  # noqa: F821
+    is_day_time = sun_state == "above_horizon"
+
+    triggers_disabled = False
+    for eid in trigger_disabling_entities:
+        if state.get(eid) == "on":  # noqa: F821
+            triggers_disabled = True
+            break
+
+    auto_off_disabled = False
+    for eid in auto_off_disabling_entities:
+        if state.get(eid) == "on":  # noqa: F821
+            auto_off_disabled = True
+            break
+
+    # Resolve friendly names for notifications
+    friendly_names: dict[str, str] = {}
+    for eid in controlled_entities:
+        try:
+            a = state.getattr(eid)  # noqa: F821
+            n = a.get("friendly_name", "")
+            if n:
+                friendly_names[eid] = n
+        except Exception:
+            pass
+
+    # Load auto_off_at from entity attribute
+    key = _state_key(instance_id)
+    auto_off_at: datetime | None = None
+    try:
+        attrs = state.getattr(key)  # noqa: F821
+        stored = attrs.get("auto_off_at", "")
+        if stored:
+            auto_off_at = datetime.fromisoformat(stored)
+    except Exception:
+        pass
+
+    # Build config and inputs, evaluate
+    trigger_period = parse_period(
+        str(trigger_period_raw),
+    )
+    trigger_forces_on = _parse_bool(trigger_forces_on_raw)
+    trigger_disabling_period = parse_period(
+        str(trigger_disabling_period_raw),
+    )
+    notification_prefix = str(
+        notification_prefix_raw or "",
+    )
+    notification_suffix = str(
+        notification_suffix_raw or "",
+    )
+    config = Config(
+        controlled_entities=controlled_entities,
+        auto_off_minutes=auto_off_minutes,
+        auto_off_disabling_entities=(auto_off_disabling_entities),
+        trigger_entities=trigger_entities,
+        trigger_period=trigger_period,
+        trigger_forces_on=trigger_forces_on,
+        trigger_disabling_entities=(trigger_disabling_entities),
+        trigger_disabling_period=trigger_disabling_period,
+        notification_prefix=notification_prefix,
+        notification_suffix=notification_suffix,
+        notification_events=notification_events,
+    )
+    inputs = Inputs(
+        current_time=now,
+        event_type=event_type,
+        changed_entity=str(trigger_entity_id or ""),
+        triggers_on=triggers_on,
+        controlled_on=controlled_on,
+        is_day_time=is_day_time,
+        triggers_disabled=triggers_disabled,
+        auto_off_disabled=auto_off_disabled,
+        auto_off_at=auto_off_at,
+        friendly_names=friendly_names,
+    )
+    result = evaluate(config, inputs)
+
+    # Execute action
+    if result.action == ActionType.TURN_ON:
+        for eid in result.target_entities:
+            homeassistant.turn_on(  # noqa: F821
+                entity_id=eid,
+            )
+    elif result.action == ActionType.TURN_OFF:
+        for eid in result.target_entities:
+            homeassistant.turn_off(  # noqa: F821
+                entity_id=eid,
+            )
+
+    # Send notification
+    if result.notification and notification_service:
+        svc = str(notification_service)
+        if not svc.startswith("notify."):
+            svc = "notify." + svc
+        parts = svc.split(".")
+        service.call(  # noqa: F821
+            parts[0],
+            parts[1],
+            message=result.notification,
+        )
+
+    # Save state + debug attributes
+    new_auto_off = ""
+    if result.auto_off_at is not None:
+        new_auto_off = result.auto_off_at.isoformat()
+    _save_state(
+        key,
+        now,
+        {
+            "auto_off_at": new_auto_off,
+            "last_action": result.action.name,
+            "last_reason": result.reason or "n/a",
+            "last_event": event_type.name,
+        },
+    )
+
+    # Debug logging (opt-in via blueprint)
+    if debug_logging:
+        log.warning(  # noqa: F821
+            "%s event=%s action=%s reason=%r"
+            " auto_off_at=%s trigger_on=%s"
+            " controlled_on=%s is_day_time=%s",
+            tag,
+            event_type.name,
+            result.action.name,
+            result.reason,
+            new_auto_off or "none",
+            triggers_on,
+            controlled_on,
+            is_day_time,
+        )
