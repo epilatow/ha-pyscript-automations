@@ -323,6 +323,8 @@ def _stsc_debug_dict(
     }
 
 
+# Parameter defaults are defined in the blueprint YAML,
+# so don't duplicate them here.
 @service  # noqa: F821
 def sensor_threshold_switch_controller(
     instance_id: str,
@@ -338,7 +340,7 @@ def sensor_threshold_switch_controller(
     notification_service: str,
     notification_prefix: str,
     notification_suffix: str,
-    debug: str = "false",
+    debug: str,
 ) -> None:
     """Evaluate sensor threshold switch controller.
 
@@ -470,16 +472,18 @@ def sensor_threshold_switch_controller(
 # ── Device Watchdog ─────────────────────────────────
 
 
+# Parameter defaults are defined in the blueprint YAML,
+# so don't duplicate them here.
 @service  # noqa: F821
 def device_watchdog(
     instance_id: str,
     monitored_integrations: str,
-    device_exclude_regex: str = "",
-    entity_exclude_regex: str = "",
-    monitored_entity_domains: object = None,
-    check_interval_minutes: str = "60",
-    dead_device_threshold_minutes: str = "1440",
-    debug_output: str = "false",
+    device_exclude_regex: str,
+    entity_exclude_regex: str,
+    monitored_entity_domains: object,
+    check_interval_minutes: str,
+    dead_device_threshold_minutes: str,
+    debug_output: str,
 ) -> None:
     """Evaluate device health across integrations.
 
