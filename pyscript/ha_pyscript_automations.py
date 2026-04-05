@@ -11,6 +11,75 @@ reactive: trigger -> evaluate -> act -> exit.
 
 import json
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    class _State:
+        def get(self, key: str) -> Any: ...
+        def getattr(
+            self,
+            entity_id: str,
+        ) -> dict[str, str]: ...
+        def set(
+            self,
+            key: str,
+            value: str,
+        ) -> None: ...
+        def setattr(
+            self,
+            key: str,
+            value: Any,
+        ) -> None: ...
+
+    class _HomeAssistant:
+        def turn_on(
+            self,
+            *,
+            entity_id: str,
+        ) -> None: ...
+        def turn_off(
+            self,
+            *,
+            entity_id: str,
+        ) -> None: ...
+
+    class _Service:
+        def __call__(
+            self,
+            fn: Callable[..., None],
+        ) -> Callable[..., None]: ...
+        def call(
+            self,
+            domain: str,
+            svc: str,
+            **kwargs: Any,
+        ) -> None: ...
+
+    class _Log:
+        def warning(
+            self,
+            msg: str,
+            *args: Any,
+        ) -> None: ...
+
+    class _PersistentNotification:
+        def create(
+            self,
+            **kwargs: str,
+        ) -> None: ...
+        def dismiss(
+            self,
+            **kwargs: str,
+        ) -> None: ...
+
+    state: _State
+    homeassistant: _HomeAssistant
+    service: _Service
+    log: _Log
+    persistent_notification: _PersistentNotification
+    hass: Any
 
 # ── Shared helpers ──────────────────────────────────
 
@@ -144,7 +213,7 @@ def sensor_threshold_switch_controller(
     #    (entity state is limited to 255 chars; attributes
     #    have no practical limit)
     key = _state_key(instance_id)
-    state_data = None
+    state_data: dict[str, Any] | None = None
     try:
         attrs = state.getattr(key)  # noqa: F821
         raw = attrs.get("data", "")

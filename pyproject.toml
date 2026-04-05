@@ -18,5 +18,15 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["pyscript/modules/"]
+files = ["pyscript/"]
+mypy_path = ["pyscript/modules"]
 cache_dir = "/tmp/mypy_cache"
+
+[[tool.mypy.overrides]]
+module = ["homeassistant.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["ha_pyscript_automations"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false

@@ -1354,7 +1354,9 @@ class TestCodeQuality(CodeQualityBase):
         "pyscript/ha_pyscript_automations.py",
         "tests/test_ha_pyscript_automations.py",
     ]
-    mypy_targets: list[str] = []
+    mypy_targets = [
+        "pyscript/ha_pyscript_automations.py",
+    ]
 
 
 class TestPyScriptCompatibility:
