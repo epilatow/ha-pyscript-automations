@@ -159,9 +159,9 @@ actions:
         {{ trigger.entity_id | default('timer', true) }}
       trigger_threshold_raw: !input trigger_threshold
       release_threshold_raw: !input release_threshold
-      sampling_window_s_raw: !input sampling_window_s
-      disable_window_s_raw: !input disable_window_s
-      auto_off_min_raw: !input auto_off_min
+      sampling_window_seconds_raw: !input sampling_window_s
+      disable_window_seconds_raw: !input disable_window_s
+      auto_off_minutes_raw: !input auto_off_min
       notification_service: !input notification_service
       notification_prefix: !input notification_prefix
       notification_suffix: !input notification_suffix

@@ -225,9 +225,9 @@ def _default_kwargs(**overrides: Any) -> dict[str, Any]:
         "trigger_entity": "timer",
         "trigger_threshold_raw": "5.0",
         "release_threshold_raw": "2.0",
-        "sampling_window_s_raw": "300",
-        "disable_window_s_raw": "10",
-        "auto_off_min_raw": "30",
+        "sampling_window_seconds_raw": "300",
+        "disable_window_seconds_raw": "10",
+        "auto_off_minutes_raw": "30",
         "notification_service": "",
         "notification_prefix": "",
         "notification_suffix": "",
@@ -538,9 +538,9 @@ class TestInputTypeConversion:
         """String window values cast to int."""
         env = _ServiceEnv()
         env.call(
-            sampling_window_s_raw="120",
-            disable_window_s_raw="5",
-            auto_off_min_raw="15",
+            sampling_window_seconds_raw="120",
+            disable_window_seconds_raw="5",
+            auto_off_minutes_raw="15",
         )
 
     def test_all_types_convert(self) -> None:
@@ -549,9 +549,9 @@ class TestInputTypeConversion:
         env.call(
             trigger_threshold_raw="10.0",
             release_threshold_raw="5.0",
-            sampling_window_s_raw="600",
-            disable_window_s_raw="0",
-            auto_off_min_raw="0",
+            sampling_window_seconds_raw="600",
+            disable_window_seconds_raw="0",
+            auto_off_minutes_raw="0",
         )
 
 
@@ -595,7 +595,7 @@ class TestMultiStepScenarios:
         env.call(
             sensor_value="60.0",
             trigger_entity="sensor.humidity",
-            sampling_window_s_raw="30",
+            sampling_window_seconds_raw="30",
         )
 
         # Spike
@@ -604,7 +604,7 @@ class TestMultiStepScenarios:
         env.call(
             sensor_value="70.0",
             trigger_entity="sensor.humidity",
-            sampling_window_s_raw="30",
+            sampling_window_seconds_raw="30",
         )
         assert len(env.mock_ha.turn_on_calls) == 1
 
@@ -615,7 +615,7 @@ class TestMultiStepScenarios:
             sensor_value="61.0",
             switch_state="on",
             trigger_entity="sensor.humidity",
-            sampling_window_s_raw="30",
+            sampling_window_seconds_raw="30",
         )
         assert len(env.mock_ha.turn_off_calls) == 1
 
@@ -629,7 +629,7 @@ class TestMultiStepScenarios:
         env.call(
             switch_state="off",
             trigger_entity="switch.test_fan",
-            auto_off_min_raw="1",
+            auto_off_minutes_raw="1",
         )
 
         # Manual on
@@ -638,20 +638,20 @@ class TestMultiStepScenarios:
         env.call(
             switch_state="on",
             trigger_entity="switch.test_fan",
-            auto_off_min_raw="1",
+            auto_off_minutes_raw="1",
         )
 
         # Timer before timeout (start rounded up to 12:01,
         # so 60s timeout fires at 12:02+)
         t += timedelta(seconds=55)  # 12:01:00
         env.set_now(t)
-        env.call(switch_state="on", auto_off_min_raw="1")
+        env.call(switch_state="on", auto_off_minutes_raw="1")
         assert len(env.mock_ha.turn_off_calls) == 0
 
         # Timer at timeout (61s past rounded-up start)
         t += timedelta(seconds=61)  # 12:02:01
         env.set_now(t)
-        env.call(switch_state="on", auto_off_min_raw="1")
+        env.call(switch_state="on", auto_off_minutes_raw="1")
         assert len(env.mock_ha.turn_off_calls) == 1
 
     def test_independent_instances(self) -> None:
