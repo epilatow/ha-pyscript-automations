@@ -16,6 +16,9 @@ devices recover.
 - Regex-based device and entity exclusion filters
 - Configurable entity domain filtering
 - Configurable check interval and staleness threshold
+- Diagnostic entity check: notifies when recommended
+  diagnostic entities (e.g., Last seen, Node status)
+  are disabled
 - Optional debug logging
 
 ## Configuration
@@ -28,7 +31,8 @@ devices recover.
 | Entity domains to monitor | Only check entities in these domains |
 | Check interval (minutes) | Minutes between watchdog evaluations |
 | Dead device threshold (minutes) | Staleness threshold for state changes |
-| Enable debug output | Log debug info to HA logs |
+| Check diagnostic entities | Notify about disabled recommended diagnostics per device |
+| Debug logging | Log debug info to HA logs |
 
 See the blueprint UI for default values.
 

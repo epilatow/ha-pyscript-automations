@@ -99,6 +99,18 @@ blueprint:
           unit_of_measurement: minutes
           mode: box
 
+    check_diagnostic_entities:
+      name: Check Diagnostic Entities
+      description: >
+        When enabled, checks whether recommended
+        diagnostic entities (e.g., Last seen, Node
+        status) are enabled for each device. Creates a
+        notification per-device if recommended entities
+        are disabled.
+      default: true
+      selector:
+        boolean: {}
+
     debug_logging:
       name: Debug Logging
       description: >
@@ -125,6 +137,7 @@ actions:
       monitored_entity_domains_raw: !input monitored_entity_domains
       check_interval_minutes_raw: !input check_interval_minutes
       dead_device_threshold_minutes_raw: !input dead_device_threshold_minutes
+      check_diagnostic_entities_raw: !input check_diagnostic_entities
       debug_logging_raw: !input debug_logging
 
 # Triggers every minute but most invocations exit

@@ -529,6 +529,7 @@ def device_watchdog(
     monitored_entity_domains_raw: object,
     check_interval_minutes_raw: str,
     dead_device_threshold_minutes_raw: str,
+    check_diagnostic_entities_raw: str,
     debug_logging_raw: str,
     trigger_platform_raw: str,
 ) -> None:
@@ -542,7 +543,9 @@ def device_watchdog(
         Config,
         DeviceInfo,
         EntityInfo,
+        RegistryEntry,
         evaluate_devices,
+        evaluate_diagnostics,
         should_run,
     )
 
@@ -593,6 +596,9 @@ def device_watchdog(
         f" got {dead_device_threshold_minutes}"
     )
     dead_threshold_seconds = dead_device_threshold_minutes * 60
+    check_diagnostics = _parse_bool(
+        check_diagnostic_entities_raw,
+    )
     debug_logging = _parse_bool(debug_logging_raw)
 
     device_exclude_regex = str(
@@ -630,9 +636,12 @@ def device_watchdog(
     )
 
     # Discover devices and their entities from
-    #    monitored integrations. Only entities belonging
-    #    to configured integrations are checked — we do
-    #    not re-query the device registry for all entities.
+    # monitored integrations.
+    if check_diagnostics:
+        import homeassistant.helpers.entity_registry as er  # noqa: F821
+
+        ent_reg = er.async_get(hass)  # noqa: F821
+
     device_map: dict[str, dict[str, Any]] = {}
     for integration_id in monitored_integrations:
         try:
@@ -657,14 +666,42 @@ def device_watchdog(
                 device_map[dev_id] = {
                     "name": info["name"],
                     "entity_ids": [],
+                    "integrations": set(),
                 }
             device_map[dev_id]["entity_ids"].append(
                 entity_id,
             )
+            device_map[dev_id]["integrations"].add(integration_id)
 
-    # Read entity state and build DeviceInfo list
+    # Build DeviceInfo with state + registry data
     devices = []
     for dev_id, dev_info in device_map.items():
+        # Build registry entries if diagnostic check
+        # is enabled (requires entity registry access)
+        registry_entries: list[RegistryEntry] = []
+        if check_diagnostics:
+            all_reg_entries = er.async_entries_for_device(
+                ent_reg,
+                dev_id,
+                include_disabled_entities=True,
+            )
+            registry_entries = [
+                RegistryEntry(
+                    entity_id=e.entity_id,
+                    original_name=(e.original_name or ""),
+                    platform=e.platform or "",
+                    entity_category=(
+                        str(e.entity_category.value)
+                        if e.entity_category
+                        else None
+                    ),
+                    disabled=(e.disabled_by is not None),
+                )
+                for e in all_reg_entries
+                if e.platform in dev_info["integrations"]
+            ]
+
+        # Read state for enabled entities
         entity_infos = []
         for eid in dev_info["entity_ids"]:
             try:
@@ -686,15 +723,25 @@ def device_watchdog(
                 device_id=dev_id,
                 device_name=dev_info["name"],
                 device_url=url,
+                integrations=list(
+                    dev_info["integrations"],
+                ),
                 entities=entity_infos,
+                registry_entries=registry_entries,
             ),
         )
 
-    # Evaluate
+    # Evaluate health
     results = evaluate_devices(config, devices, now)
 
-    # Process notifications
+    # Check for disabled diagnostic entities
+    diag_notifications = []
+    if check_diagnostics:
+        diag_notifications = evaluate_diagnostics(devices)
+
+    # Process all notifications
     notifications = [r.to_notification() for r in results]
+    notifications += diag_notifications
     _process_persistent_notifications(notifications)
 
     # Write debug attributes

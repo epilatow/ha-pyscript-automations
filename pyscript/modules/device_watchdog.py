@@ -35,13 +35,30 @@ class EntityInfo:
 
 
 @dataclass
+class RegistryEntry:
+    """Minimal entity registry entry for diagnostics."""
+
+    entity_id: str
+    original_name: str
+    platform: str
+    entity_category: str | None
+    disabled: bool
+
+
+@dataclass
 class DeviceInfo:
     """Device with its entity snapshots."""
 
     device_id: str
     device_name: str
     device_url: str
+    integrations: list[str] = field(
+        default_factory=list,
+    )
     entities: list[EntityInfo] = field(
+        default_factory=list,
+    )
+    registry_entries: list[RegistryEntry] = field(
         default_factory=list,
     )
 
@@ -70,6 +87,109 @@ class DeviceResult:
             title=self.notification_title,
             message=self.notification_message,
         )
+
+
+# Recommended diagnostic entities per integration.
+# Matched via original_name on entity_category=diagnostic
+# entries. If an entity with the name exists but is
+# disabled, the user is notified. If it doesn't exist
+# at all, it's silently skipped (device doesn't support
+# it).
+RECOMMENDED_DIAGNOSTICS: dict[str, list[str]] = {
+    "zwave_js": ["Last seen", "Node status"],
+    "bthome": ["Signal strength"],
+    "shelly": ["RSSI"],
+}
+
+
+def check_disabled_diagnostics(
+    integration: str,
+    entries: list[RegistryEntry],
+) -> list[str]:
+    """Check for disabled recommended diagnostic entities.
+
+    Returns list of original_name values for entities
+    that exist but are disabled. Entities that don't
+    exist at all are silently skipped.
+    """
+    recommended = RECOMMENDED_DIAGNOSTICS.get(
+        integration,
+        [],
+    )
+    if not recommended:
+        return []
+
+    # Filter to diagnostic entities for this integration
+    diag_entries = [
+        e
+        for e in entries
+        if e.platform == integration and e.entity_category == "diagnostic"
+    ]
+
+    disabled: list[str] = []
+    for name in recommended:
+        for entry in diag_entries:
+            if entry.original_name == name:
+                if entry.disabled:
+                    disabled.append(name)
+                break
+    return disabled
+
+
+def evaluate_diagnostics(
+    devices: list[DeviceInfo],
+) -> list[PersistentNotification]:
+    """Check all devices for disabled diagnostics.
+
+    Uses device.integrations and device.registry_entries
+    to find disabled recommended diagnostic entities.
+
+    Skips devices with no integrations in
+    RECOMMENDED_DIAGNOSTICS. Returns a
+    PersistentNotification per device that has at least
+    one relevant integration.
+    """
+    results: list[PersistentNotification] = []
+    for device in devices:
+        has_recommendations = [
+            i for i in device.integrations if i in RECOMMENDED_DIAGNOSTICS
+        ]
+        if not has_recommendations:
+            continue
+        disabled: list[str] = []
+        for integration in device.integrations:
+            disabled += check_disabled_diagnostics(
+                integration,
+                device.registry_entries,
+            )
+        notification_id = "dw_diag_" + device.device_id
+        if disabled:
+            entity_list = "\n- ".join(disabled)
+            message = (
+                "Recommended diagnostic entities"
+                " are disabled:\n\n- " + entity_list + "\n\nEnable in"
+                " [Settings > Devices]("
+                + device.device_url
+                + ") for better health monitoring."
+            )
+            results.append(
+                PersistentNotification(
+                    active=True,
+                    notification_id=notification_id,
+                    title=(device.device_name + ": Disabled Diagnostics"),
+                    message=message,
+                ),
+            )
+        else:
+            results.append(
+                PersistentNotification(
+                    active=False,
+                    notification_id=notification_id,
+                    title="",
+                    message="",
+                ),
+            )
+    return results
 
 
 def should_run(

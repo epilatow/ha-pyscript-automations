@@ -22,13 +22,19 @@ from device_watchdog import (  # noqa: E402
     Config,
     DeviceInfo,
     EntityInfo,
+    RegistryEntry,
     _build_notification_message,
     _check_staleness,
     _evaluate_device,
     _filter_entities,
     _matches_pattern,
+    check_disabled_diagnostics,
     evaluate_devices,
+    evaluate_diagnostics,
     should_run,
+)
+from notification_helpers import (  # noqa: E402
+    PersistentNotification,
 )
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
@@ -519,6 +525,251 @@ class TestEvaluateDevices:
         ]
         results = evaluate_devices(cfg, devices, T0)
         assert all(r.has_issue for r in results)
+
+
+def _reg_entry(
+    entity_id: str = "sensor.test",
+    original_name: str = "Test",
+    platform: str = "zwave_js",
+    entity_category: str | None = "diagnostic",
+    disabled: bool = False,
+) -> RegistryEntry:
+    return RegistryEntry(
+        entity_id=entity_id,
+        original_name=original_name,
+        platform=platform,
+        entity_category=entity_category,
+        disabled=disabled,
+    )
+
+
+class TestCheckDisabledDiagnostics:
+    def test_disabled_entity_flagged(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Last seen",
+                disabled=True,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == ["Last seen"]
+
+    def test_enabled_entity_not_flagged(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Last seen",
+                disabled=False,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == []
+
+    def test_missing_entity_skipped(self) -> None:
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            [],
+        )
+        assert result == []
+
+    def test_non_diagnostic_ignored(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Last seen",
+                entity_category=None,
+                disabled=True,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == []
+
+    def test_wrong_platform_ignored(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Last seen",
+                platform="matter",
+                disabled=True,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == []
+
+    def test_unknown_integration_returns_empty(
+        self,
+    ) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Last seen",
+                platform="unknown",
+                disabled=True,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "unknown",
+            entries,
+        )
+        assert result == []
+
+    def test_multiple_disabled(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Last seen",
+                disabled=True,
+            ),
+            _reg_entry(
+                original_name="Node status",
+                disabled=True,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == ["Last seen", "Node status"]
+
+    def test_partial_disabled(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Last seen",
+                disabled=False,
+            ),
+            _reg_entry(
+                original_name="Node status",
+                disabled=True,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == ["Node status"]
+
+
+class TestEvaluateDiagnostics:
+    def test_device_with_disabled_generates_active(
+        self,
+    ) -> None:
+        device = DeviceInfo(
+            device_id="dev1",
+            device_name="Front Door Lock",
+            device_url="/config/devices/device/dev1",
+            integrations=["zwave_js"],
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics([device])
+        assert len(results) == 1
+        assert results[0].active is True
+        assert "Last seen" in results[0].message
+        assert "Front Door Lock" in results[0].title
+
+    def test_device_all_enabled_dismisses(
+        self,
+    ) -> None:
+        device = DeviceInfo(
+            device_id="dev1",
+            device_name="Lock",
+            device_url="/config/devices/device/dev1",
+            integrations=["zwave_js"],
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=False,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics([device])
+        assert len(results) == 1
+        assert results[0].active is False
+
+    def test_notification_id_uses_device_id(
+        self,
+    ) -> None:
+        device = DeviceInfo(
+            device_id="abc123",
+            device_name="Lock",
+            device_url="/config/devices/device/abc123",
+            integrations=["zwave_js"],
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics([device])
+        assert results[0].notification_id == ("dw_diag_abc123")
+
+    def test_returns_persistent_notification(
+        self,
+    ) -> None:
+        device = DeviceInfo(
+            device_id="dev1",
+            device_name="Lock",
+            device_url="/config/devices/device/dev1",
+            integrations=["zwave_js"],
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics([device])
+        assert isinstance(
+            results[0],
+            PersistentNotification,
+        )
+
+    def test_skips_device_with_no_known_diagnostics(
+        self,
+    ) -> None:
+        device = DeviceInfo(
+            device_id="dev1",
+            device_name="Lock",
+            device_url="/config/devices/device/dev1",
+            integrations=["unknown_integration"],
+            registry_entries=[],
+        )
+        results = evaluate_diagnostics([device])
+        assert results == []
+
+    def test_mixed_known_and_unknown_integrations(
+        self,
+    ) -> None:
+        device = DeviceInfo(
+            device_id="dev1",
+            device_name="Lock",
+            device_url="/config/devices/device/dev1",
+            integrations=[
+                "unknown_integration",
+                "zwave_js",
+            ],
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics([device])
+        assert len(results) == 1
+        assert results[0].active is True
 
 
 class TestCodeQuality(CodeQualityBase):

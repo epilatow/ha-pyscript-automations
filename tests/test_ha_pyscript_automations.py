@@ -23,6 +23,7 @@ import ast
 import json
 import re
 import sys
+import types
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1049,6 +1050,7 @@ class _WatchdogEnv:
         self._integration_entities: dict[str, list[str]] = {}
         self._device_for_entity: dict[str, dict[str, str] | None] = {}
         self._entity_states: dict[str, tuple[str, datetime]] = {}
+        self._registry_entries: dict[str, list[Any]] = {}
 
         # Wire mock helpers into the namespace
         self._ns["_get_integration_entities"] = (
@@ -1090,6 +1092,80 @@ class _WatchdogEnv:
     def remove_hass(self) -> None:
         """Remove hass from namespace to simulate missing."""
         del self._ns["hass"]
+
+    def setup_registry_entry(
+        self,
+        device_id: str,
+        entity_id: str,
+        original_name: str,
+        platform: str,
+        entity_category: str | None = None,
+        disabled_by: str | None = None,
+    ) -> None:
+        """Add a mock entity registry entry for a device."""
+        cat = None
+        if entity_category is not None:
+            cat = types.SimpleNamespace(
+                value=entity_category,
+            )
+        entry = types.SimpleNamespace(
+            entity_id=entity_id,
+            original_name=original_name,
+            platform=platform,
+            entity_category=cat,
+            disabled_by=disabled_by,
+        )
+        self._registry_entries.setdefault(
+            device_id,
+            [],
+        ).append(entry)
+
+    def _install_entity_registry_mock(
+        self,
+    ) -> None:
+        """Inject mock homeassistant.helpers.entity_registry.
+
+        Call cleanup_entity_registry_mock() after the test
+        to remove injected sys.modules entries.
+        """
+        registry_entries = self._registry_entries
+        _ER_MODULES = [
+            "homeassistant",
+            "homeassistant.helpers",
+            "homeassistant.helpers.entity_registry",
+        ]
+        self._er_saved: dict[str, Any] = {
+            k: sys.modules.get(k) for k in _ER_MODULES
+        }
+
+        def async_get(_hass: Any) -> str:
+            return "mock_ent_reg"
+
+        def async_entries_for_device(
+            _ent_reg: Any,
+            device_id: str,
+            include_disabled_entities: bool = False,
+        ) -> list[Any]:
+            return registry_entries.get(device_id, [])
+
+        mock_er = types.ModuleType(
+            "homeassistant.helpers.entity_registry",
+        )
+        mock_er.async_get = async_get  # type: ignore[attr-defined]
+        mock_er.async_entries_for_device = async_entries_for_device  # type: ignore[attr-defined]
+        sys.modules["homeassistant"] = types.ModuleType("homeassistant")
+        sys.modules["homeassistant.helpers"] = types.ModuleType(
+            "homeassistant.helpers",
+        )
+        sys.modules["homeassistant.helpers.entity_registry"] = mock_er
+
+    def cleanup_entity_registry_mock(self) -> None:
+        """Remove injected sys.modules entries."""
+        for k, v in self._er_saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
 
     def setup_device(
         self,
@@ -1137,6 +1213,7 @@ def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
         "monitored_entity_domains_raw": [],
         "check_interval_minutes_raw": "1",
         "dead_device_threshold_minutes_raw": "1440",
+        "check_diagnostic_entities_raw": "false",
         "debug_logging_raw": "false",
         "trigger_platform_raw": "time_pattern",
     }
@@ -1508,6 +1585,109 @@ class TestDeviceWatchdogNotifications:
             if "config_error" not in c["notification_id"]
         ]
         assert len(device_dismissals) == 1
+
+
+class TestDeviceWatchdogDiagnostics:
+    """Integration tests for diagnostic entity checking."""
+
+    def test_disabled_diagnostic_creates_notification(
+        self,
+    ) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Front Lock",
+            {"sensor.a": ("ok", T0_UTC)},
+        )
+        env.setup_registry_entry(
+            device_id="dev1",
+            entity_id="sensor.last_seen",
+            original_name="Last seen",
+            platform="zwave_js",
+            entity_category="diagnostic",
+            disabled_by="user",
+        )
+        env._install_entity_registry_mock()
+        try:
+            env.call(
+                check_diagnostic_entities_raw="true",
+            )
+            diag_creates = [
+                c
+                for c in env.mock_pn.create_calls
+                if c["notification_id"].startswith(
+                    "dw_diag_",
+                )
+            ]
+            assert len(diag_creates) == 1
+            assert "Last seen" in diag_creates[0]["message"]
+            assert "Front Lock" in diag_creates[0]["title"]
+        finally:
+            env.cleanup_entity_registry_mock()
+
+    def test_enabled_diagnostic_dismisses(
+        self,
+    ) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Lock",
+            {"sensor.a": ("ok", T0_UTC)},
+        )
+        env.setup_registry_entry(
+            device_id="dev1",
+            entity_id="sensor.last_seen",
+            original_name="Last seen",
+            platform="zwave_js",
+            entity_category="diagnostic",
+        )
+        env._install_entity_registry_mock()
+        try:
+            env.call(
+                check_diagnostic_entities_raw="true",
+            )
+            diag_creates = [
+                c
+                for c in env.mock_pn.create_calls
+                if c["notification_id"].startswith(
+                    "dw_diag_",
+                )
+            ]
+            diag_dismissals = [
+                c
+                for c in env.mock_pn.dismiss_calls
+                if c["notification_id"].startswith(
+                    "dw_diag_",
+                )
+            ]
+            assert diag_creates == []
+            assert len(diag_dismissals) == 1
+        finally:
+            env.cleanup_entity_registry_mock()
+
+    def test_diagnostics_disabled_no_registry_calls(
+        self,
+    ) -> None:
+        """When check_diagnostic_entities is false, no
+        diagnostic notifications are produced."""
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Lock",
+            {"sensor.a": ("ok", T0_UTC)},
+        )
+        env.call(
+            check_diagnostic_entities_raw="false",
+        )
+        diag_notifs = [
+            c
+            for c in (env.mock_pn.create_calls + env.mock_pn.dismiss_calls)
+            if c["notification_id"].startswith("dw_diag_")
+        ]
+        assert diag_notifs == []
 
 
 class TestDeviceWatchdogDebugAttrs:
