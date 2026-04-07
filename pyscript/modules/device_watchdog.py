@@ -1,7 +1,7 @@
 # This is AI generated code
-"""Pure business logic for device health watchdog.
+"""Business logic for device health watchdog.
 
-No PyScript or Home Assistant dependencies.
+No PyScript runtime dependencies.
 
 Monitors device health across integrations by checking for
 unavailable entities and stale state (no state change within
@@ -272,7 +272,7 @@ def evaluate_devices(
 ) -> list[DeviceResult]:
     """Evaluate health of all devices.
 
-    Main entry point for the pure logic module.
+    Main entry point for the logic module.
 
     The service wrapper triggers every minute via a time
     pattern.  An interval gate checks whether enough time

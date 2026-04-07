@@ -1,7 +1,7 @@
 # This is AI generated code
-"""Pure business logic for sensor-threshold-based switch control.
+"""Business logic for sensor-threshold-based switch control.
 
-No PyScript or Home Assistant dependencies.
+No PyScript runtime dependencies.
 
 Controls a switch based on sensor value spikes (e.g., humidity),
 with manual override protection, auto-off, and notifications.
@@ -590,7 +590,7 @@ def handle_service_call(
     notification_service: str,
     **kwargs: Any,
 ) -> ServiceResult:
-    """Pure bridge entry point called by ha_pyscript_automations.py.
+    """Bridge entry point called by ha_pyscript_automations.py.
 
     Accepts pre-loaded data (no HA dependencies) and
     returns a ``ServiceResult`` describing what the caller
@@ -634,7 +634,7 @@ def handle_service_call(
             kwargs.get("sensor_value", ""),
         )
 
-    # Evaluate (pure logic)
+    # Evaluate
     result = evaluate(
         current_time=current_time,
         switch_name=switch_name,

@@ -1,7 +1,7 @@
 # This is AI generated code
 """PyScript service wrappers.
 
-Thin layer bridging Home Assistant and pure logic modules.
+Thin layer bridging Home Assistant and logic modules.
 All business logic lives in modules/ and is tested
 separately.
 
@@ -434,7 +434,7 @@ def sensor_threshold_switch_controller(
     except Exception:
         pass
 
-    # Evaluate (pure logic)
+    # Evaluate
     result = handle_service_call(
         state_data=state_data,
         switch_name=switch_name,
@@ -667,7 +667,7 @@ def device_watchdog(
             ),
         )
 
-    # Evaluate (pure logic)
+    # Evaluate
     results = evaluate_devices(config, devices, now)
 
     # Create/dismiss notifications
@@ -830,7 +830,7 @@ def trigger_entity_controller(
     if event_type is None:
         return
 
-    # Read current entity states for the pure logic
+    # Read current entity states for evaluation
     triggers_on = False
     for eid in trigger_entities:
         if state.get(eid) == "on":  # noqa: F821

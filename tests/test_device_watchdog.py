@@ -4,7 +4,7 @@
 # dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
-"""Tests for device_watchdog pure logic module."""
+"""Tests for device_watchdog module."""
 
 import sys
 from datetime import datetime, timedelta

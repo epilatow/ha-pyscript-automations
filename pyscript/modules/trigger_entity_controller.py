@@ -1,7 +1,7 @@
 # This is AI generated code
-"""Pure business logic for triggered entity controller.
+"""Business logic for trigger entity controller.
 
-No PyScript or Home Assistant dependencies.
+No PyScript runtime dependencies.
 
 Controls entities with optional trigger-based activation
 and auto-off timer.  Supports time-of-day restrictions,
@@ -468,7 +468,7 @@ def _handle_timer(
 def evaluate(config: Config, inputs: Inputs) -> Result:
     """Evaluate a single event and return the action.
 
-    Main entry point for the pure logic module.
+    Main entry point for the logic module.
 
     The service wrapper calls this on each event:
     1. Validates entities exist (wrapper, before this)

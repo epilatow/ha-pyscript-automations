@@ -2,8 +2,8 @@
 
 Home Assistant automations built as native HA blueprints that call
 [PyScript](https://github.com/custom-components/pyscript) actions.
-All business logic lives in pure Python modules with zero HA
-dependencies, making it fully testable with pytest.
+All business logic lives in Python modules with no PyScript
+runtime dependencies, making it fully testable with pytest.
 
 ## Automations
 

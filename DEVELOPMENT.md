@@ -8,13 +8,17 @@ All automations follow a three-layer architecture:
    triggers and user-configurable inputs. Calls a pyscript
    service. Contains no logic.
 2. **Service wrapper** (`pyscript/ha_pyscript_automations.py`)
-   — thin bridge between HA and pure logic. Parses inputs,
-   loads/saves state, calls the pure logic module, and
-   executes the returned action. No business logic.
-3. **Pure logic module** (`pyscript/modules/name.py`) — zero
-   PyScript/HA dependencies. Receives `current_time` as an
-   input (never calls `datetime.now()`). Fully testable with
-   pytest.
+   — runs under PyScript's AST evaluator. Has access to
+   PyScript-injected globals (`state`, `hass`,
+   `homeassistant`, `service`, `log`, etc.). Parses inputs,
+   loads/saves state, calls the logic module, and executes
+   the returned action. No business logic.
+3. **Logic module** (`pyscript/modules/name.py`) — runs
+   under standard Python import. Testable with pytest. No
+   PyScript runtime dependencies (cannot call `state.get()`,
+   `homeassistant.turn_on()`, etc.). May reference HA
+   concepts (entity IDs, integration names, device classes)
+   as data.
 
 **Execution model**: purely reactive. No sleeping, no
 waiting, no scheduling. Trigger fires, logic evaluates,
@@ -131,7 +135,7 @@ selection. Also validate domains at runtime via
 
 All code has type annotations and mypy strict enforcement:
 
-- **Pure logic modules** (`pyscript/modules/*.py`) — fully
+- **Logic modules** (`pyscript/modules/*.py`) — fully
   typed, checked by mypy strict.
 - **Service wrapper** (`pyscript/ha_pyscript_automations.py`)
   — fully typed, with `TYPE_CHECKING` stubs for
@@ -168,7 +172,7 @@ Entity Controller).
 
 Use friendly names (not raw entity IDs) in all user-facing
 notification messages. The service wrapper resolves friendly
-names via `state.getattr()` and passes them to the pure
+names via `state.getattr()` and passes them to the
 logic module.
 
 ## Implementation Details in Code
@@ -198,7 +202,7 @@ restrictions. These are enforced via the
 - No `print()` (use `log.warning()`)
 - No `match`/`case`
 
-Pure logic modules (`pyscript/modules/*.py`) run under
+Logic modules (`pyscript/modules/*.py`) run under
 standard Python import and do not have these restrictions.
 
 ## Testing

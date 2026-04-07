@@ -1,7 +1,7 @@
 # This is AI generated code
 """Shared notification formatting helpers.
 
-No PyScript or Home Assistant dependencies.
+No PyScript runtime dependencies.
 
 Provides timestamp token substitution and
 prefix/suffix wrapping for notification messages.
