@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from notification_helpers import PersistentNotification  # noqa: F821
+from helpers import PersistentNotification, on_interval  # noqa: F821
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -546,7 +546,6 @@ def device_watchdog(
         RegistryEntry,
         evaluate_devices,
         evaluate_diagnostics,
-        should_run,
     )
 
     now = datetime.now(tz=UTC)
@@ -578,7 +577,7 @@ def device_watchdog(
         f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
     )
     if str(trigger_platform_raw) == "time_pattern":
-        if not should_run(check_interval_minutes, now):
+        if not on_interval(check_interval_minutes, now):
             return
 
     # Parse config

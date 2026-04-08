@@ -4,7 +4,7 @@
 # dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
-"""Tests for notification_helpers module."""
+"""Tests for helpers module."""
 
 import sys
 from datetime import datetime
@@ -12,14 +12,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
-_SCRIPT_PATH = REPO_ROOT / "pyscript" / "modules" / "notification_helpers.py"
+_SCRIPT_PATH = REPO_ROOT / "pyscript" / "modules" / "helpers.py"
 
 sys.path.insert(0, str(_SCRIPT_PATH.parent))
 
 from conftest import CodeQualityBase  # noqa: E402
-from notification_helpers import (  # noqa: E402
+from helpers import (  # noqa: E402
     format_notification,
     format_timestamp,
+    matches_pattern,
+    on_interval,
 )
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
@@ -76,13 +78,58 @@ class TestFormatNotification:
         assert result == "2024-01-02 msg 03:04:05"
 
 
+class TestShouldRun:
+    def test_runs_on_interval_boundary(self) -> None:
+        t = datetime(2024, 1, 15, 12, 0, 0)
+        assert on_interval(60, t) is True
+
+    def test_skips_off_interval(self) -> None:
+        t = datetime(2024, 1, 15, 12, 1, 0)
+        assert on_interval(60, t) is False
+
+    def test_interval_one_always_runs(self) -> None:
+        t = datetime(2024, 1, 15, 12, 37, 0)
+        assert on_interval(1, t) is True
+
+    def test_interval_zero_always_runs(self) -> None:
+        t = datetime(2024, 1, 15, 12, 37, 0)
+        assert on_interval(0, t) is True
+
+    def test_negative_interval_always_runs(self) -> None:
+        t = datetime(2024, 1, 15, 12, 37, 0)
+        assert on_interval(-5, t) is True
+
+
+class TestMatchesPattern:
+    def test_empty_pattern_no_match(self) -> None:
+        assert matches_pattern("anything", "") is False
+
+    def test_simple_match(self) -> None:
+        assert matches_pattern("sensor.temp", "temp")
+
+    def test_case_insensitive(self) -> None:
+        assert matches_pattern("Sensor.Temp", "sensor")
+
+    def test_regex_pattern(self) -> None:
+        assert matches_pattern(
+            "sensor.outdoor_temp",
+            r"outdoor.*temp",
+        )
+
+    def test_no_match(self) -> None:
+        assert not matches_pattern("sensor.temp", "humid")
+
+    def test_invalid_regex_no_crash(self) -> None:
+        assert not matches_pattern("test", "[invalid")
+
+
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/modules/notification_helpers.py",
-        "tests/test_notification_helpers.py",
+        "pyscript/modules/helpers.py",
+        "tests/test_helpers.py",
     ]
     mypy_targets = [
-        "pyscript/modules/notification_helpers.py",
+        "pyscript/modules/helpers.py",
     ]
 
 

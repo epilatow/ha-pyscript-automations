@@ -27,13 +27,11 @@ from device_watchdog import (  # noqa: E402
     _check_staleness,
     _evaluate_device,
     _filter_entities,
-    _matches_pattern,
     check_disabled_diagnostics,
     evaluate_devices,
     evaluate_diagnostics,
-    should_run,
 )
-from notification_helpers import (  # noqa: E402
+from helpers import (  # noqa: E402
     PersistentNotification,
 )
 
@@ -80,52 +78,6 @@ def _device(
 
 
 # ── Tests ───────────────────────────────────────────
-
-
-class TestShouldRun:
-    def test_runs_on_interval_boundary(self) -> None:
-        # 12:00 is minute 0 from epoch; 60 divides evenly
-        t = datetime(2024, 1, 15, 12, 0, 0)
-        assert should_run(60, t) is True
-
-    def test_skips_off_interval(self) -> None:
-        t = datetime(2024, 1, 15, 12, 1, 0)
-        assert should_run(60, t) is False
-
-    def test_interval_one_always_runs(self) -> None:
-        t = datetime(2024, 1, 15, 12, 37, 0)
-        assert should_run(1, t) is True
-
-    def test_interval_zero_always_runs(self) -> None:
-        t = datetime(2024, 1, 15, 12, 37, 0)
-        assert should_run(0, t) is True
-
-    def test_negative_interval_always_runs(self) -> None:
-        t = datetime(2024, 1, 15, 12, 37, 0)
-        assert should_run(-5, t) is True
-
-
-class TestMatchesPattern:
-    def test_empty_pattern_no_match(self) -> None:
-        assert _matches_pattern("anything", "") is False
-
-    def test_simple_match(self) -> None:
-        assert _matches_pattern("sensor.temp", "temp")
-
-    def test_case_insensitive(self) -> None:
-        assert _matches_pattern("Sensor.Temp", "sensor")
-
-    def test_regex_pattern(self) -> None:
-        assert _matches_pattern(
-            "sensor.outdoor_temp",
-            r"outdoor.*temp",
-        )
-
-    def test_no_match(self) -> None:
-        assert not _matches_pattern("sensor.temp", "humid")
-
-    def test_invalid_regex_no_crash(self) -> None:
-        assert not _matches_pattern("test", "[invalid")
 
 
 class TestFilterEntities:

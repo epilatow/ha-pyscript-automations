@@ -8,11 +8,13 @@ unavailable entities and stale state (no state change within
 a configurable threshold).
 """
 
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from notification_helpers import PersistentNotification
+from helpers import (
+    PersistentNotification,
+    matches_pattern,
+)
 
 
 @dataclass
@@ -192,41 +194,6 @@ def evaluate_diagnostics(
     return results
 
 
-def should_run(
-    check_interval_minutes: int,
-    current_time: datetime,
-) -> bool:
-    """Return True if this tick should run evaluation.
-
-    Uses modulo arithmetic on the minute-of-epoch to gate
-    execution to every N minutes without persistent state.
-    """
-    if check_interval_minutes <= 0:
-        return True
-    minutes_since_epoch = int(
-        current_time.timestamp() // 60,
-    )
-    return (minutes_since_epoch % check_interval_minutes) == 0
-
-
-def _matches_pattern(
-    text: str,
-    pattern: str,
-) -> bool:
-    """Return True if text matches regex pattern.
-
-    Returns False if pattern is empty or invalid.
-    """
-    if not pattern:
-        return False
-    try:
-        return bool(
-            re.search(pattern, text, re.IGNORECASE),
-        )
-    except re.error:
-        return False
-
-
 def _filter_entities(
     config: Config,
     entities: list[EntityInfo],
@@ -249,7 +216,7 @@ def _filter_entities(
             filtered_out.append(entity)
             continue
 
-        if _matches_pattern(
+        if matches_pattern(
             eid,
             config.entity_exclude_regex,
         ):
@@ -348,7 +315,7 @@ def _evaluate_device(
         device.entities,
     )
 
-    if _matches_pattern(
+    if matches_pattern(
         device.device_name,
         config.device_exclude_regex,
     ):

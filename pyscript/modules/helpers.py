@@ -1,12 +1,13 @@
 # This is AI generated code
-"""Shared notification formatting helpers.
+"""Shared helpers for automation logic modules.
 
 No PyScript runtime dependencies.
 
-Provides timestamp token substitution and
-prefix/suffix wrapping for notification messages.
+Provides persistent notification dataclass, timestamp
+token formatting, interval gating, and regex matching.
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -60,3 +61,38 @@ def format_notification(
         current_time,
     )
     return f"{formatted_prefix}{text}{formatted_suffix}"
+
+
+def on_interval(
+    check_interval_minutes: int,
+    current_time: datetime,
+) -> bool:
+    """Return True if this tick should run evaluation.
+
+    Uses modulo arithmetic on the minute-of-epoch to gate
+    execution to every N minutes without persistent state.
+    """
+    if check_interval_minutes <= 0:
+        return True
+    minutes_since_epoch = int(
+        current_time.timestamp() // 60,
+    )
+    return (minutes_since_epoch % check_interval_minutes) == 0
+
+
+def matches_pattern(
+    text: str,
+    pattern: str,
+) -> bool:
+    """Return True if text matches regex pattern.
+
+    Returns False if pattern is empty or invalid.
+    """
+    if not pattern:
+        return False
+    try:
+        return bool(
+            re.search(pattern, text, re.IGNORECASE),
+        )
+    except re.error:
+        return False
