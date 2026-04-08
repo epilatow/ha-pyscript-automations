@@ -507,6 +507,7 @@ def device_watchdog(
     check_interval_minutes_raw: str,
     dead_device_threshold_minutes_raw: str,
     debug_logging_raw: str,
+    trigger_platform_raw: str,
 ) -> None:
     """Evaluate device health across integrations.
 
@@ -543,15 +544,16 @@ def device_watchdog(
         )
         return
 
-    # Interval gating
+    # Interval gating (skip for manual runs from UI)
     check_interval_minutes = int(
         check_interval_minutes_raw,
     )
     assert check_interval_minutes >= 1, (
         f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
     )
-    if not should_run(check_interval_minutes, now):
-        return
+    if str(trigger_platform_raw) == "time_pattern":
+        if not should_run(check_interval_minutes, now):
+            return
 
     # Parse config
     monitored_integrations = _normalize_list(

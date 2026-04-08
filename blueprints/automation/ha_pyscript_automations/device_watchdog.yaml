@@ -118,6 +118,7 @@ actions:
   - action: pyscript.device_watchdog
     data:
       instance_id: "{{ this.entity_id }}"
+      trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"
       monitored_integrations_raw: !input monitored_integrations
       device_exclude_regex_raw: !input device_exclude_regex
       entity_exclude_regex_raw: !input entity_exclude_regex

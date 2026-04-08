@@ -1138,6 +1138,7 @@ def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
         "check_interval_minutes_raw": "1",
         "dead_device_threshold_minutes_raw": "1440",
         "debug_logging_raw": "false",
+        "trigger_platform_raw": "time_pattern",
     }
     defaults.update(overrides)
     return defaults
@@ -1304,6 +1305,35 @@ class TestDeviceWatchdogIntervalGating:
         env.call(check_interval_minutes_raw="60")
         key = "pyscript.auto_dw_test_state"
         assert env.mock_state.get(key) is None
+
+    def test_manual_trigger_bypasses_interval_gate(
+        self,
+    ) -> None:
+        """Manual UI run should always evaluate."""
+        env = _WatchdogEnv(
+            current_time=datetime(
+                2024,
+                1,
+                15,
+                12,
+                1,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call(
+            check_interval_minutes_raw="60",
+            trigger_platform_raw="manual",
+        )
+        # Should have created a notification despite
+        # being off the interval boundary
+        assert len(env.mock_pn.create_calls) == 1
 
 
 class TestDeviceWatchdogDiscovery:
