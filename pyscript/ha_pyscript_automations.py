@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from notification_helpers import PersistentNotification  # noqa: F821
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -111,6 +113,23 @@ def _save_state(
             key + "." + name,
             value,
         )
+
+
+def _process_persistent_notifications(
+    notifications: "list[PersistentNotification]",
+) -> None:
+    """Create or dismiss persistent notifications."""
+    for n in notifications:
+        if n.active:
+            persistent_notification.create(  # noqa: F821
+                title=n.title,
+                message=n.message,
+                notification_id=n.notification_id,
+            )
+        else:
+            persistent_notification.dismiss(  # noqa: F821
+                notification_id=n.notification_id,
+            )
 
 
 def _parse_bool(value: object) -> bool:
@@ -304,7 +323,7 @@ def _validate_entities(
     return errors
 
 
-def _update_persistent_error_notifications(
+def _manage_config_error_persistent_notification(
     errors: list[str],
     instance_id: str,
     service_label: str,
@@ -317,23 +336,27 @@ def _update_persistent_error_notifications(
     safe_id = instance_id.replace(".", "_")
     prefix = service_label.lower().replace(" ", "_")
     notif_id = prefix + "_config_error_" + safe_id
+    name = _automation_name(instance_id)
 
+    message = ""
     if errors:
-        name = _automation_name(instance_id)
-        persistent_notification.create(  # noqa: F821
-            title=(name + ": Invalid Configuration"),
-            message=(
-                "Configuration errors:\n\n- "
-                + "\n- ".join(errors)
-                + "\n\nPlease fix the automation"
-                " configuration."
+        message = (
+            "Configuration errors:\n\n- "
+            + "\n- ".join(errors)
+            + "\n\nPlease fix the"
+            " automation configuration."
+        )
+
+    _process_persistent_notifications(
+        [
+            PersistentNotification(
+                active=bool(errors),
+                notification_id=notif_id,
+                title=(name + ": Invalid Configuration"),
+                message=message,
             ),
-            notification_id=notif_id,
-        )
-    else:
-        persistent_notification.dismiss(  # noqa: F821
-            notification_id=notif_id,
-        )
+        ],
+    )
 
 
 # ── Sensor Threshold Switch Controller ──────────────
@@ -395,7 +418,7 @@ def sensor_threshold_switch_controller(
         [target_switch_entity],
         EntityType.CONTROLLABLE,
     )
-    _update_persistent_error_notifications(
+    _manage_config_error_persistent_notification(
         errors,
         instance_id,
         "Sensor Threshold Switch Controller",
@@ -531,16 +554,16 @@ def device_watchdog(
     try:
         hass  # noqa: F821, B018
     except NameError:
-        persistent_notification.create(  # noqa: F821
-            title="Device Watchdog: Configuration Error",
-            message=(
+        _manage_config_error_persistent_notification(
+            [
                 "pyscript must have hass_is_global"
                 " enabled. Add to configuration.yaml:\n"
                 "pyscript:\n"
                 "  hass_is_global: true\n"
                 "  allow_all_imports: true"
-            ),
-            notification_id="device_watchdog_config_error",
+            ],
+            instance_id,
+            "Device Watchdog",
         )
         return
 
@@ -591,14 +614,12 @@ def device_watchdog(
         errors.append(
             'entity_exclude_regex: "' + entity_exclude_regex + '": ' + err,
         )
+    _manage_config_error_persistent_notification(
+        errors,
+        instance_id,
+        "Device Watchdog",
+    )
     if errors:
-        persistent_notification.create(  # noqa: F821
-            title="Device Watchdog: Invalid Regex",
-            message="\n".join(
-                ["Invalid regular expression for " + e for e in errors]
-            ),
-            notification_id=("device_watchdog_config_error"),
-        )
         return
 
     config = Config(
@@ -672,18 +693,9 @@ def device_watchdog(
     # Evaluate
     results = evaluate_devices(config, devices, now)
 
-    # Create/dismiss notifications
-    for result in results:
-        if result.has_issue:
-            persistent_notification.create(  # noqa: F821
-                title=result.notification_title,
-                message=result.notification_message,
-                notification_id=result.notification_id,
-            )
-        else:
-            persistent_notification.dismiss(  # noqa: F821
-                notification_id=result.notification_id,
-            )
+    # Process notifications
+    notifications = [r.to_notification() for r in results]
+    _process_persistent_notifications(notifications)
 
     # Write debug attributes
     key = _state_key(instance_id)
@@ -807,7 +819,7 @@ def trigger_entity_controller(
             eid + " is in both trigger and disabling entities",
         )
 
-    _update_persistent_error_notifications(
+    _manage_config_error_persistent_notification(
         errors,
         instance_id,
         "Trigger Entity Controller",

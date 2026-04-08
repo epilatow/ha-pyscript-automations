@@ -1147,6 +1147,8 @@ def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
 class TestDeviceWatchdogHassDetection:
     """Test hass_is_global detection."""
 
+    _NOTIF_ID = "device_watchdog_config_error_auto_dw_test"
+
     def test_missing_hass_notifies_and_skips(
         self,
     ) -> None:
@@ -1163,18 +1165,26 @@ class TestDeviceWatchdogHassDetection:
         assert len(env.mock_pn.create_calls) == 1
         call = env.mock_pn.create_calls[0]
         assert "hass_is_global" in call["message"]
-        assert call["notification_id"] == ("device_watchdog_config_error")
+        assert call["notification_id"] == self._NOTIF_ID
         assert env.mock_pn.dismiss_calls == []
 
-    def test_present_hass_no_config_error(self) -> None:
+    def test_present_hass_dismisses_config_error(
+        self,
+    ) -> None:
         env = _WatchdogEnv()
         env.call()
-        config_errors = [
+        config_creates = [
             c
             for c in env.mock_pn.create_calls
-            if c.get("notification_id") == "device_watchdog_config_error"
+            if c.get("notification_id") == self._NOTIF_ID
         ]
-        assert config_errors == []
+        assert config_creates == []
+        config_dismissals = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if c.get("notification_id") == self._NOTIF_ID
+        ]
+        assert len(config_dismissals) == 1
 
 
 class TestDeviceWatchdogRegexValidation:
@@ -1339,6 +1349,27 @@ class TestDeviceWatchdogIntervalGating:
 class TestDeviceWatchdogDiscovery:
     """Test device discovery from registries."""
 
+    @staticmethod
+    def _device_notifications(
+        env: _WatchdogEnv,
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """Filter to device-level notifications only.
+
+        Excludes config-error notifications that always
+        run as part of validation.
+        """
+        creates = [
+            c
+            for c in env.mock_pn.create_calls
+            if "config_error" not in c["notification_id"]
+        ]
+        dismissals = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if "config_error" not in c["notification_id"]
+        ]
+        return creates, dismissals
+
     def test_discovers_device_from_integration(
         self,
     ) -> None:
@@ -1350,12 +1381,12 @@ class TestDeviceWatchdogDiscovery:
             {"sensor.temp": ("22.5", T0_UTC)},
         )
         env.call()
-        # Should dismiss (healthy device)
-        assert len(env.mock_pn.dismiss_calls) == 1
-        assert (
-            env.mock_pn.dismiss_calls[0]["notification_id"]
-            == "device_watchdog_dev1"
+        creates, dismissals = self._device_notifications(
+            env,
         )
+        # Should dismiss (healthy device)
+        assert len(dismissals) == 1
+        assert dismissals[0]["notification_id"] == "device_watchdog_dev1"
 
     def test_deduplicates_devices(self) -> None:
         env = _WatchdogEnv()
@@ -1370,9 +1401,11 @@ class TestDeviceWatchdogDiscovery:
             },
         )
         env.call()
+        creates, dismissals = self._device_notifications(
+            env,
+        )
         # One device, one dismiss
-        total = len(env.mock_pn.create_calls) + len(env.mock_pn.dismiss_calls)
-        assert total == 1
+        assert len(creates) + len(dismissals) == 1
 
     def test_multiple_integrations(self) -> None:
         env = _WatchdogEnv()
@@ -1391,14 +1424,19 @@ class TestDeviceWatchdogDiscovery:
         env.call(
             monitored_integrations_raw=["zwave_js", "matter"],
         )
-        total = len(env.mock_pn.create_calls) + len(env.mock_pn.dismiss_calls)
-        assert total == 2
+        creates, dismissals = self._device_notifications(
+            env,
+        )
+        assert len(creates) + len(dismissals) == 2
 
     def test_no_devices_no_notifications(self) -> None:
         env = _WatchdogEnv()
         env.call()
-        assert env.mock_pn.create_calls == []
-        assert env.mock_pn.dismiss_calls == []
+        creates, dismissals = self._device_notifications(
+            env,
+        )
+        assert creates == []
+        assert dismissals == []
 
 
 class TestDeviceWatchdogNotifications:
@@ -1427,11 +1465,13 @@ class TestDeviceWatchdogNotifications:
             {"sensor.a": ("22.5", T0_UTC)},
         )
         env.call()
-        assert len(env.mock_pn.dismiss_calls) == 1
-        assert (
-            env.mock_pn.dismiss_calls[0]["notification_id"]
-            == "device_watchdog_dev1"
-        )
+        device_dismissals = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if "config_error" not in c["notification_id"]
+        ]
+        assert len(device_dismissals) == 1
+        assert device_dismissals[0]["notification_id"] == "device_watchdog_dev1"
 
     def test_creates_for_stale(self) -> None:
         old = T0_UTC - timedelta(hours=25)
@@ -1462,7 +1502,12 @@ class TestDeviceWatchdogNotifications:
         )
         env.call()
         assert len(env.mock_pn.create_calls) == 1
-        assert len(env.mock_pn.dismiss_calls) == 1
+        device_dismissals = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if "config_error" not in c["notification_id"]
+        ]
+        assert len(device_dismissals) == 1
 
 
 class TestDeviceWatchdogDebugAttrs:

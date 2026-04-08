@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from notification_helpers import PersistentNotification
+
 
 @dataclass
 class Config:
@@ -60,6 +62,14 @@ class DeviceResult:
     newest_timestamp: datetime | None
     entities_evaluated: int
     entities_filtered: int
+
+    def to_notification(self) -> PersistentNotification:
+        return PersistentNotification(
+            active=self.has_issue,
+            notification_id=self.notification_id,
+            title=self.notification_title,
+            message=self.notification_message,
+        )
 
 
 def should_run(

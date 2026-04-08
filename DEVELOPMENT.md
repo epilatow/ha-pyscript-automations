@@ -122,7 +122,7 @@ blueprint is the single source of truth.
 Validate all blueprint inputs in the service wrapper and
 generate persistent notifications for configuration errors.
 See `_validate_entities()` and
-`_update_persistent_error_notifications()`.
+`_manage_config_error_persistent_notification()`.
 
 ### Entity domain filtering
 

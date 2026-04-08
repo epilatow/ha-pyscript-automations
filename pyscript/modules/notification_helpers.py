@@ -7,7 +7,18 @@ Provides timestamp token substitution and
 prefix/suffix wrapping for notification messages.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
+
+
+@dataclass
+class PersistentNotification:
+    """A persistent notification to create or dismiss."""
+
+    active: bool
+    notification_id: str
+    title: str
+    message: str
 
 
 def format_timestamp(template: str, dt: datetime) -> str:
