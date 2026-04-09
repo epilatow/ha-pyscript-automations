@@ -666,13 +666,15 @@ def sensor_threshold_switch_controller(
 @service  # noqa: F821
 def device_watchdog(
     instance_id: str,
-    monitored_integrations_raw: object,
+    include_integrations_raw: object,
+    exclude_integrations_raw: object,
     device_exclude_regex_raw: str,
-    entity_exclude_regex_raw: str,
+    entity_id_exclude_regex_raw: str,
     monitored_entity_domains_raw: object,
     check_interval_minutes_raw: str,
     dead_device_threshold_minutes_raw: str,
     check_diagnostic_entities_raw: str,
+    max_device_notifications_raw: str,
     debug_logging_raw: str,
     trigger_platform_raw: str,
 ) -> None:
@@ -691,41 +693,17 @@ def device_watchdog(
         evaluate_diagnostics,
     )
 
+    start_time = time.monotonic()
     now = datetime.now(tz=UTC)
     auto_name = _automation_name(instance_id)
     tag = "[DW: " + auto_name + "]"
 
-    # Verify hass is available
-    try:
-        hass  # noqa: F821, B018
-    except NameError:
-        _manage_config_error_persistent_notification(
-            [
-                "pyscript must have hass_is_global"
-                " enabled. Add to configuration.yaml:\n"
-                "pyscript:\n"
-                "  hass_is_global: true\n"
-                "  allow_all_imports: true"
-            ],
-            instance_id,
-            "Device Watchdog",
-        )
-        return
-
-    # Interval gating (skip for manual runs from UI)
-    check_interval_minutes = int(
-        check_interval_minutes_raw,
+    # Parse all config inputs
+    include_integrations = _normalize_list(
+        include_integrations_raw,
     )
-    assert check_interval_minutes >= 1, (
-        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
-    )
-    if str(trigger_platform_raw) == "time_pattern":
-        if not on_interval(check_interval_minutes, now):
-            return
-
-    # Parse config
-    monitored_integrations = _normalize_list(
-        monitored_integrations_raw,
+    exclude_integrations = _normalize_list(
+        exclude_integrations_raw,
     )
     monitored_entity_domains = _normalize_list(
         monitored_entity_domains_raw,
@@ -742,26 +720,27 @@ def device_watchdog(
         check_diagnostic_entities_raw,
     )
     debug_logging = _parse_bool(debug_logging_raw)
-
-    device_exclude_regex = str(
-        device_exclude_regex_raw or "",
+    check_interval_minutes = int(
+        check_interval_minutes_raw,
     )
-    entity_exclude_regex = str(
-        entity_exclude_regex_raw or "",
+    max_notifications = int(
+        max_device_notifications_raw,
     )
 
-    # Validate regex patterns
-    errors = []
-    err = _validate_regex(device_exclude_regex)
-    if err:
-        errors.append(
-            'device_exclude_regex: "' + device_exclude_regex + '": ' + err,
-        )
-    err = _validate_regex(entity_exclude_regex)
-    if err:
-        errors.append(
-            'entity_exclude_regex: "' + entity_exclude_regex + '": ' + err,
-        )
+    # Validate config (accumulate all errors)
+    errors: list[str] = []
+    if hass_err := _check_hass_available():
+        errors.append(hass_err)
+    device_exclude_regex = _validate_and_join_patterns(
+        device_exclude_regex_raw,
+        "device_exclude_regex",
+        errors,
+    )
+    entity_id_exclude_regex = _validate_and_join_patterns(
+        entity_id_exclude_regex_raw,
+        "entity_id_exclude_regex",
+        errors,
+    )
     _manage_config_error_persistent_notification(
         errors,
         instance_id,
@@ -770,61 +749,56 @@ def device_watchdog(
     if errors:
         return
 
+    # Interval gating (skip for timed triggers only;
+    # manual UI runs always execute)
+    assert check_interval_minutes >= 1, (
+        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
+    )
+    if str(trigger_platform_raw) == "time_pattern":
+        if not on_interval(check_interval_minutes, now):
+            return
+
     config = Config(
         device_exclude_regex=device_exclude_regex,
-        entity_exclude_regex=entity_exclude_regex,
+        entity_id_exclude_regex=entity_id_exclude_regex,
         monitored_entity_domains=monitored_entity_domains,
         dead_threshold_seconds=dead_threshold_seconds,
     )
 
-    # Discover devices and their entities from
-    # monitored integrations.
+    # Determine target integrations.
+    all_integrations = set(
+        _get_all_integration_ids(hass),  # noqa: F821
+    )
+    if include_integrations:
+        target_integrations = set(include_integrations)
+    else:
+        target_integrations = set(all_integrations)
+    for ex in exclude_integrations:
+        target_integrations.discard(ex)
+
+    # Discover devices (scans all integrations for
+    # accurate multi-integration detection; only
+    # populates entity IDs for target integrations).
     if check_diagnostics:
         import homeassistant.helpers.entity_registry as er  # noqa: F821
 
         ent_reg = er.async_get(hass)  # noqa: F821
 
-    device_map: dict[str, dict[str, Any]] = {}
-    for integration_id in monitored_integrations:
-        try:
-            entities = _get_integration_entities(
-                hass,  # noqa: F821
-                integration_id,
-            )
-        except Exception:
-            continue
-        for entity_id in entities:
-            try:
-                info = _get_device_for_entity(
-                    hass,  # noqa: F821
-                    entity_id,
-                )
-            except Exception:
-                continue
-            if not info:
-                continue
-            dev_id = info["id"]
-            if dev_id not in device_map:
-                device_map[dev_id] = {
-                    "name": info["name"],
-                    "entity_ids": [],
-                    "integrations": set(),
-                }
-            device_map[dev_id]["entity_ids"].append(
-                entity_id,
-            )
-            device_map[dev_id]["integrations"].add(integration_id)
+    device_map = _discover_devices(
+        hass,  # noqa: F821
+        list(target_integrations),
+    )
 
-    # Build DeviceInfo with state + registry data
+    # Build DeviceInfo with state + registry data.
     devices = []
-    for dev_id, dev_info in device_map.items():
+    for dev_entry in device_map.values():
         # Build registry entries if diagnostic check
         # is enabled (requires entity registry access)
         registry_entries: list[RegistryEntry] = []
         if check_diagnostics:
             all_reg_entries = er.async_entries_for_device(
                 ent_reg,
-                dev_id,
+                dev_entry.id,
                 include_disabled_entities=True,
             )
             registry_entries = [
@@ -840,77 +814,147 @@ def device_watchdog(
                     disabled=(e.disabled_by is not None),
                 )
                 for e in all_reg_entries
-                if e.platform in dev_info["integrations"]
+                if e.platform in target_integrations
             ]
 
-        # Read state for enabled entities
         entity_infos = []
-        for eid in dev_info["entity_ids"]:
-            try:
-                ent_state, last_changed = _read_entity_state(eid)
-                if ent_state is not None:
-                    entity_infos.append(
-                        EntityInfo(
-                            entity_id=eid,
-                            state=str(ent_state),
-                            last_changed=last_changed,
-                        ),
-                    )
-            except Exception:
-                continue
+        for eids in dev_entry.integration_entities.values():
+            for eid in eids:
+                try:
+                    ent_state, last_changed = _read_entity_state(eid)
+                    if ent_state is not None:
+                        entity_infos.append(
+                            EntityInfo(
+                                entity_id=eid,
+                                state=str(ent_state),
+                                last_changed=last_changed,
+                            ),
+                        )
+                except (NameError, AttributeError):
+                    # Entity state unavailable
+                    continue
 
-        url = "/config/devices/device/" + dev_id
         devices.append(
             DeviceInfo(
-                device_id=dev_id,
-                device_name=dev_info["name"],
-                device_url=url,
-                integrations=list(
-                    dev_info["integrations"],
-                ),
+                de=dev_entry,
                 entities=entity_infos,
                 registry_entries=registry_entries,
             ),
         )
 
-    # Evaluate health
+    # Evaluate health (results are sorted by device_name
+    # for deterministic notification cap behavior)
     results = evaluate_devices(config, devices, now)
+    issues = [r for r in results if r.has_issue]
 
     # Check for disabled diagnostic entities
-    diag_notifications = []
+    diag_notifications: list[PersistentNotification] = []
     if check_diagnostics:
         diag_notifications = evaluate_diagnostics(devices)
 
-    # Process all notifications
-    notifications = [r.to_notification() for r in results]
-    notifications += diag_notifications
-    _process_persistent_notifications(notifications)
+    # Apply notification cap
+    cap_notification_id = "device_watchdog_cap"
 
-    # Write debug attributes
+    notifications: list[PersistentNotification] = []
+    if max_notifications > 0 and len(issues) > max_notifications:
+        shown = issues[:max_notifications]
+        suppressed = issues[max_notifications:]
+        for r in shown:
+            notifications.append(r.to_notification())
+        for r in suppressed:
+            notifications.append(
+                r.to_notification(suppress=True),
+            )
+        for r in results:
+            if not r.has_issue:
+                notifications.append(
+                    r.to_notification(),
+                )
+        notifications.append(
+            PersistentNotification(
+                active=True,
+                notification_id=cap_notification_id,
+                title=("Device watchdog: notification cap reached"),
+                message=(
+                    "Showing "
+                    + str(max_notifications)
+                    + " of "
+                    + str(len(issues))
+                    + " devices with issues. "
+                    + str(len(suppressed))
+                    + " additional devices were"
+                    " suppressed. Increase the"
+                    " notification cap or fix"
+                    " existing issues to see more."
+                ),
+            ),
+        )
+    else:
+        notifications = [r.to_notification() for r in results]
+        notifications.append(
+            PersistentNotification(
+                active=False,
+                notification_id=cap_notification_id,
+                title="",
+                message="",
+            ),
+        )
+
+    notifications += diag_notifications
+    active_ids = _get_active_notification_ids(
+        hass,  # noqa: F821
+    )
+    _process_persistent_notifications(
+        notifications,
+        active_ids,
+    )
+
+    # Compute stats and save state
+    elapsed = time.monotonic() - start_time
     key = _state_key(instance_id)
-    issues = [r for r in results if r.has_issue]
+    stat_entities = sum(
+        [
+            r.entities_evaluated + r.entities_filtered
+            for r in results
+            if not r.device_excluded
+        ]
+    )
+    stat_devices_excluded = sum([1 for r in results if r.device_excluded])
+    stat_entities_excluded = sum([r.entities_filtered for r in results])
+    stat_entity_issues = sum([len(r.unavailable_entities) for r in issues])
+    stat_stale = sum([1 for r in issues if r.is_stale])
+
     _save_state(
         key,
         now,
         {
-            "devices_checked": len(results),
-            "devices_with_issues": len(issues),
-            "integrations": json.dumps(
-                monitored_integrations,
+            "runtime": str(round(elapsed, 2)),
+            "integrations": len(all_integrations),
+            "devices": len(results),
+            "entities": stat_entities,
+            "integrations_excluded": (
+                len(all_integrations) - len(target_integrations)
             ),
+            "devices_excluded": stat_devices_excluded,
+            "entities_excluded": stat_entities_excluded,
+            "device_issues": len(issues),
+            "entity_issues": stat_entity_issues,
+            "device_stale_issues": stat_stale,
         },
     )
 
     # Debug logging
     if debug_logging:
-        issue_names = [r.device_name for r in issues]
         log.warning(  # noqa: F821
-            "%s checked=%d issues=%d integrations=%s devices_with_issues=%s",
+            "%s integrations=%d devices=%d"
+            " entities=%d device_issues=%d"
+            " entity_issues=%d",
             tag,
+            len(all_integrations),
             len(results),
+            stat_entities,
             len(issues),
-            monitored_integrations,
-            issue_names,
+            stat_entity_issues,
         )
 
 

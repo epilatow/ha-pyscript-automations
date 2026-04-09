@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from helpers import (
+    DeviceEntry,
     PersistentNotification,
     matches_pattern,
 )
@@ -22,7 +23,7 @@ class Config:
     """Configuration parameters (set per-instance)."""
 
     device_exclude_regex: str
-    entity_exclude_regex: str
+    entity_id_exclude_regex: str
     monitored_entity_domains: list[str]
     dead_threshold_seconds: int
 
@@ -49,14 +50,9 @@ class RegistryEntry:
 
 @dataclass
 class DeviceInfo:
-    """Device with its entity snapshots."""
+    """Device with its entity state snapshots."""
 
-    device_id: str
-    device_name: str
-    device_url: str
-    integrations: list[str] = field(
-        default_factory=list,
-    )
+    de: DeviceEntry
     entities: list[EntityInfo] = field(
         default_factory=list,
     )
@@ -72,6 +68,7 @@ class DeviceResult:
     device_id: str
     device_name: str
     has_issue: bool
+    device_excluded: bool
     notification_id: str
     notification_title: str
     notification_message: str
@@ -82,9 +79,12 @@ class DeviceResult:
     entities_evaluated: int
     entities_filtered: int
 
-    def to_notification(self) -> PersistentNotification:
+    def to_notification(
+        self,
+        suppress: bool = False,
+    ) -> PersistentNotification:
         return PersistentNotification(
-            active=self.has_issue,
+            active=self.has_issue and not suppress,
             notification_id=self.notification_id,
             title=self.notification_title,
             message=self.notification_message,
@@ -143,7 +143,8 @@ def evaluate_diagnostics(
 ) -> list[PersistentNotification]:
     """Check all devices for disabled diagnostics.
 
-    Uses device.integrations and device.registry_entries
+    Uses device.de.integration_entities and
+    device.registry_entries
     to find disabled recommended diagnostic entities.
 
     Skips devices with no integrations in
@@ -153,32 +154,35 @@ def evaluate_diagnostics(
     """
     results: list[PersistentNotification] = []
     for device in devices:
+        integrations = sorted(
+            device.de.integration_entities.keys(),
+        )
         has_recommendations = [
-            i for i in device.integrations if i in RECOMMENDED_DIAGNOSTICS
+            i for i in integrations if i in RECOMMENDED_DIAGNOSTICS
         ]
         if not has_recommendations:
             continue
         disabled: list[str] = []
-        for integration in device.integrations:
+        for integration in integrations:
             disabled += check_disabled_diagnostics(
                 integration,
                 device.registry_entries,
             )
-        notification_id = "dw_diag_" + device.device_id
+        notification_id = "dw_diag_" + device.de.id
         if disabled:
             entity_list = "\n- ".join(disabled)
             message = (
                 "Recommended diagnostic entities"
                 " are disabled:\n\n- " + entity_list + "\n\nEnable in"
                 " [Settings > Devices]("
-                + device.device_url
+                + device.de.url
                 + ") for better health monitoring."
             )
             results.append(
                 PersistentNotification(
                     active=True,
                     notification_id=notification_id,
-                    title=(device.device_name + ": Disabled Diagnostics"),
+                    title=(device.de.name + ": Disabled Diagnostics"),
                     message=message,
                 ),
             )
@@ -218,7 +222,7 @@ def _filter_entities(
 
         if matches_pattern(
             eid,
-            config.entity_exclude_regex,
+            config.entity_id_exclude_regex,
         ):
             filtered_out.append(entity)
             continue
@@ -271,10 +275,17 @@ def _build_notification_message(
     """Build the notification body for an unhealthy device."""
     lines: list[str] = []
     lines.append(
-        "Device: [" + device.device_name + "](" + device.device_url + ")",
+        "Device: [" + device.de.name + "](" + device.de.url + ")",
     )
+    integrations = sorted(
+        device.de.integration_entities.keys(),
+    )
+    if integrations:
+        lines.append(
+            "Integrations: " + ", ".join(integrations),
+        )
 
-    for entity in unavailable:
+    for entity in sorted(unavailable, key=lambda e: e.entity_id):
         lines.append(
             "Unavailable entity: " + entity.entity_id,
         )
@@ -310,16 +321,34 @@ def _evaluate_device(
     current_time: datetime,
 ) -> DeviceResult:
     """Evaluate health of a single device."""
+    notification_id = "device_watchdog_" + device.de.id
+
+    # Skip excluded devices
+    device_excluded = matches_pattern(
+        device.de.name,
+        config.device_exclude_regex,
+    )
+    if device_excluded:
+        return DeviceResult(
+            device_id=device.de.id,
+            device_name=device.de.name,
+            has_issue=False,
+            device_excluded=True,
+            notification_id=notification_id,
+            notification_title="",
+            notification_message="",
+            unavailable_entities=[],
+            is_stale=False,
+            newest_entity=None,
+            newest_timestamp=None,
+            entities_evaluated=0,
+            entities_filtered=0,
+        )
+
     kept, filtered_out = _filter_entities(
         config,
         device.entities,
     )
-
-    if matches_pattern(
-        device.device_name,
-        config.device_exclude_regex,
-    ):
-        kept, filtered_out = [], device.entities
 
     unavailable = [e for e in kept if e.state in ("unavailable", "unknown")]
 
@@ -331,12 +360,10 @@ def _evaluate_device(
 
     has_issue = bool(unavailable) or is_stale
 
-    notification_id = "device_watchdog_" + device.device_id
-
     message = ""
     title = ""
     if has_issue:
-        title = "Device watchdog: " + device.device_name
+        title = "Device watchdog: " + device.de.name
         message = _build_notification_message(
             device,
             unavailable,
@@ -347,9 +374,10 @@ def _evaluate_device(
         )
 
     return DeviceResult(
-        device_id=device.device_id,
-        device_name=device.device_name,
+        device_id=device.de.id,
+        device_name=device.de.name,
         has_issue=has_issue,
+        device_excluded=False,
         notification_id=notification_id,
         notification_title=title,
         notification_message=message,
@@ -399,4 +427,11 @@ def evaluate_devices(
             current_time,
         )
         results.append(result)
+    # Sort so that notification cap shows a deterministic
+    # subset. Sorted here (in the logic module) rather
+    # than in the service wrapper because PyScript's AST
+    # evaluator interferes with sort operations.
+    results.sort(
+        key=lambda r: (r.device_name, r.device_id),
+    )
     return results

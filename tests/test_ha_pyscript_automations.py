@@ -1059,6 +1059,9 @@ class _WatchdogEnv:
         )
         self._ns["_get_device_for_entity"] = self._mock_get_device_for_entity
         self._ns["_read_entity_state"] = self._mock_read_entity_state
+        self._ns["_get_all_integration_ids"] = (
+            self._mock_get_all_integration_ids
+        )
 
     def _mock_get_integration_entities(
         self,
@@ -1076,6 +1079,12 @@ class _WatchdogEnv:
         entity_id: str,
     ) -> dict[str, str] | None:
         return self._device_for_entity.get(entity_id)
+
+    def _mock_get_all_integration_ids(
+        self,
+        _hass: Any,
+    ) -> list[str]:
+        return sorted(self._integration_entities.keys())
 
     def _mock_read_entity_state(
         self,
@@ -1190,6 +1199,7 @@ class _WatchdogEnv:
             self._device_for_entity[eid] = {
                 "id": device_id,
                 "name": device_name,
+                "default_name": device_name,
             }
         self._integration_entities[integration] = current
 
@@ -1208,13 +1218,15 @@ class _WatchdogEnv:
 def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
     defaults: dict[str, Any] = {
         "instance_id": "auto.dw_test",
-        "monitored_integrations_raw": ["zwave_js"],
+        "include_integrations_raw": ["zwave_js"],
+        "exclude_integrations_raw": [],
         "device_exclude_regex_raw": "",
-        "entity_exclude_regex_raw": "",
+        "entity_id_exclude_regex_raw": "",
         "monitored_entity_domains_raw": [],
         "check_interval_minutes_raw": "1",
         "dead_device_threshold_minutes_raw": "1440",
         "check_diagnostic_entities_raw": "false",
+        "max_device_notifications_raw": "0",
         "debug_logging_raw": "false",
         "trigger_platform_raw": "time_pattern",
     }
@@ -1279,22 +1291,22 @@ class TestDeviceWatchdogRegexValidation:
 
     def test_invalid_entity_regex_notifies(self) -> None:
         env = _WatchdogEnv()
-        env.call(entity_exclude_regex_raw="(unclosed")
+        env.call(entity_id_exclude_regex_raw="(unclosed")
         assert len(env.mock_pn.create_calls) == 1
         msg = env.mock_pn.create_calls[0]["message"]
-        assert "entity_exclude_regex" in msg
+        assert "entity_id_exclude_regex" in msg
         assert "(unclosed" in msg
 
     def test_both_invalid_reports_both(self) -> None:
         env = _WatchdogEnv()
         env.call(
             device_exclude_regex_raw="[bad",
-            entity_exclude_regex_raw="(bad",
+            entity_id_exclude_regex_raw="(bad",
         )
         assert len(env.mock_pn.create_calls) == 1
         msg = env.mock_pn.create_calls[0]["message"]
         assert "device_exclude_regex" in msg
-        assert "entity_exclude_regex" in msg
+        assert "entity_id_exclude_regex" in msg
 
     def test_invalid_regex_skips_evaluation(self) -> None:
         env = _WatchdogEnv()
@@ -1313,7 +1325,7 @@ class TestDeviceWatchdogRegexValidation:
         env = _WatchdogEnv()
         env.call(
             device_exclude_regex_raw=".*test.*",
-            entity_exclude_regex_raw="^sensor\\.bat",
+            entity_id_exclude_regex_raw="^sensor\\.bat",
         )
         config_errors = [
             c
@@ -1355,7 +1367,14 @@ class TestDeviceWatchdogIntervalGating:
         env.call(check_interval_minutes_raw="60")
         # Should not have created any notifications
         assert env.mock_pn.create_calls == []
-        assert env.mock_pn.dismiss_calls == []
+        # Only config error dismiss (config validation
+        # runs before interval gating)
+        device_dismisses = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if "config_error" not in c["notification_id"]
+        ]
+        assert device_dismisses == []
 
     def test_runs_on_interval_boundary(self) -> None:
         env = _WatchdogEnv(
@@ -1433,18 +1452,18 @@ class TestDeviceWatchdogDiscovery:
     ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
         """Filter to device-level notifications only.
 
-        Excludes config-error notifications that always
-        run as part of validation.
+        Excludes config-error and cap notifications.
         """
+        skip = ("config_error", "_cap")
         creates = [
             c
             for c in env.mock_pn.create_calls
-            if "config_error" not in c["notification_id"]
+            if not any(s in c["notification_id"] for s in skip)
         ]
         dismissals = [
             c
             for c in env.mock_pn.dismiss_calls
-            if "config_error" not in c["notification_id"]
+            if not any(s in c["notification_id"] for s in skip)
         ]
         return creates, dismissals
 
@@ -1500,7 +1519,7 @@ class TestDeviceWatchdogDiscovery:
             {"sensor.mt": ("ok", T0_UTC)},
         )
         env.call(
-            monitored_integrations_raw=["zwave_js", "matter"],
+            include_integrations_raw=["zwave_js", "matter"],
         )
         creates, dismissals = self._device_notifications(
             env,
@@ -1547,6 +1566,7 @@ class TestDeviceWatchdogNotifications:
             c
             for c in env.mock_pn.dismiss_calls
             if "config_error" not in c["notification_id"]
+            and "_cap" not in c["notification_id"]
         ]
         assert len(device_dismissals) == 1
         assert device_dismissals[0]["notification_id"] == "device_watchdog_dev1"
@@ -1584,6 +1604,7 @@ class TestDeviceWatchdogNotifications:
             c
             for c in env.mock_pn.dismiss_calls
             if "config_error" not in c["notification_id"]
+            and "_cap" not in c["notification_id"]
         ]
         assert len(device_dismissals) == 1
 
@@ -1707,8 +1728,9 @@ class TestDeviceWatchdogDebugAttrs:
         assert env.mock_state.get(key) == "ok"
         attrs = env.mock_state.getattr(key)
         assert "last_run" in attrs
-        assert attrs["devices_checked"] == 1
-        assert attrs["devices_with_issues"] == 0
+        assert "runtime" in attrs
+        assert attrs["devices"] == 1
+        assert attrs["device_issues"] == 0
 
     def test_devices_with_issues_count(self) -> None:
         env = _WatchdogEnv()
@@ -1727,17 +1749,23 @@ class TestDeviceWatchdogDebugAttrs:
         env.call()
         key = "pyscript.auto_dw_test_state"
         attrs = env.mock_state.getattr(key)
-        assert attrs["devices_checked"] == 2
-        assert attrs["devices_with_issues"] == 1
+        assert attrs["devices"] == 2
+        assert attrs["device_issues"] == 1
 
     def test_integrations_attr(self) -> None:
         env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("22.5", T0_UTC)},
+        )
         env.call(
-            monitored_integrations_raw=["zwave_js", "matter"],
+            include_integrations_raw=["zwave_js"],
         )
         key = "pyscript.auto_dw_test_state"
         attrs = env.mock_state.getattr(key)
-        assert "zwave_js" in attrs["integrations"]
+        assert attrs["integrations"] >= 1
 
 
 class TestDeviceWatchdogDebugLogging:
@@ -1775,8 +1803,7 @@ class TestDeviceWatchdogDebugLogging:
         msg = env.mock_log.warning_calls[0][0]
         args = env.mock_log.warning_calls[0][1]
         formatted = msg % args
-        assert "issues=1" in formatted
-        assert "Bad Dev" in formatted
+        assert "device_issues=1" in formatted
 
 
 # ── Trigger Entity Controller ─────────────────────

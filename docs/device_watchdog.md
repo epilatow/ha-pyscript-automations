@@ -8,14 +8,18 @@ devices recover.
 
 ## Features
 
-- Monitor devices across multiple integrations (Z-Wave, Matter,
-  BLE, Shelly, etc.)
+- Monitor devices across multiple integrations (Z-Wave,
+  Matter, BLE, Shelly, etc.)
 - Detect unavailable or unknown entity states
 - Detect stale devices (no state change within threshold)
-- Per-device persistent notifications with auto-clear on recovery
+- Per-device persistent notifications with auto-clear
+  on recovery
+- Include/exclude integration filtering (empty include
+  means all integrations)
 - Regex-based device and entity exclusion filters
 - Configurable entity domain filtering
 - Configurable check interval and staleness threshold
+- Notification cap to limit per-device notifications
 - Diagnostic entity check: notifies when recommended
   diagnostic entities (e.g., Last seen, Node status)
   are disabled
@@ -25,13 +29,15 @@ devices recover.
 
 | Parameter | Description |
 |---|---|
-| Integrations to monitor | Integration IDs whose devices should be monitored |
-| Device exclude regex | Skip devices whose name matches this pattern |
-| Entity exclude regex | Skip entities whose ID matches this pattern |
+| Include integrations | Integration IDs to monitor. Empty means all. |
+| Exclude integrations | Integration IDs to skip even if included. |
+| Device exclude regex | Skip devices whose name matches. One pattern per line. |
+| Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
 | Entity domains to monitor | Only check entities in these domains |
 | Check interval (minutes) | Minutes between watchdog evaluations |
 | Dead device threshold (minutes) | Staleness threshold for state changes |
 | Check diagnostic entities | Notify about disabled recommended diagnostics per device |
+| Max device notifications | Cap on per-device notifications. 0 = unlimited. |
 | Debug logging | Log debug info to HA logs |
 
 See the blueprint UI for default values.
@@ -46,9 +52,6 @@ pyscript:
   hass_is_global: true
 ```
 
-If `hass_is_global` is not enabled, the automation will create
-a persistent notification explaining how to fix the configuration.
-
 ## Usage
 
 1. Install the automation (see main README)
@@ -57,19 +60,43 @@ a persistent notification explaining how to fix the configuration.
 4. Configure integrations and thresholds
 5. Save and enable
 
+## Notifications
+
+Each device with health issues gets its own persistent
+notification. Notifications are automatically dismissed
+when devices recover.
+
+### Notification panel ordering
+
+The order of notifications in the HA notification panel
+may change between evaluation runs. This is because each
+run re-creates all active notifications (to update
+content if health changed), which updates their
+timestamps. Since all creates happen within milliseconds,
+the panel's display order is effectively random. The
+same devices are shown — only the panel ordering varies.
+
 ## Debugging
 
 ### Entity attributes
 
 After each evaluation, attributes are written to
-`pyscript.<instance_id>_state`:
+`pyscript.<automation-name>_state` (e.g.,
+`pyscript.automation_device_watchdog_state`). Search
+for `pyscript.*_state` in Developer Tools > States
+to find it.
 
 - `last_run`: ISO timestamp of last evaluation
-- `devices_checked`: Number of devices evaluated
-- `devices_with_issues`: Number of devices with issues
-- `integrations`: JSON list of monitored integrations
-
-View in **Developer Tools > States**.
+- `runtime`: Evaluation time in seconds
+- `integrations`: Total integrations discovered
+- `devices`: Total devices discovered
+- `entities`: Total entities discovered for included devices
+- `integrations_excluded`: Integrations excluded by filters
+- `devices_excluded`: Devices excluded by device filters
+- `entities_excluded`: Entities excluded by entity filters
+- `device_issues`: Devices with issues
+- `entity_issues`: Entities with issues
+- `device_stale_issues`: Devices flagged as stale
 
 ### Debug logging
 
@@ -80,7 +107,6 @@ output appears in **Settings > System > Logs**. Uses
 Example output for an automation named "Device Watchdog":
 
 ```
-[DW: Device Watchdog] checked=12 issues=2
-  integrations=['zwave_js', 'matter']
-  devices_with_issues=['Kitchen Sensor', 'Garage Door']
+[DW: Device Watchdog] integrations=12 devices=45
+  entities=320 device_issues=2 entity_issues=5
 ```

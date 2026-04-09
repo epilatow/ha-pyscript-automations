@@ -32,6 +32,7 @@ from device_watchdog import (  # noqa: E402
     evaluate_diagnostics,
 )
 from helpers import (  # noqa: E402
+    DeviceEntry,
     PersistentNotification,
 )
 
@@ -44,7 +45,7 @@ T0 = datetime(2024, 1, 15, 12, 0, 0)
 def _config(**overrides: object) -> Config:
     defaults: dict[str, object] = {
         "device_exclude_regex": "",
-        "entity_exclude_regex": "",
+        "entity_id_exclude_regex": "",
         "monitored_entity_domains": [],
         "dead_threshold_seconds": 86400,
     }
@@ -70,9 +71,12 @@ def _device(
     entities: list[EntityInfo] | None = None,
 ) -> DeviceInfo:
     return DeviceInfo(
-        device_id=device_id,
-        device_name=device_name,
-        device_url="/config/devices/device/" + device_id,
+        de=DeviceEntry(
+            id=device_id,
+            url="/config/devices/device/" + device_id,
+            name=device_name,
+            default_name=device_name,
+        ),
         entities=entities or [],
     )
 
@@ -102,8 +106,8 @@ class TestFilterEntities:
         assert kept[0].entity_id == "sensor.temp"
         assert len(filtered) == 2
 
-    def test_entity_exclude_regex(self) -> None:
-        cfg = _config(entity_exclude_regex="battery")
+    def test_entity_id_exclude_regex(self) -> None:
+        cfg = _config(entity_id_exclude_regex="battery")
         entities = [
             _entity("sensor.temp"),
             _entity("sensor.battery_level"),
@@ -115,7 +119,7 @@ class TestFilterEntities:
     def test_domain_and_exclude_combined(self) -> None:
         cfg = _config(
             monitored_entity_domains=["sensor"],
-            entity_exclude_regex="battery",
+            entity_id_exclude_regex="battery",
         )
         entities = [
             _entity("sensor.temp"),
@@ -301,8 +305,9 @@ class TestEvaluateDevice:
         )
         result = _evaluate_device(cfg, device, T0)
         assert result.has_issue is False
+        assert result.device_excluded is True
         assert result.entities_evaluated == 0
-        assert result.entities_filtered == 1
+        assert result.entities_filtered == 0
 
     def test_notification_id_format(self) -> None:
         cfg = _config()
@@ -609,14 +614,31 @@ class TestCheckDisabledDiagnostics:
 
 
 class TestEvaluateDiagnostics:
+    def _diag_device(
+        self,
+        device_id: str = "dev1",
+        device_name: str = "Lock",
+        integrations: list[str] | None = None,
+        registry_entries: list[RegistryEntry] | None = None,
+    ) -> DeviceInfo:
+        ints = integrations or ["zwave_js"]
+        ie: dict[str, set[str]] = {i: set() for i in ints}
+        return DeviceInfo(
+            de=DeviceEntry(
+                id=device_id,
+                url="/config/devices/device/" + device_id,
+                name=device_name,
+                default_name=device_name,
+                integration_entities=ie,
+            ),
+            registry_entries=registry_entries or [],
+        )
+
     def test_device_with_disabled_generates_active(
         self,
     ) -> None:
-        device = DeviceInfo(
-            device_id="dev1",
+        device = self._diag_device(
             device_name="Front Door Lock",
-            device_url="/config/devices/device/dev1",
-            integrations=["zwave_js"],
             registry_entries=[
                 _reg_entry(
                     original_name="Last seen",
@@ -633,11 +655,7 @@ class TestEvaluateDiagnostics:
     def test_device_all_enabled_dismisses(
         self,
     ) -> None:
-        device = DeviceInfo(
-            device_id="dev1",
-            device_name="Lock",
-            device_url="/config/devices/device/dev1",
-            integrations=["zwave_js"],
+        device = self._diag_device(
             registry_entries=[
                 _reg_entry(
                     original_name="Last seen",
@@ -652,11 +670,8 @@ class TestEvaluateDiagnostics:
     def test_notification_id_uses_device_id(
         self,
     ) -> None:
-        device = DeviceInfo(
+        device = self._diag_device(
             device_id="abc123",
-            device_name="Lock",
-            device_url="/config/devices/device/abc123",
-            integrations=["zwave_js"],
             registry_entries=[
                 _reg_entry(
                     original_name="Last seen",
@@ -670,11 +685,7 @@ class TestEvaluateDiagnostics:
     def test_returns_persistent_notification(
         self,
     ) -> None:
-        device = DeviceInfo(
-            device_id="dev1",
-            device_name="Lock",
-            device_url="/config/devices/device/dev1",
-            integrations=["zwave_js"],
+        device = self._diag_device(
             registry_entries=[
                 _reg_entry(
                     original_name="Last seen",
@@ -691,12 +702,8 @@ class TestEvaluateDiagnostics:
     def test_skips_device_with_no_known_diagnostics(
         self,
     ) -> None:
-        device = DeviceInfo(
-            device_id="dev1",
-            device_name="Lock",
-            device_url="/config/devices/device/dev1",
+        device = self._diag_device(
             integrations=["unknown_integration"],
-            registry_entries=[],
         )
         results = evaluate_diagnostics([device])
         assert results == []
@@ -704,10 +711,7 @@ class TestEvaluateDiagnostics:
     def test_mixed_known_and_unknown_integrations(
         self,
     ) -> None:
-        device = DeviceInfo(
-            device_id="dev1",
-            device_name="Lock",
-            device_url="/config/devices/device/dev1",
+        device = self._diag_device(
             integrations=[
                 "unknown_integration",
                 "zwave_js",

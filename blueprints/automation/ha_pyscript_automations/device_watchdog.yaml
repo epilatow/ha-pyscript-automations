@@ -10,50 +10,53 @@ blueprint:
   author: epilatow
 
   input:
-    monitored_integrations:
-      name: Monitored integrations
+    include_integrations:
+      name: Include integrations
       description: >
-        Choose the integrations whose devices should be
-        monitored. Enable "Add custom value" to type
-        additional integration IDs.
+        Integrations to monitor. Leave empty to monitor
+        all integrations.
+      default: []
       selector:
         select:
           multiple: true
           custom_value: true
-          options:
-            - zwave_js
-            - matter
-            - bthome
-            - shelly
-            - roomba
-      default:
-        - zwave_js
-        - matter
-        - bthome
-        - shelly
-        - roomba
+          options: []
+
+    exclude_integrations:
+      name: Exclude integrations
+      description: >
+        Integrations to skip even if they match the
+        include list.
+      default: []
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options: []
 
     device_exclude_regex:
       name: Device exclude regex
       description: >
-        Devices whose name contains a match for this
-        regular expression are ignored. A partial match
-        is sufficient (use ^...$ to require a full match).
+        Devices whose name matches any of these regular
+        expressions are ignored. Enter one pattern per
+        line. A partial match is sufficient (use ^...$
+        to require a full match).
       default: ""
       selector:
         text:
-          multiline: false
+          multiline: true
 
-    entity_exclude_regex:
-      name: Entity exclude regex
+    entity_id_exclude_regex:
+      name: Entity ID exclude regex
       description: >
-        Entities whose ID contains a match for this
-        regular expression are ignored. A partial match
-        is sufficient (use ^...$ to require a full match).
+        Entities whose ID matches any of these regular
+        expressions are ignored. Enter one pattern per
+        line. A partial match is sufficient (use ^...$
+        to require a full match).
       default: ""
       selector:
         text:
-          multiline: false
+          multiline: true
 
     monitored_entity_domains:
       name: Monitored entity domains
@@ -111,6 +114,20 @@ blueprint:
       selector:
         boolean: {}
 
+    max_device_notifications:
+      name: Max device notifications
+      description: >
+        Maximum number of per-device notifications.
+        Set to 0 for unlimited. When the cap is reached,
+        a summary notification indicates how many
+        additional notifications were suppressed.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+
     debug_logging:
       name: Debug Logging
       description: >
@@ -131,13 +148,15 @@ actions:
     data:
       instance_id: "{{ this.entity_id }}"
       trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"
-      monitored_integrations_raw: !input monitored_integrations
+      include_integrations_raw: !input include_integrations
+      exclude_integrations_raw: !input exclude_integrations
       device_exclude_regex_raw: !input device_exclude_regex
-      entity_exclude_regex_raw: !input entity_exclude_regex
+      entity_id_exclude_regex_raw: !input entity_id_exclude_regex
       monitored_entity_domains_raw: !input monitored_entity_domains
       check_interval_minutes_raw: !input check_interval_minutes
       dead_device_threshold_minutes_raw: !input dead_device_threshold_minutes
       check_diagnostic_entities_raw: !input check_diagnostic_entities
+      max_device_notifications_raw: !input max_device_notifications
       debug_logging_raw: !input debug_logging
 
 # Triggers every minute but most invocations exit
