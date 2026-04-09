@@ -3,12 +3,13 @@
 
 No PyScript runtime dependencies.
 
-Provides persistent notification dataclass, timestamp
-token formatting, interval gating, and regex matching.
+Provides dataclasses, persistent notification support,
+timestamp formatting, interval gating, and regex
+matching.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -20,6 +21,42 @@ class PersistentNotification:
     notification_id: str
     title: str
     message: str
+
+
+@dataclass
+class EntityRegistryInfo:
+    """Entity registry fields for drift detection."""
+
+    entity_id: str
+    name: str | None
+    # Default entity name (HA entry.original_name).
+    # Used when entry.name is not set.
+    original_name: str | None
+    has_entity_name: bool
+    device_id: str | None
+
+
+@dataclass
+class DeviceEntry:
+    """Device discovered during integration scan."""
+
+    id: str
+    url: str
+
+    # Current device name. HA device registry
+    # device.name_by_user (if set) or device.name
+    # (set by integration).
+    name: str
+
+    # Integration default name. HA device registry
+    # device.name. Non-deterministic for
+    # multi-integration devices.
+    default_name: str
+
+    # Map integrations to the entity ids they provide.
+    integration_entities: dict[str, set[str]] = field(
+        default_factory=dict,
+    )
 
 
 def format_timestamp(template: str, dt: datetime) -> str:

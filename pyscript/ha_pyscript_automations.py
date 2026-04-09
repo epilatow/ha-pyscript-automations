@@ -7,14 +7,26 @@ separately.
 
 IMPORTANT: No sleeping, no waiting. Services are purely
 reactive: trigger -> evaluate -> act -> exit.
+
+Home Assistant packages (homeassistant.*) must be
+imported inside function bodies, not at module level.
+Tests exec() this file into a mock namespace that does
+not have homeassistant installed; a top-level import
+would fail during test collection.
 """
 
 import json
+import time
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from helpers import PersistentNotification, on_interval  # noqa: F821
+from helpers import (  # noqa: F821
+    DeviceEntry,
+    EntityRegistryInfo,
+    PersistentNotification,
+    on_interval,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -115,10 +127,36 @@ def _save_state(
         )
 
 
+def _get_active_notification_ids(
+    hass_obj: object,
+) -> set[str] | None:
+    """Return IDs of all active persistent notifications.
+
+    Reads the live notification dict from hass.data.
+    Returns None if unavailable (e.g., in tests), in
+    which case callers should dismiss unconditionally.
+    """
+    try:
+        data = hass_obj.data.get(  # type: ignore[attr-defined]
+            "persistent_notification",
+            {},
+        )
+        return set(data.keys())
+    except (AttributeError, TypeError):
+        return None
+
+
 def _process_persistent_notifications(
     notifications: "list[PersistentNotification]",
+    active_ids: set[str] | None = None,
 ) -> None:
-    """Create or dismiss persistent notifications."""
+    """Create or dismiss persistent notifications.
+
+    When active_ids is provided, dismissals are skipped
+    for notification IDs not in the set (they were never
+    created, so dismissing them is a no-op waste of an
+    HA service call).
+    """
     for n in notifications:
         if n.active:
             persistent_notification.create(  # noqa: F821
@@ -126,7 +164,7 @@ def _process_persistent_notifications(
                 message=n.message,
                 notification_id=n.notification_id,
             )
-        else:
+        elif active_ids is None or n.notification_id in active_ids:
             persistent_notification.dismiss(  # noqa: F821
                 notification_id=n.notification_id,
             )
@@ -175,6 +213,41 @@ def _validate_regex(pattern: str) -> str | None:
     return None
 
 
+def _check_hass_available() -> str | None:
+    """Return error if hass global is unavailable."""
+    try:
+        hass  # noqa: F821, B018
+    except NameError:
+        return "pyscript hass_is_global not enabled (see docs)"
+    return None
+
+
+def _validate_and_join_patterns(
+    raw: str,
+    field_name: str,
+    errors: list[str],
+) -> str:
+    """Validate multiline regex patterns and join.
+
+    Splits the raw string on newlines, validates each
+    non-empty line individually, appends errors, and
+    returns the combined regex joined with |.
+    """
+    lines = [line.strip() for line in str(raw or "").splitlines()]
+    valid: list[str] = []
+    for line in lines:
+        if not line:
+            continue
+        err = _validate_regex(line)
+        if err:
+            errors.append(
+                field_name + ': "' + line + '": ' + err,
+            )
+        else:
+            valid.append(line)
+    return "|".join(valid)
+
+
 def _get_integration_entities(
     hass_obj: object,
     integration_id: str,
@@ -210,7 +283,77 @@ def _get_device_for_entity(
     if not device:
         return None
     name = device.name_by_user or device.name or ""
-    return {"id": entry.device_id, "name": name}
+    return {
+        "id": entry.device_id,
+        "name": name,
+        "default_name": device.name or "",
+    }
+
+
+def _get_all_integration_ids(
+    hass_obj: object,
+) -> list[str]:
+    """All distinct integration IDs from entity registry."""
+    import homeassistant.helpers.entity_registry as er  # noqa: F821
+
+    ent_reg = er.async_get(hass_obj)
+    integrations: set[str] = set()
+    for entry in ent_reg.entities.values():
+        if entry.platform:
+            integrations.add(entry.platform)
+    return sorted(integrations)
+
+
+def _discover_devices(
+    hass_obj: object,
+    integrations: list[str] | None = None,
+) -> "dict[str, DeviceEntry]":
+    """Discover devices across all integrations.
+
+    Always scans every integration for accurate
+    multi-integration device detection. The optional
+    integrations parameter filters which integrations
+    populate entity IDs. Omit or pass None for all
+    integrations (no filtering).
+    """
+    all_ids = _get_all_integration_ids(hass_obj)
+    populate = set(integrations) if integrations is not None else None
+    device_map: dict[str, DeviceEntry] = {}
+    for integration_id in all_ids:
+        try:
+            entities = _get_integration_entities(
+                hass_obj,
+                integration_id,
+            )
+        except (KeyError, ValueError):
+            # Integration not found or invalid
+            continue
+        for entity_id in entities:
+            try:
+                info = _get_device_for_entity(
+                    hass_obj,
+                    entity_id,
+                )
+            except (KeyError, ValueError):
+                # Entity or device not in registry
+                continue
+            if not info:
+                continue
+            dev_id = info["id"]
+            if dev_id not in device_map:
+                url = "/config/devices/device/" + dev_id
+                device_map[dev_id] = DeviceEntry(
+                    id=dev_id,
+                    url=url,
+                    name=info["name"],
+                    default_name=info["default_name"],
+                )
+            ie = device_map[dev_id].integration_entities
+            if integration_id not in ie:
+                ie[integration_id] = set()
+            if populate is None or integration_id in populate:
+                ie[integration_id].add(entity_id)
+    return device_map
 
 
 def _read_entity_state(
@@ -1034,4 +1177,340 @@ def trigger_entity_controller(
             triggers_on,
             controlled_on,
             is_day_time,
+        )
+
+
+# ── Entity Defaults Watchdog ──────────────────────
+
+
+def _get_entity_info(
+    hass_obj: object,
+    entity_id: str,
+) -> "EntityRegistryInfo | None":
+    """Return registry fields for an entity.
+
+    Returns None if the entity is not in the registry.
+    """
+    import homeassistant.helpers.entity_registry as er  # noqa: F821
+
+    ent_reg = er.async_get(hass_obj)
+    entry = ent_reg.async_get(entity_id)
+    if not entry:
+        return None
+    return EntityRegistryInfo(
+        entity_id=entry.entity_id,
+        name=entry.name,
+        original_name=entry.original_name,
+        has_entity_name=entry.has_entity_name,
+        device_id=entry.device_id,
+    )
+
+
+def _compute_expected_entity_id(
+    hass_obj: object,
+    entity_id: str,
+) -> str | None:
+    """Compute the expected entity ID from current state.
+
+    Uses HA's async_regenerate_entity_id which accounts
+    for current device name and any name override.
+    Returns None if the entry is not found or the method
+    is unavailable.
+    """
+    import homeassistant.helpers.entity_registry as er  # noqa: F821
+
+    ent_reg = er.async_get(hass_obj)
+    entry = ent_reg.async_get(entity_id)
+    if not entry:
+        return None
+    try:
+        return str(
+            ent_reg.async_regenerate_entity_id(entry),
+        )
+    except (AttributeError, TypeError):
+        # AttributeError: method missing in older HA
+        # TypeError: unexpected argument types
+        return None
+
+
+# Parameter defaults are defined in the blueprint YAML,
+# so don't duplicate them here.
+@service  # noqa: F821
+def entity_defaults_watchdog(
+    instance_id: str,
+    trigger_platform_raw: str,
+    drift_checks_raw: object,
+    include_integrations_raw: object,
+    exclude_integrations_raw: object,
+    device_exclude_regex_raw: str,
+    exclude_entities_raw: object,
+    entity_id_exclude_regex_raw: str,
+    entity_name_exclude_regex_raw: str,
+    check_interval_minutes_raw: str,
+    max_device_notifications_raw: str,
+    debug_logging_raw: str,
+) -> None:
+    """Detect entity ID and name drift.
+
+    Called by blueprint-generated automation.
+    Purely reactive: evaluate -> act -> exit.
+    No sleeping, no waiting.
+    """
+    from entity_defaults_watchdog import (  # noqa: F821
+        Config,
+        DeviceInfo,
+        EntityDriftInfo,
+        evaluate_devices,
+    )
+
+    start_time = time.monotonic()
+    now = datetime.now(tz=UTC)
+    auto_name = _automation_name(instance_id)
+    tag = "[EDW: " + auto_name + "]"
+
+    # Parse all config inputs
+    drift_checks = _normalize_list(drift_checks_raw)
+    include_integrations = _normalize_list(
+        include_integrations_raw,
+    )
+    exclude_integrations = _normalize_list(
+        exclude_integrations_raw,
+    )
+    exclude_entities = _normalize_list(
+        exclude_entities_raw,
+    )
+    debug_logging = _parse_bool(debug_logging_raw)
+    check_interval_minutes = int(
+        check_interval_minutes_raw,
+    )
+    max_notifications = int(
+        max_device_notifications_raw,
+    )
+
+    # Validate config (accumulate all errors)
+    errors: list[str] = []
+    if hass_err := _check_hass_available():
+        errors.append(hass_err)
+    device_exclude_regex = _validate_and_join_patterns(
+        device_exclude_regex_raw,
+        "device_exclude_regex",
+        errors,
+    )
+    entity_id_exclude_regex = _validate_and_join_patterns(
+        entity_id_exclude_regex_raw,
+        "entity_id_exclude_regex",
+        errors,
+    )
+    entity_name_exclude_regex = _validate_and_join_patterns(
+        entity_name_exclude_regex_raw,
+        "entity_name_exclude_regex",
+        errors,
+    )
+    _manage_config_error_persistent_notification(
+        errors,
+        instance_id,
+        "Entity Defaults Watchdog",
+    )
+    if errors:
+        return
+
+    # Interval gating (skip for timed triggers only;
+    # manual UI runs always execute)
+    assert check_interval_minutes >= 1, (
+        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
+    )
+    if str(trigger_platform_raw) == "time_pattern":
+        if not on_interval(check_interval_minutes, now):
+            return
+
+    config = Config(
+        drift_checks=drift_checks,
+        device_exclude_regex=device_exclude_regex,
+        exclude_entity_ids=exclude_entities,
+        entity_id_exclude_regex=entity_id_exclude_regex,
+        entity_name_exclude_regex=(entity_name_exclude_regex),
+    )
+
+    # Determine target integrations.
+    all_integrations = set(
+        _get_all_integration_ids(hass),  # noqa: F821
+    )
+    if include_integrations:
+        target_integrations = set(include_integrations)
+    else:
+        target_integrations = set(all_integrations)
+    for ex in exclude_integrations:
+        target_integrations.discard(ex)
+
+    # Discover devices (scans all integrations for
+    # accurate multi-integration detection; only
+    # populates entity IDs for target integrations).
+    device_map = _discover_devices(
+        hass,  # noqa: F821
+        list(target_integrations),
+    )
+
+    # Compute drift data.
+    devices = []
+    for dev_entry in device_map.values():
+        entity_infos: list[EntityDriftInfo] = []
+        for eids in dev_entry.integration_entities.values():
+            for eid in eids:
+                reg_info = _get_entity_info(
+                    hass,  # noqa: F821
+                    eid,
+                )
+                if not reg_info:
+                    continue
+
+                has_name_override = reg_info.name is not None
+
+                # Expected entity ID via HA's regeneration
+                expected_id = _compute_expected_entity_id(
+                    hass,  # noqa: F821
+                    eid,
+                )
+
+                # Current and expected name
+                current_name = str(
+                    reg_info.name or reg_info.original_name or "",
+                )
+                expected_name = None
+                if has_name_override:
+                    expected_name = str(
+                        reg_info.original_name or "",
+                    )
+
+                entity_infos.append(
+                    EntityDriftInfo(
+                        entity_id=eid,
+                        has_entity_name=(reg_info.has_entity_name),
+                        has_name_override=has_name_override,
+                        expected_entity_id=expected_id,
+                        current_name=current_name,
+                        expected_name=expected_name,
+                    ),
+                )
+
+        devices.append(
+            DeviceInfo(
+                de=dev_entry,
+                entities=entity_infos,
+            ),
+        )
+
+    # Evaluate drift (results are pre-sorted by the
+    # logic module for deterministic cap behavior)
+    results = evaluate_devices(config, devices)
+
+    # Apply notification cap
+    drifted = [r for r in results if r.has_drift]
+    cap_notification_id = "entity_defaults_watchdog_cap"
+
+    notifications: list[PersistentNotification] = []
+    if max_notifications > 0 and len(drifted) > max_notifications:
+        shown = drifted[:max_notifications]
+        suppressed = drifted[max_notifications:]
+        for r in shown:
+            notifications.append(r.to_notification())
+        for r in suppressed:
+            notifications.append(
+                r.to_notification(suppress=True),
+            )
+        # Dismiss clean devices
+        for r in results:
+            if not r.has_drift:
+                notifications.append(
+                    r.to_notification(),
+                )
+        # Cap summary notification
+        notifications.append(
+            PersistentNotification(
+                active=True,
+                notification_id=cap_notification_id,
+                title=("Entity defaults watchdog: notification cap reached"),
+                message=(
+                    "Showing "
+                    + str(max_notifications)
+                    + " of "
+                    + str(len(drifted))
+                    + " devices with drift. "
+                    + str(len(suppressed))
+                    + " additional notifications"
+                    " were suppressed."
+                ),
+            ),
+        )
+    else:
+        notifications = [r.to_notification() for r in results]
+        # Dismiss cap notification if it existed
+        notifications.append(
+            PersistentNotification(
+                active=False,
+                notification_id=cap_notification_id,
+                title="",
+                message="",
+            ),
+        )
+
+    active_ids = _get_active_notification_ids(
+        hass,  # noqa: F821
+    )
+    _process_persistent_notifications(
+        notifications,
+        active_ids,
+    )
+
+    # Compute stats and save state
+    elapsed = time.monotonic() - start_time
+    key = _state_key(instance_id)
+    stat_entities = sum(
+        [
+            r.entities_checked + r.entities_excluded
+            for r in results
+            if not r.device_excluded
+        ]
+    )
+    stat_devices_excluded = sum([1 for r in results if r.device_excluded])
+    stat_entities_excluded = sum([r.entities_excluded for r in results])
+    stat_entity_issues = sum([len(r.drifted_entities) for r in drifted])
+    stat_name_issues = sum(
+        [1 for r in drifted for d in r.drifted_entities if d.name_drifted]
+    )
+    stat_id_issues = sum(
+        [1 for r in drifted for d in r.drifted_entities if d.id_drifted]
+    )
+
+    _save_state(
+        key,
+        now,
+        {
+            "runtime": str(round(elapsed, 2)),
+            "integrations": len(all_integrations),
+            "devices": len(results),
+            "entities": stat_entities,
+            "integrations_excluded": (
+                len(all_integrations) - len(target_integrations)
+            ),
+            "devices_excluded": stat_devices_excluded,
+            "entities_excluded": stat_entities_excluded,
+            "device_issues": len(drifted),
+            "entity_issues": stat_entity_issues,
+            "entity_name_issues": stat_name_issues,
+            "entity_id_issues": stat_id_issues,
+        },
+    )
+
+    # Debug logging
+    if debug_logging:
+        log.warning(  # noqa: F821
+            "%s integrations=%d devices=%d"
+            " entities=%d device_issues=%d"
+            " entity_issues=%d",
+            tag,
+            len(all_integrations),
+            len(results),
+            stat_entities,
+            len(drifted),
+            stat_entity_issues,
         )

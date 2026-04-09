@@ -165,8 +165,8 @@ log.warning("%s event=%s ...", tag, ...)
 ```
 
 Current abbreviations: `STSC` (Sensor Threshold Switch
-Controller), `DW` (Device Watchdog), `TEC` (Trigger
-Entity Controller).
+Controller), `DW` (Device Watchdog), `EDW` (Entity
+Defaults Watchdog), `TEC` (Trigger Entity Controller).
 
 ## Notifications
 

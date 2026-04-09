@@ -1,0 +1,157 @@
+blueprint:
+  name: Entity Defaults Watchdog
+  description: >
+    Detect entity IDs and names that have drifted from their
+    defaults. Creates a persistent notification per device
+    with repair instructions. Clears notifications automatically
+    when drift is resolved.
+  domain: automation
+  author: epilatow
+
+  input:
+    drift_checks:
+      name: Drift checks
+      description: >
+        Which drift checks to run. Leave empty to run
+        all checks.
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Entity ID
+              value: entity-id
+            - label: Entity name
+              value: entity-name
+
+    include_integrations:
+      name: Include integrations
+      description: >
+        Integrations to check. Leave empty to check all
+        integrations.
+      default: []
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options: []
+
+    exclude_integrations:
+      name: Exclude integrations
+      description: >
+        Integrations to skip even if they match the
+        include list.
+      default: []
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options: []
+
+    device_exclude_regex:
+      name: Device exclude regex
+      description: >
+        Devices whose name matches any of these regular
+        expressions are ignored. Enter one pattern per
+        line. A partial match is sufficient (use ^...$
+        to require a full match).
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    exclude_entities:
+      name: Exclude entities
+      description: >
+        Entities to exclude from all drift checks.
+        Use this for entities with intentional custom
+        names.
+      default: []
+      selector:
+        entity:
+          multiple: true
+
+    entity_id_exclude_regex:
+      name: Entity ID exclude regex
+      description: >
+        Entities whose ID matches any of these regular
+        expressions are ignored. Enter one pattern per
+        line. A partial match is sufficient (use ^...$
+        to require a full match).
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    entity_name_exclude_regex:
+      name: Entity name exclude regex
+      description: >
+        Entities whose friendly name matches any of
+        these regular expressions are ignored. Enter one
+        pattern per line. A partial match is sufficient
+        (use ^...$ to require a full match).
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    check_interval_minutes:
+      name: Check interval (minutes)
+      description: Minutes between drift evaluations.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 10080
+          unit_of_measurement: minutes
+          mode: box
+
+    max_device_notifications:
+      name: Max device notifications
+      description: >
+        Maximum number of per-device notifications.
+        Set to 0 for unlimited. When the cap is reached,
+        a summary notification indicates how many
+        additional notifications were suppressed.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+
+    debug_logging:
+      name: Debug Logging
+      description: >
+        Enable debug logging. When enabled, emits a
+        log.warning message with full decision context
+        on every invocation. Check Settings > System >
+        Logs to view output.
+      default: false
+      selector:
+        boolean: {}
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+
+actions:
+  - action: pyscript.entity_defaults_watchdog
+    data:
+      instance_id: "{{ this.entity_id }}"
+      trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"
+      drift_checks_raw: !input drift_checks
+      include_integrations_raw: !input include_integrations
+      exclude_integrations_raw: !input exclude_integrations
+      device_exclude_regex_raw: !input device_exclude_regex
+      exclude_entities_raw: !input exclude_entities
+      entity_id_exclude_regex_raw: !input entity_id_exclude_regex
+      entity_name_exclude_regex_raw: !input entity_name_exclude_regex
+      check_interval_minutes_raw: !input check_interval_minutes
+      max_device_notifications_raw: !input max_device_notifications
+      debug_logging_raw: !input debug_logging
+
+# Triggers every minute but most invocations exit
+# immediately (interval gate). If a real evaluation
+# overlaps the next tick, dropping it is fine.
+mode: single

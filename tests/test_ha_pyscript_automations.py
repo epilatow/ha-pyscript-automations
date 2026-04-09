@@ -44,6 +44,7 @@ from datetime import UTC  # noqa: E402
 
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
+from helpers import EntityRegistryInfo  # noqa: E402
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
 # Timezone-aware version for watchdog tests (pyscript's
@@ -2190,6 +2191,712 @@ class TestTecDebug:
         )
         env.call()
         assert len(env.mock_log.warning_calls) == 0
+
+
+# ── Entity Defaults Watchdog mock infrastructure ───
+
+
+class _EdwEnv:
+    """Loads service file and wires mocks for EDW.
+
+    Replaces registry helpers in the exec'd namespace
+    with controllable mocks, avoiding any dependency
+    on HA packages.
+    """
+
+    def __init__(
+        self,
+        current_time: datetime = T0_UTC,
+    ) -> None:
+        self.mock_state = _MockState()
+        self.mock_ha = _MockHA()
+        self.mock_service = _MockServiceObj()
+        self.mock_log = _MockLog()
+        self.mock_pn = _MockPersistentNotification()
+
+        src = _SCRIPT_PATH.read_text()
+        self._ns: dict[str, Any] = {
+            "__builtins__": __builtins__,
+            "service": self.mock_service,
+            "state": self.mock_state,
+            "homeassistant": self.mock_ha,
+            "log": self.mock_log,
+            "hass": "mock_hass_obj",
+            "persistent_notification": self.mock_pn,
+        }
+        exec(
+            compile(src, str(_SCRIPT_PATH), "exec"),
+            self._ns,
+        )
+        self.set_now(current_time)
+
+        # Default mock registry responses
+        self._integration_entities: dict[str, list[str]] = {}
+        self._device_for_entity: dict[str, dict[str, str] | None] = {}
+        self._entity_info: dict[str, dict[str, object]] = {}
+        self._entity_expected_ids: dict[str, str | None] = {}
+        self._all_integration_ids: list[str] = []
+
+        # Wire mock helpers into the namespace
+        self._ns["_get_integration_entities"] = (
+            self._mock_get_integration_entities
+        )
+        self._ns["_get_device_for_entity"] = self._mock_get_device_for_entity
+        self._ns["_get_entity_info"] = self._mock_get_entity_info
+        self._ns["_compute_expected_entity_id"] = (
+            self._mock_compute_expected_entity_id
+        )
+        self._ns["_get_all_integration_ids"] = (
+            self._mock_get_all_integration_ids
+        )
+
+    def _mock_get_integration_entities(
+        self,
+        _hass: Any,
+        integration_id: str,
+    ) -> list[str]:
+        return self._integration_entities.get(
+            integration_id,
+            [],
+        )
+
+    def _mock_get_device_for_entity(
+        self,
+        _hass: Any,
+        entity_id: str,
+    ) -> dict[str, str] | None:
+        return self._device_for_entity.get(entity_id)
+
+    def _mock_get_entity_info(
+        self,
+        _hass: Any,
+        entity_id: str,
+    ) -> "EntityRegistryInfo | None":
+        return self._entity_info.get(entity_id)
+
+    def _mock_compute_expected_entity_id(
+        self,
+        _hass: Any,
+        entity_id: str,
+    ) -> str | None:
+        return self._entity_expected_ids.get(entity_id)
+
+    def _mock_get_all_integration_ids(
+        self,
+        _hass: Any,
+    ) -> list[str]:
+        ids = set(self._all_integration_ids)
+        ids.update(self._integration_entities.keys())
+        return sorted(ids)
+
+    def set_now(self, dt: datetime) -> None:
+        """Override datetime.now() for calls."""
+        self._ns["datetime"] = _ControllableDatetime(dt)
+
+    def remove_hass(self) -> None:
+        """Remove hass to simulate missing."""
+        del self._ns["hass"]
+
+    def setup_device(
+        self,
+        integration: str,
+        device_id: str,
+        device_name: str,
+        entities: dict[str, dict[str, object]],
+        default_name: str | None = None,
+    ) -> None:
+        """Wire up a device with entities.
+
+        entities: {entity_id: {name, original_name,
+            has_entity_name, expected_entity_id}}
+        default_name: device.name from the integration
+            (defaults to device_name).
+        """
+        def_name = default_name or device_name
+        current = self._integration_entities.get(
+            integration,
+            [],
+        )
+        for eid, edata in entities.items():
+            if eid not in current:
+                current.append(eid)
+            self._device_for_entity[eid] = {
+                "id": device_id,
+                "name": device_name,
+                "default_name": def_name,
+            }
+            self._entity_info[eid] = EntityRegistryInfo(
+                entity_id=eid,
+                name=edata.get("name"),
+                original_name=edata.get(
+                    "original_name",
+                ),
+                has_entity_name=edata.get(
+                    "has_entity_name",
+                    True,
+                ),
+                device_id=device_id,
+            )
+            expected_id = edata.get("expected_entity_id")
+            self._entity_expected_ids[eid] = (
+                str(expected_id) if expected_id else None
+            )
+        self._integration_entities[integration] = current
+
+    @property
+    def edw_fn(self) -> Any:
+        return self._ns["entity_defaults_watchdog"]
+
+    def call(self, **kwargs: Any) -> None:
+        self.edw_fn(**_edw_default_kwargs(**kwargs))
+
+
+def _edw_default_kwargs(
+    **overrides: Any,
+) -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "instance_id": "auto.edw_test",
+        "trigger_platform_raw": "time_pattern",
+        "drift_checks_raw": [],
+        "include_integrations_raw": ["zwave_js"],
+        "exclude_integrations_raw": [],
+        "device_exclude_regex_raw": "",
+        "exclude_entities_raw": [],
+        "entity_id_exclude_regex_raw": "",
+        "entity_name_exclude_regex_raw": "",
+        "check_interval_minutes_raw": "1",
+        "max_device_notifications_raw": "0",
+        "debug_logging_raw": "false",
+    }
+    defaults.update(overrides)
+    return defaults
+
+
+class TestEdwHassDetection:
+    """Test hass_is_global detection for EDW."""
+
+    def test_missing_hass_notifies(self) -> None:
+        env = _EdwEnv()
+        env.remove_hass()
+        env.call()
+        assert len(env.mock_pn.create_calls) == 1
+        call = env.mock_pn.create_calls[0]
+        assert "hass_is_global" in call["message"]
+        assert call["notification_id"] == (
+            "entity_defaults_watchdog_config_error_auto_edw_test"
+        )
+
+    def test_present_hass_no_config_error(
+        self,
+    ) -> None:
+        env = _EdwEnv()
+        env.call()
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if c.get("notification_id")
+            == "entity_defaults_watchdog_config_error"
+        ]
+        assert config_errors == []
+
+
+class TestEdwRegexValidation:
+    """Test invalid regex detection for EDW."""
+
+    def test_invalid_device_regex(self) -> None:
+        env = _EdwEnv()
+        env.call(device_exclude_regex_raw="[invalid")
+        assert len(env.mock_pn.create_calls) == 1
+        call = env.mock_pn.create_calls[0]
+        assert "Invalid" in call["title"]
+        assert "device_exclude_regex" in call["message"]
+
+    def test_invalid_entity_id_regex(self) -> None:
+        env = _EdwEnv()
+        env.call(
+            entity_id_exclude_regex_raw="(unclosed",
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "entity_id_exclude_regex" in msg
+
+    def test_invalid_entity_name_regex(self) -> None:
+        env = _EdwEnv()
+        env.call(
+            entity_name_exclude_regex_raw="(bad",
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "entity_name_exclude_regex" in msg
+
+    def test_all_invalid_reports_all(self) -> None:
+        env = _EdwEnv()
+        env.call(
+            device_exclude_regex_raw="[bad",
+            entity_id_exclude_regex_raw="(bad",
+            entity_name_exclude_regex_raw="(bad",
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "device_exclude_regex" in msg
+        assert "entity_id_exclude_regex" in msg
+        assert "entity_name_exclude_regex" in msg
+
+
+class TestEdwMultilineRegex:
+    """Test multiline regex pattern handling."""
+
+    def test_multiline_patterns_joined(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.battery": {
+                    "name": None,
+                    "original_name": "Battery",
+                    "has_entity_name": True,
+                    "expected_entity_id": ("sensor.dev_battery"),
+                },
+            },
+        )
+        env.call(
+            entity_id_exclude_regex_raw=("battery\ntemp"),
+        )
+        # battery entity excluded by first pattern
+        key = "pyscript.auto_edw_test_state"
+        attrs = env.mock_state.getattr(key)
+        assert attrs["device_issues"] == 0
+
+    def test_multiline_invalid_reports_per_line(
+        self,
+    ) -> None:
+        env = _EdwEnv()
+        env.call(
+            device_exclude_regex_raw=("valid.*\n[invalid\nalso_valid"),
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "[invalid" in msg
+        assert "valid.*" not in msg
+        assert "also_valid" not in msg
+
+    def test_empty_lines_ignored(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.a": {
+                    "name": None,
+                    "original_name": "A",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.a",
+                },
+            },
+        )
+        # Empty lines and whitespace-only lines
+        env.call(
+            device_exclude_regex_raw="\n  \n\n",
+        )
+        # No errors, no match-all rejection
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if "config_error" in c.get("notification_id", "")
+        ]
+        assert config_errors == []
+
+    def test_match_all_pattern_rejected(self) -> None:
+        env = _EdwEnv()
+        env.call(
+            device_exclude_regex_raw=".*",
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "matches empty string" in msg
+
+
+class TestEdwIntervalGating:
+    """Test check interval gating for EDW."""
+
+    def test_skips_when_off_interval(self) -> None:
+        # Odd minute with interval=2 -> skip
+        env = _EdwEnv(
+            current_time=datetime(
+                2024,
+                1,
+                15,
+                12,
+                1,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.a": {
+                    "name": "Old",
+                    "original_name": "New",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.new_a",
+                },
+            },
+        )
+        env.call(check_interval_minutes_raw="2")
+        assert env.mock_pn.create_calls == []
+        # Only config error dismiss (config validation
+        # runs before interval gating)
+        device_dismisses = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if "config_error" not in c["notification_id"]
+        ]
+        assert device_dismisses == []
+
+    def test_runs_on_interval_boundary(self) -> None:
+        env = _EdwEnv(
+            current_time=datetime(
+                2024,
+                1,
+                15,
+                12,
+                0,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.a": {
+                    "name": "Old",
+                    "original_name": "New",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.new_a",
+                },
+            },
+        )
+        env.call(check_interval_minutes_raw="60")
+        # Should have evaluated (create or dismiss)
+        total = len(env.mock_pn.create_calls) + len(env.mock_pn.dismiss_calls)
+        assert total >= 1
+
+    def test_manual_trigger_bypasses_interval(
+        self,
+    ) -> None:
+        env = _EdwEnv(
+            current_time=datetime(
+                2024,
+                1,
+                15,
+                12,
+                1,
+                0,
+                tzinfo=UTC,
+            ),
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.a": {
+                    "name": "Old",
+                    "original_name": "New",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.new_a",
+                },
+            },
+        )
+        env.call(
+            check_interval_minutes_raw="60",
+            trigger_platform_raw="manual",
+        )
+        total = len(env.mock_pn.create_calls) + len(env.mock_pn.dismiss_calls)
+        assert total >= 1
+
+
+class TestEdwIntegrationFiltering:
+    """Test integration include/exclude filtering."""
+
+    def test_include_filters(self) -> None:
+        env = _EdwEnv()
+        # Give matter device a drifted entity
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "ZWave Dev",
+            {
+                "sensor.zw": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.zw",
+                },
+            },
+        )
+        env.setup_device(
+            "matter",
+            "dev2",
+            "Matter Dev",
+            {
+                "sensor.mt_old": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": ("sensor.matter_dev_temp"),
+                },
+            },
+        )
+        # Only include zwave_js — matter entity
+        # drift should be suppressed
+        env.call(
+            include_integrations_raw=["zwave_js"],
+        )
+        # Both devices discovered, but only
+        # zwave_js entities checked for drift.
+        # Matter device should get a dismiss.
+        key = "pyscript.auto_edw_test_state"
+        attrs = env.mock_state.getattr(key)
+        assert attrs["devices"] == 2
+        assert attrs["device_issues"] == 0
+
+    def test_exclude_removes(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "ZWave Dev",
+            {
+                "sensor.zw_old": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": ("sensor.zwave_dev_temp"),
+                },
+            },
+        )
+        # Include then exclude -> no drift reported
+        env.call(
+            include_integrations_raw=["zwave_js"],
+            exclude_integrations_raw=["zwave_js"],
+        )
+        key = "pyscript.auto_edw_test_state"
+        attrs = env.mock_state.getattr(key)
+        assert attrs["device_issues"] == 0
+
+    def test_empty_include_scans_all(self) -> None:
+        env = _EdwEnv()
+        env._all_integration_ids = ["zwave_js"]
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "ZWave Dev",
+            {
+                "sensor.zw": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.zw",
+                },
+            },
+        )
+        env.call(include_integrations_raw=[])
+        key = "pyscript.auto_edw_test_state"
+        attrs = env.mock_state.getattr(key)
+        assert attrs["devices"] == 1
+
+
+class TestEdwDiscovery:
+    """Test device discovery from registries."""
+
+    def test_discovers_device(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Kitchen Sensor",
+            {
+                "sensor.old_temp": {
+                    "name": None,
+                    "original_name": "Temperature",
+                    "has_entity_name": True,
+                    "expected_entity_id": ("sensor.kitchen_sensor_temperature"),
+                },
+            },
+        )
+        env.call()
+        # ID drift -> notification created
+        assert len(env.mock_pn.create_calls) == 1
+        call = env.mock_pn.create_calls[0]
+        assert "Kitchen Sensor" in call["title"]
+
+    def test_no_devices_no_notifications(
+        self,
+    ) -> None:
+        env = _EdwEnv()
+        env.call()
+        assert env.mock_pn.create_calls == []
+        # Only the cap dismiss (always emitted when
+        # under cap)
+        device_dismisses = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if "_cap" not in c["notification_id"]
+            and "config_error" not in c["notification_id"]
+        ]
+        assert device_dismisses == []
+
+
+class TestEdwNotifications:
+    """Test notification create/dismiss behavior."""
+
+    def test_creates_for_drifted(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Drifted Dev",
+            {
+                "sensor.old_name": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": ("sensor.drifted_dev_temp"),
+                },
+            },
+        )
+        env.call()
+        assert len(env.mock_pn.create_calls) == 1
+        call = env.mock_pn.create_calls[0]
+        assert call["notification_id"] == ("entity_defaults_watchdog_dev1")
+        assert "Drifted Dev" in call["title"]
+
+    def test_duplicate_device_names(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Doorbell",
+            {
+                "sensor.old_a": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": ("sensor.doorbell_temp"),
+                },
+            },
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev2",
+            "Doorbell",
+            {
+                "sensor.old_b": {
+                    "name": None,
+                    "original_name": "Humidity",
+                    "has_entity_name": True,
+                    "expected_entity_id": ("sensor.doorbell_humidity"),
+                },
+            },
+        )
+        env.call()
+        assert len(env.mock_pn.create_calls) == 2
+
+    def test_dismisses_for_clean(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Clean Dev",
+            {
+                "sensor.clean": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.clean",
+                },
+            },
+        )
+        env.call()
+        device_dismisses = [
+            c
+            for c in env.mock_pn.dismiss_calls
+            if "_cap" not in c["notification_id"]
+            and "config_error" not in c["notification_id"]
+        ]
+        assert len(device_dismisses) == 1
+        assert (
+            device_dismisses[0]["notification_id"]
+            == "entity_defaults_watchdog_dev1"
+        )
+
+
+class TestEdwDebugAttrs:
+    """Test debug attribute writing for EDW."""
+
+    def test_writes_debug_attrs(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.a": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.a",
+                },
+            },
+        )
+        env.call()
+        key = "pyscript.auto_edw_test_state"
+        assert env.mock_state.get(key) == "ok"
+        attrs = env.mock_state.getattr(key)
+        assert "last_run" in attrs
+        assert "runtime" in attrs
+        assert attrs["devices"] == 1
+        assert attrs["device_issues"] == 0
+
+
+class TestEdwDebugLogging:
+    """Test debug logging behavior for EDW."""
+
+    def test_no_logging_when_false(self) -> None:
+        env = _EdwEnv()
+        env.call(debug_logging_raw="false")
+        assert env.mock_log.warning_calls == []
+
+    def test_logging_when_true(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.a": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.a",
+                },
+            },
+        )
+        env.call(debug_logging_raw="true")
+        assert len(env.mock_log.warning_calls) == 1
+        msg = env.mock_log.warning_calls[0][0]
+        args = env.mock_log.warning_calls[0][1]
+        formatted = msg % args
+        assert "[EDW:" in formatted
 
 
 class TestCodeQuality(CodeQualityBase):
