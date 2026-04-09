@@ -2360,6 +2360,44 @@ class TestPyScriptCompatibility:
                     " in PyScript. Use if/elif/else."
                 )
 
+    def test_no_sort_key_in_service_wrappers(
+        self,
+    ) -> None:
+        """sort(key=func) breaks under PyScript.
+
+        PyScript wraps all function calls as coroutines,
+        so sort(key=func) compares coroutine objects
+        instead of return values. Use tuple-based sorting
+        instead: [(key, item) for item in items].sort().
+        """
+        for path in self._service_files():
+            src = path.read_text()
+            tree = ast.parse(src, str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                # Check .sort(key=...) and sorted(key=...)
+                func = node.func
+                is_sort = False
+                if isinstance(func, ast.Attribute):
+                    is_sort = func.attr in (
+                        "sort",
+                        "sorted",
+                    )
+                elif isinstance(func, ast.Name):
+                    is_sort = func.id == "sorted"
+                if not is_sort:
+                    continue
+                for kw in node.keywords:
+                    assert kw.arg != "key", (
+                        f"{path.name}:{node.lineno}"
+                        " sort(key=func) -- PyScript"
+                        " wraps key function calls as"
+                        " coroutines, breaking"
+                        " comparison. Use tuple-based"
+                        " sorting instead."
+                    )
+
     def test_no_print_in_service_wrappers(self) -> None:
         """print() is intercepted by PyScript; use log.*."""
         for path in self._service_files():

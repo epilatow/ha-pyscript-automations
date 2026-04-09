@@ -201,6 +201,9 @@ restrictions. These are enforced via the
 - No `yield` / `yield from`
 - No `print()` (use `log.warning()`)
 - No `match`/`case`
+- No `sort(key=func)` or `sorted(key=func)` (PyScript
+  wraps function calls as coroutines; use tuple-based
+  sorting instead)
 
 Logic modules (`pyscript/modules/*.py`) run under
 standard Python import and do not have these restrictions.
