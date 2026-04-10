@@ -17,6 +17,18 @@ runtime dependencies, making it fully testable with pytest.
   notifications for unavailable or stale devices, clears them
   automatically on recovery.
 
+- [Entity Defaults Watchdog](docs/entity_defaults_watchdog.md) -
+  Detects entity IDs and names that have drifted from their
+  defaults. Creates persistent notifications per device with
+  repair instructions, clears them automatically when drift
+  is resolved.
+
+- [Trigger Entity Controller](docs/trigger_entity_controller.md) -
+  Controls entities (lights, switches, fans, etc.) with optional
+  trigger-based activation and auto-off timer. Supports
+  time-of-day gating, trigger disabling, force-on, and
+  configurable notifications.
+
 ## Prerequisites
 
 - Home Assistant with the
