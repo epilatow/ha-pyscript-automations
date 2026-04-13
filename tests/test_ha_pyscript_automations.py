@@ -104,11 +104,14 @@ class _MockServiceObj:
 
     As a decorator (``@service``), returns the function
     unchanged.  ``call()`` records invocations for
-    assertion.
+    assertion. Tests can set ``call_exception`` to make
+    the next ``call()`` raise — used to verify that
+    notification dispatch failures don't propagate.
     """
 
     def __init__(self) -> None:
         self.call_log: list[tuple[str, str, dict[str, Any]]] = []
+        self.call_exception: Exception | None = None
 
     def __call__(self, fn: Any) -> Any:
         return fn
@@ -120,6 +123,33 @@ class _MockServiceObj:
         **kwargs: Any,
     ) -> None:
         self.call_log.append((domain, svc, kwargs))
+        if self.call_exception is not None:
+            raise self.call_exception
+
+
+class _MockHassServices:
+    """Mock for ``hass.services``.
+
+    ``has_service_result`` defaults to True so existing
+    tests that pass a ``notification_service`` continue
+    to validate cleanly. Tests that need to simulate a
+    missing service set it to False.
+    """
+
+    def __init__(self) -> None:
+        self.has_service_result: bool = True
+        self.has_service_calls: list[tuple[str, str]] = []
+
+    def has_service(self, domain: str, svc: str) -> bool:
+        self.has_service_calls.append((domain, svc))
+        return self.has_service_result
+
+
+class _MockHass:
+    """Mock for the pyscript-injected ``hass`` global."""
+
+    def __init__(self) -> None:
+        self.services = _MockHassServices()
 
 
 class _MockLog:
@@ -168,6 +198,7 @@ class _ServiceEnv:
         self.mock_service = _MockServiceObj()
         self.mock_log = _MockLog()
         self.mock_pn = _MockPersistentNotification()
+        self.mock_hass = _MockHass()
 
         src = _SCRIPT_PATH.read_text()
         self._ns: dict[str, Any] = {
@@ -177,6 +208,7 @@ class _ServiceEnv:
             "homeassistant": self.mock_ha,
             "log": self.mock_log,
             "persistent_notification": self.mock_pn,
+            "hass": self.mock_hass,
         }
         exec(
             compile(src, str(_SCRIPT_PATH), "exec"),
@@ -994,6 +1026,218 @@ class TestValidateEntitiesDomainChecks:
         env.set_entity_state("sensor.temp", "22")
         errors = fn(["sensor.temp"], et.ANY)
         assert errors == []
+
+
+class TestValidateNotificationService:
+    """_validate_notification_service unit tests."""
+
+    def test_empty_returns_no_errors(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_validate_notification_service"]
+        env.mock_hass.services.has_service_result = False
+        assert fn("") == []
+        # Empty input must not even consult hass.
+        assert env.mock_hass.services.has_service_calls == []
+
+    def test_existing_returns_no_errors(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_validate_notification_service"]
+        env.mock_hass.services.has_service_result = True
+        assert fn("notify.mobile_app_phone") == []
+
+    def test_missing_returns_error(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_validate_notification_service"]
+        env.mock_hass.services.has_service_result = False
+        errors = fn("notify.mobile_app_gone")
+        assert len(errors) == 1
+        assert "notify.mobile_app_gone" in errors[0]
+        assert "does not exist" in errors[0]
+
+    def test_normalizes_bare_service_name(self) -> None:
+        """Bare 'mobile_app_x' becomes notify.mobile_app_x."""
+        env = _ServiceEnv()
+        fn = env._ns["_validate_notification_service"]
+        env.mock_hass.services.has_service_result = True
+        fn("mobile_app_x")
+        assert env.mock_hass.services.has_service_calls == [
+            ("notify", "mobile_app_x"),
+        ]
+
+    def test_handles_missing_hass(self) -> None:
+        """No hass in namespace -> NameError caught, no error."""
+        env = _ServiceEnv()
+        fn = env._ns["_validate_notification_service"]
+        del env._ns["hass"]
+        assert fn("notify.mobile_app_phone") == []
+
+
+class TestSendNotificationHelper:
+    """_send_notification helper unit tests."""
+
+    def test_dispatches_qualified_name(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_send_notification"]
+        fn("notify.mobile_app_phone", "hello", "[TAG]")
+        assert env.mock_service.call_log == [
+            (
+                "notify",
+                "mobile_app_phone",
+                {"message": "hello"},
+            ),
+        ]
+
+    def test_dispatches_bare_name_with_prefix(self) -> None:
+        """Bare 'mobile_app_x' is normalized to notify."""
+        env = _ServiceEnv()
+        fn = env._ns["_send_notification"]
+        fn("mobile_app_x", "hi", "[TAG]")
+        assert env.mock_service.call_log == [
+            (
+                "notify",
+                "mobile_app_x",
+                {"message": "hi"},
+            ),
+        ]
+
+    def test_empty_service_is_noop(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_send_notification"]
+        fn("", "hello", "[TAG]")
+        assert env.mock_service.call_log == []
+
+    def test_empty_message_is_noop(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_send_notification"]
+        fn("notify.phone", "", "[TAG]")
+        assert env.mock_service.call_log == []
+
+    def test_swallows_keyerror(self) -> None:
+        """A KeyError from service.call must not propagate."""
+        env = _ServiceEnv()
+        fn = env._ns["_send_notification"]
+        env.mock_service.call_exception = KeyError("phone")
+        # Must return normally (no raise).
+        fn("notify.phone", "hello", "[STSC: foo]")
+        # Helper logged the failure.
+        assert len(env.mock_log.warning_calls) == 1
+        msg, args = env.mock_log.warning_calls[0]
+        formatted = msg % args
+        assert "[STSC: foo]" in formatted
+        assert "notify.phone" in formatted
+
+    def test_swallows_runtime_error(self) -> None:
+        """Non-KeyError exceptions are also swallowed."""
+        env = _ServiceEnv()
+        fn = env._ns["_send_notification"]
+        env.mock_service.call_exception = RuntimeError(
+            "transient",
+        )
+        fn("notify.phone", "hello", "[TAG]")
+        assert len(env.mock_log.warning_calls) == 1
+
+
+class TestStscNotificationServiceValidation:
+    """STSC entrypoint validates notification_service."""
+
+    def test_missing_service_creates_notification(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        env.mock_hass.services.has_service_result = False
+        env.call(notification_service="notify.gone")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "notify.gone" in msg
+        assert "does not exist" in msg
+
+    def test_missing_service_blocks_action(self) -> None:
+        env = _ServiceEnv()
+        env.mock_hass.services.has_service_result = False
+        env.call(
+            sensor_value="60.0",
+            trigger_entity="sensor.humidity",
+            notification_service="notify.gone",
+        )
+        # Validation failed -> early return -> no action,
+        # no service.call dispatched.
+        assert env.mock_ha.turn_on_calls == []
+        assert env.mock_ha.turn_off_calls == []
+        assert env.mock_service.call_log == []
+
+    def test_valid_service_dismisses_notification(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        env.mock_hass.services.has_service_result = True
+        env.call(notification_service="notify.phone")
+        assert len(env.mock_pn.dismiss_calls) == 1
+        assert env.mock_pn.create_calls == []
+
+    def test_empty_service_skips_validation(
+        self,
+    ) -> None:
+        """Empty notification_service is valid."""
+        env = _ServiceEnv()
+        env.mock_hass.services.has_service_result = False
+        env.call(notification_service="")
+        # Default config-error path: dismiss only.
+        assert env.mock_pn.create_calls == []
+
+
+class TestStscStateSavedWhenNotifyRaises:
+    """The reorder invariant: state saves even if
+    notification dispatch raises.
+
+    This is the load-bearing regression test for the
+    bath fan flap incident on 2026-04-13.
+    """
+
+    def test_release_path_saves_state_on_notify_failure(
+        self,
+    ) -> None:
+        from sensor_threshold_switch_controller import (
+            Sample,
+            State,
+        )
+
+        env = _ServiceEnv()
+        env.mock_hass.services.has_service_result = True
+        env.mock_service.call_exception = KeyError(
+            "mobile_app_gone",
+        )
+
+        # Pre-seed state with an active baseline so the
+        # release path fires.
+        key = env.state_key_fn("auto.test_instance")
+        s = State(
+            baseline=60.0,
+            samples=[Sample(value=62.0, timestamp=T0)],
+            initialized=True,
+        )
+        env.mock_state.setattr(
+            key + ".data",
+            json.dumps(s.to_dict()),
+        )
+
+        # Sensor reading drops below release threshold.
+        env.call(
+            sensor_value="61.0",
+            switch_state="on",
+            trigger_entity="sensor.humidity",
+            notification_service="notify.mobile_app_gone",
+        )
+
+        # Action happened.
+        assert len(env.mock_ha.turn_off_calls) == 1
+        # Notification was attempted (and raised).
+        assert len(env.mock_service.call_log) == 1
+        # _send_notification logged the failure.
+        assert len(env.mock_log.warning_calls) == 1
+        # State save still happened: baseline cleared.
+        raw = env.mock_state.getattr(key).get("data", "")
+        data = json.loads(raw)
+        assert data["baseline"] is None
 
 
 # ── Device Watchdog mock infrastructure ──────────────
@@ -1821,6 +2065,7 @@ class _TecEnv:
         self.mock_service = _MockServiceObj()
         self.mock_log = _MockLog()
         self.mock_pn = _MockPersistentNotification()
+        self.mock_hass = _MockHass()
 
         src = _SCRIPT_PATH.read_text()
         self._ns: dict[str, Any] = {
@@ -1830,6 +2075,7 @@ class _TecEnv:
             "homeassistant": self.mock_ha,
             "log": self.mock_log,
             "persistent_notification": self.mock_pn,
+            "hass": self.mock_hass,
         }
         exec(
             compile(src, str(_SCRIPT_PATH), "exec"),
@@ -2145,6 +2391,97 @@ class TestTecNotifications:
             notification_events_raw=["triggered-on"],
         )
         assert len(env.mock_service.call_log) == 0
+
+
+class TestTecNotificationServiceValidation:
+    """TEC entrypoint validates notification_service."""
+
+    def test_missing_service_creates_notification(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.mock_hass.services.has_service_result = False
+        env.call(notification_service="notify.gone")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "notify.gone" in msg
+
+    def test_missing_service_blocks_action(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.mock_hass.services.has_service_result = False
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+            notification_service="notify.gone",
+            notification_events_raw=["triggered-on"],
+        )
+        assert env.mock_ha.turn_on_calls == []
+        assert env.mock_service.call_log == []
+
+    def test_valid_service_dismisses_notification(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "off",
+        )
+        env.mock_hass.services.has_service_result = True
+        env.call(notification_service="notify.phone")
+        assert len(env.mock_pn.dismiss_calls) == 1
+
+
+class TestTecStateSavedWhenNotifyRaises:
+    """The reorder invariant for TEC: state saves even
+    if notification dispatch raises."""
+
+    def test_triggered_on_persisted_on_notify_failure(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state(
+            "binary_sensor.motion",
+            "on",
+        )
+        env.mock_hass.services.has_service_result = True
+        env.mock_service.call_exception = KeyError(
+            "mobile_app_gone",
+        )
+
+        env.call(
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+            auto_off_minutes_raw="2",
+            notification_service="notify.mobile_app_gone",
+            notification_events_raw=["triggered-on"],
+        )
+
+        # Action happened.
+        assert len(env.mock_ha.turn_on_calls) == 1
+        # Notification was attempted (and raised).
+        assert len(env.mock_service.call_log) == 1
+        # _send_notification logged the failure.
+        assert len(env.mock_log.warning_calls) == 1
+        # State save happened despite the notify failure
+        # (the load-bearing invariant): the run's
+        # ``last_action`` attribute was persisted to the
+        # entity by ``_save_state``.
+        key = env.state_key_fn("auto.tec_test")
+        attrs = env.mock_state.getattr(key)
+        assert attrs.get("last_action") == "TURN_ON"
+        assert attrs.get("last_event") is not None
 
 
 class TestTecStatePersistence:

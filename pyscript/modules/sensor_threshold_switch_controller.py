@@ -578,7 +578,6 @@ class ServiceResult:
     event_type: str = ""
     sensor_value: float | None = None
     notification: str = ""
-    notification_service: str = ""
 
 
 def handle_service_call(
@@ -587,7 +586,6 @@ def handle_service_call(
     switch_name: str,
     current_time: datetime,
     target_switch_entity: str,
-    notification_service: str,
     **kwargs: Any,
 ) -> ServiceResult:
     """Bridge entry point called by ha_pyscript_automations.py.
@@ -608,7 +606,6 @@ def handle_service_call(
          manual off (re-activate or double-off disable)
        - TIMER: check auto-off expiry
     5. Format notification with prefix/suffix
-    6. Normalise notification service name
 
     Purely reactive: no sleeping, no waiting.  Auto-off
     records a start timestamp rounded up to the next
@@ -643,13 +640,6 @@ def handle_service_call(
         **kwargs,
     )
 
-    # Normalise notification service name
-    svc = ""
-    if result.notification and notification_service:
-        svc = notification_service
-        if not svc.startswith("notify."):
-            svc = f"notify.{svc}"
-
     return ServiceResult(
         state_dict=s.to_dict(),
         action=result.action,
@@ -657,5 +647,4 @@ def handle_service_call(
         event_type=event_type.name,
         sensor_value=parsed_sensor,
         notification=result.notification or "",
-        notification_service=svc,
     )

@@ -180,6 +180,49 @@ def _parse_bool(value: object) -> bool:
     return str(value).lower() == "true"
 
 
+def _send_notification(
+    notification_service: str,
+    message: str,
+    tag: str,
+) -> None:
+    """Best-effort notification dispatch.
+
+    notification_service may be a bare ``"notify"`` or
+    a fully-qualified ``"notify.<service>"`` name; the
+    ``"notify."`` prefix is added when missing. Empty
+    or falsy values are a no-op.
+
+    The service.call wrapper does not document the set
+    of exceptions it can raise: a misconfigured target,
+    a renamed integration, a transient HA error all
+    surface as different exception types. Catch broadly
+    so callers can treat notification dispatch as
+    fire-and-forget and continue executing regardless
+    of outcome. Failures are logged at warning level so
+    the user has a breadcrumb when notifications go
+    silent.
+    """
+    if not notification_service or not message:
+        return
+    svc = str(notification_service)
+    if not svc.startswith("notify."):
+        svc = "notify." + svc
+    parts = svc.split(".", 1)
+    try:
+        service.call(  # noqa: F821
+            parts[0],
+            parts[1],
+            message=message,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning(  # noqa: F821
+            "%s notification dispatch via %s failed: %s",
+            tag,
+            svc,
+            e,
+        )
+
+
 def _normalize_list(value: object) -> list[str]:
     """Ensure value is a list of strings.
 
@@ -466,6 +509,40 @@ def _validate_entities(
     return errors
 
 
+def _validate_notification_service(
+    notification_service: str,
+) -> list[str]:
+    """Validate that a notify service is registered.
+
+    Returns a single-element error list if the input is
+    non-empty and HA does not have a matching service in
+    the ``notify`` domain. An empty/blank input means
+    notifications are disabled and is always valid.
+
+    NameError/AttributeError/TypeError are caught
+    defensively so test environments without a real
+    ``hass`` object skip the check rather than crash,
+    matching the convention in ``_validate_entities``
+    (NameError on missing ``state``) and
+    ``_get_active_notification_ids``.
+    """
+    if not notification_service:
+        return []
+    svc = str(notification_service)
+    if not svc.startswith("notify."):
+        svc = "notify." + svc
+    parts = svc.split(".", 1)
+    try:
+        if hass.services.has_service(  # noqa: F821
+            parts[0],
+            parts[1],
+        ):
+            return []
+    except (NameError, AttributeError, TypeError):
+        return []
+    return [svc + " notify service does not exist"]
+
+
 def _manage_config_error_persistent_notification(
     errors: list[str],
     instance_id: str,
@@ -556,10 +633,13 @@ def sensor_threshold_switch_controller(
     auto_name = _automation_name(instance_id)
     tag = "[STSC: " + auto_name + "]"
 
-    # Validate entities
+    # Validate entities and notification service
     errors = _validate_entities(
         [target_switch_entity],
         EntityType.CONTROLLABLE,
+    )
+    errors += _validate_notification_service(
+        notification_service,
     )
     _manage_config_error_persistent_notification(
         errors,
@@ -614,7 +694,6 @@ def sensor_threshold_switch_controller(
         sampling_window_s=int(sampling_window_seconds_raw),
         disable_window_s=int(disable_window_seconds_raw),
         auto_off_min=int(auto_off_minutes_raw),
-        notification_service=notification_service,
         notification_prefix=notification_prefix,
         notification_suffix=notification_suffix,
     )
@@ -629,19 +708,19 @@ def sensor_threshold_switch_controller(
             entity_id=target_switch_entity,
         )
 
-    # Send notification
-    if result.notification and result.notification_service:
-        parts = result.notification_service.split(".")
-        service.call(  # noqa: F821
-            parts[0],
-            parts[1],
-            message=result.notification,
-        )
-
-    # Save state + debug attributes
+    # Save state before dispatching notifications.
+    # State is load-bearing; notifications are best-
+    # effort. A notify failure must never lose state.
     info = _stsc_debug_dict(result, now, sensor_value)
     info["data"] = json.dumps(result.state_dict)
     _save_state(key, now, info)
+
+    # Best-effort notification dispatch.
+    _send_notification(
+        notification_service,
+        result.notification,
+        tag,
+    )
 
     # Debug logging (opt-in via blueprint)
     if debug_logging:
@@ -1051,7 +1130,9 @@ def trigger_entity_controller(
         errors.append(
             eid + " is in both trigger and disabling entities",
         )
-
+    errors += _validate_notification_service(
+        notification_service,
+    )
     _manage_config_error_persistent_notification(
         errors,
         instance_id,
@@ -1180,19 +1261,9 @@ def trigger_entity_controller(
                 entity_id=eid,
             )
 
-    # Send notification
-    if result.notification and notification_service:
-        svc = str(notification_service)
-        if not svc.startswith("notify."):
-            svc = "notify." + svc
-        parts = svc.split(".")
-        service.call(  # noqa: F821
-            parts[0],
-            parts[1],
-            message=result.notification,
-        )
-
-    # Save state + debug attributes
+    # Save state before dispatching notifications.
+    # State is load-bearing; notifications are best-
+    # effort. A notify failure must never lose state.
     new_auto_off = ""
     if result.auto_off_at is not None:
         new_auto_off = result.auto_off_at.isoformat()
@@ -1205,6 +1276,13 @@ def trigger_entity_controller(
             "last_reason": result.reason or "n/a",
             "last_event": event_type.name,
         },
+    )
+
+    # Best-effort notification dispatch.
+    _send_notification(
+        notification_service,
+        result.notification,
+        tag,
     )
 
     # Debug logging (opt-in via blueprint)

@@ -96,8 +96,10 @@ blueprint:
       name: Notification Service (optional)
       description: >
         Service name for notifications (e.g., "notify" or
-        "notify.mobile_app_phone"). Leave empty to disable
-        notifications.
+        "notify.mobile_app_phone"). Validated at automation
+        startup; if the service does not exist a persistent
+        notification is raised and the automation will not
+        run. Leave empty to disable notifications.
       default: ""
       selector:
         text:

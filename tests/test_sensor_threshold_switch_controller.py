@@ -1035,7 +1035,6 @@ class TestHandleServiceCall:
             "sampling_window_s": 300,
             "disable_window_s": 10,
             "auto_off_min": 30,
-            "notification_service": "",
             "notification_prefix": "",
             "notification_suffix": "",
         }
@@ -1089,14 +1088,16 @@ class TestHandleServiceCall:
         )
         assert result.action == Action.TURN_OFF
 
-    def test_notification_sent(self) -> None:
-        """Spike with notification_service -> notification
-        populated in result."""
+    def test_notification_message_populated_on_spike(
+        self,
+    ) -> None:
+        """Spike -> ServiceResult.notification carries the
+        formatted spike message regardless of dispatch
+        target (target routing is the bridge's job)."""
         r1 = handle_service_call(
             **self._call_kwargs(
                 sensor_value="60.0",
                 trigger_entity="sensor.humidity",
-                notification_service="notify.phone",
                 current_time=T0,
             ),
         )
@@ -1105,60 +1106,10 @@ class TestHandleServiceCall:
                 state_data=r1.state_dict,
                 sensor_value="70.0",
                 trigger_entity="sensor.humidity",
-                notification_service="notify.phone",
                 current_time=T0 + timedelta(seconds=10),
             ),
         )
-        assert r2.notification_service == "notify.phone"
         assert "spike" in r2.notification.lower()
-
-    def test_notification_normalizes_service_name(
-        self,
-    ) -> None:
-        """'phone' -> notification_service is
-        'notify.phone'."""
-        r1 = handle_service_call(
-            **self._call_kwargs(
-                sensor_value="60.0",
-                trigger_entity="sensor.humidity",
-                notification_service="phone",
-                current_time=T0,
-            ),
-        )
-        r2 = handle_service_call(
-            **self._call_kwargs(
-                state_data=r1.state_dict,
-                sensor_value="70.0",
-                trigger_entity="sensor.humidity",
-                notification_service="phone",
-                current_time=T0 + timedelta(seconds=10),
-            ),
-        )
-        assert r2.notification_service == "notify.phone"
-
-    def test_no_notification_when_service_empty(
-        self,
-    ) -> None:
-        """Empty notification_service -> no notification
-        in result."""
-        r1 = handle_service_call(
-            **self._call_kwargs(
-                sensor_value="60.0",
-                trigger_entity="sensor.humidity",
-                notification_service="",
-                current_time=T0,
-            ),
-        )
-        r2 = handle_service_call(
-            **self._call_kwargs(
-                state_data=r1.state_dict,
-                sensor_value="70.0",
-                trigger_entity="sensor.humidity",
-                notification_service="",
-                current_time=T0 + timedelta(seconds=10),
-            ),
-        )
-        assert r2.notification_service == ""
 
     def test_no_action_on_timer_idle(self) -> None:
         """Timer event, no auto-off pending -> NONE."""
