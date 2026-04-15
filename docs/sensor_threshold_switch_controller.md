@@ -1,5 +1,7 @@
 # Sensor Threshold Switch Controller
 
+## Summary
+
 Controls a switch-like entity based on sensor value spikes, with manual
 override protection, auto-off functionality, and notification support.
 
@@ -18,6 +20,27 @@ override protection, auto-off functionality, and notification support.
   already ON, starts the auto-off timer.
 - **Notifications**: Optionally sends notifications for all actions via
   a configurable notification service.
+
+## Requirements
+
+PyScript must be configured with:
+
+```yaml
+pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+```
+
+## Usage
+
+1. Go to **Settings > Automations & Scenes > Blueprints**.
+2. Find **Sensor Threshold Switch Controller** and click **Create
+   Automation**.
+3. Configure the required and optional parameters.
+4. Save.
+
+The automation will appear in the **Used By** list for all sensor
+and switch entities.
 
 ## Configuration
 
@@ -48,18 +71,9 @@ replaced with the current time when the notification is sent:
 
 `YYYY`, `YY`, `MM`, `DD`, `HH`, `mm`, `ss`
 
-## Usage
+## Usage notes
 
-1. Go to **Settings > Automations & Scenes > Blueprints**.
-2. Find **Sensor Threshold Switch Controller** and click **Create
-   Automation**.
-3. Configure the required and optional parameters.
-4. Save.
-
-The automation will appear in the **Used By** list for all sensor
-and switch entities.
-
-## Example: Bathroom Fan Control
+### Example: Bathroom Fan Control
 
 ```
 Target Switch Entity:  switch.bathroom_fan
@@ -79,12 +93,12 @@ in a row (within 10 seconds), the sensor override is disabled. If
 they turn the fan on manually (with no humidity spike), it turns off
 automatically after 30 minutes.
 
-## Debugging
+## Developer notes
 
 Three complementary layers provide visibility into the automation's
 decisions without requiring ad-hoc instrumentation.
 
-### Entity Attributes (always on)
+### Entity attributes (always on)
 
 After every invocation, the automation writes decision metadata to the
 `pyscript.*_state` entity as attributes. These are visible in
@@ -104,7 +118,7 @@ To view:
 2. Search for `pyscript.` and find your `*_state` entity.
 3. Expand the attributes to see the latest decision context.
 
-### Debug Logging (opt-in)
+### Debug logging (opt-in)
 
 The blueprint includes a **Debug Logging** toggle (default: off). When
 enabled, the service emits a `log.warning` message with full decision
@@ -134,7 +148,7 @@ Uses `log.warning` (not `log.info`) because HA's default log level
 for custom components is WARNING. Toggling the flag produces immediate
 output without editing `configuration.yaml`.
 
-### Logger Configuration (optional)
+### Logger configuration (optional)
 
 For more verbose PyScript output without the debug flag, add the
 following to `configuration.yaml`:

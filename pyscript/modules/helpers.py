@@ -4,13 +4,49 @@
 No PyScript runtime dependencies.
 
 Provides dataclasses, persistent notification support,
-timestamp formatting, interval gating, and regex
-matching.
+timestamp formatting, interval gating, regex matching,
+and shared notification-cap logic used by watchdog
+automations.
 """
 
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from typing import Protocol
+
+    class CappableResult(Protocol):
+        """Structural type expected by ``prepare_notifications``.
+
+        Any watchdog result dataclass that exposes:
+
+        - ``has_issue: bool``
+        - ``notification_id: str``
+        - ``notification_title: str``
+        - ``to_notification(suppress: bool = False) -> PersistentNotification``
+
+        is usable as input. ``notification_id`` and
+        ``notification_title`` are used by the helper as
+        the sort key so each watchdog doesn't need to
+        sort results itself: results are ordered by
+        ``(notification_title, notification_id)`` before
+        the cap is applied, giving a deterministic
+        shown/suppressed split when the cap is exceeded.
+        """
+
+        has_issue: bool
+        notification_id: str
+        notification_title: str
+
+        def to_notification(
+            self,
+            suppress: bool = False,
+        ) -> "PersistentNotification":
+            """Return a PersistentNotification for this result."""
+            ...
 
 
 @dataclass
@@ -133,3 +169,139 @@ def matches_pattern(
         )
     except re.error:
         return False
+
+
+def prepare_notifications(
+    results: "Sequence[CappableResult]",
+    max_notifications: int,
+    cap_notification_id: str,
+    cap_title: str,
+    cap_item_label: str,
+) -> list[PersistentNotification]:
+    """Sort, build, and cap per-result notifications.
+
+    This helper is the "glue" step every watchdog runs
+    between `evaluate_*` (which produces result
+    dataclasses) and `_process_persistent_notifications`
+    (which creates/dismisses them in HA). It is the
+    single place where shared notification semantics live.
+
+    Responsibilities, in order:
+
+    1. **Sort** ``results`` deterministically by
+       ``(notification_title, notification_id)``. Each
+       watchdog used to sort its own results in its
+       logic module; now the helper does it once.
+       Deterministic ordering is required so the
+       shown/suppressed split below is reproducible
+       across runs — users should see the same
+       "first N" subset when the cap is exceeded,
+       regardless of whichever internal-dict ordering
+       the logic module happened to iterate in.
+    2. **Cap** the issue set. When the number of
+       has-issue results exceeds ``max_notifications``
+       (and the cap is non-zero), the first
+       ``max_notifications`` are shown in full, the
+       rest are suppressed (passed as ``suppress=True``
+       to ``to_notification``, which dismisses their
+       stored ID), and a cap-reached summary
+       notification is appended.
+    3. **Emit clean-result notifications anyway** when
+       the cap is exceeded, so any lingering
+       notifications from a prior run where the same
+       result was in the issue partition get dismissed.
+    4. **Always emit the cap-summary slot** — active
+       when the cap is reached, inactive otherwise —
+       so a previously-active summary gets dismissed
+       when the cap no longer applies.
+
+    This runs as standard Python inside the module
+    rather than under PyScript's AST evaluator, so it
+    can use ``sorted(key=fn)`` freely. Service wrappers
+    that call this function inherit that benefit: they
+    no longer need to sort themselves.
+
+    Args:
+        results: Watchdog result dataclasses
+            implementing the ``CappableResult`` protocol.
+        max_notifications: Per-run cap; ``0`` means
+            unlimited.
+        cap_notification_id: Persistent notification ID
+            used for the cap-summary notification. Must
+            be unique per watchdog instance.
+        cap_title: Title to use when the cap is reached.
+        cap_item_label: Human-readable label describing
+            what's being counted, e.g.
+            ``"devices with issues"`` or
+            ``"owners with broken references"``. Inserted
+            into the cap summary message.
+
+    Returns:
+        A flat list of ``PersistentNotification`` ready
+        for ``_process_persistent_notifications`` to
+        create or dismiss. Every input result produces
+        exactly one notification, plus one cap-summary
+        notification.
+    """
+    # Sort by title then id so the cap-exceeded split is
+    # deterministic run-to-run. Sorted() returns a new
+    # list so we don't mutate the caller's sequence.
+    sorted_results = sorted(
+        results,
+        key=lambda r: (r.notification_title, r.notification_id),
+    )
+
+    notifications: list[PersistentNotification] = []
+    issues = [r for r in sorted_results if r.has_issue]
+
+    if max_notifications > 0 and len(issues) > max_notifications:
+        shown = issues[:max_notifications]
+        suppressed = issues[max_notifications:]
+        for r in shown:
+            notifications.append(r.to_notification())
+        for r in suppressed:
+            notifications.append(
+                r.to_notification(suppress=True),
+            )
+        # Emit notifications for clean results so any
+        # lingering notifications from a prior run get
+        # dismissed.
+        for r in sorted_results:
+            if not r.has_issue:
+                notifications.append(r.to_notification())
+        notifications.append(
+            PersistentNotification(
+                active=True,
+                notification_id=cap_notification_id,
+                title=cap_title,
+                message=(
+                    "Showing "
+                    + str(max_notifications)
+                    + " of "
+                    + str(len(issues))
+                    + " "
+                    + cap_item_label
+                    + ". "
+                    + str(len(suppressed))
+                    + " additional notifications were"
+                    " suppressed. Increase the"
+                    " notification cap or fix existing"
+                    " issues to see more."
+                ),
+            ),
+        )
+    else:
+        for r in sorted_results:
+            notifications.append(r.to_notification())
+        # Cap slot always emitted so a previously-active
+        # summary gets dismissed when the cap no longer
+        # applies.
+        notifications.append(
+            PersistentNotification(
+                active=False,
+                notification_id=cap_notification_id,
+                title="",
+                message="",
+            ),
+        )
+    return notifications

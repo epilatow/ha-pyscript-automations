@@ -26,6 +26,7 @@ from helpers import (  # noqa: F821
     EntityRegistryInfo,
     PersistentNotification,
     on_interval,
+    prepare_notifications,
 )
 
 if TYPE_CHECKING:
@@ -921,63 +922,21 @@ def device_watchdog(
             ),
         )
 
-    # Evaluate health (results are sorted by device_name
-    # for deterministic notification cap behavior)
     results = evaluate_devices(config, devices, now)
-    issues = [r for r in results if r.has_issue]
 
     # Check for disabled diagnostic entities
     diag_notifications: list[PersistentNotification] = []
     if check_diagnostics:
         diag_notifications = evaluate_diagnostics(devices)
 
-    # Apply notification cap
-    cap_notification_id = "device_watchdog_cap"
-
-    notifications: list[PersistentNotification] = []
-    if max_notifications > 0 and len(issues) > max_notifications:
-        shown = issues[:max_notifications]
-        suppressed = issues[max_notifications:]
-        for r in shown:
-            notifications.append(r.to_notification())
-        for r in suppressed:
-            notifications.append(
-                r.to_notification(suppress=True),
-            )
-        for r in results:
-            if not r.has_issue:
-                notifications.append(
-                    r.to_notification(),
-                )
-        notifications.append(
-            PersistentNotification(
-                active=True,
-                notification_id=cap_notification_id,
-                title=("Device watchdog: notification cap reached"),
-                message=(
-                    "Showing "
-                    + str(max_notifications)
-                    + " of "
-                    + str(len(issues))
-                    + " devices with issues. "
-                    + str(len(suppressed))
-                    + " additional devices were"
-                    " suppressed. Increase the"
-                    " notification cap or fix"
-                    " existing issues to see more."
-                ),
-            ),
-        )
-    else:
-        notifications = [r.to_notification() for r in results]
-        notifications.append(
-            PersistentNotification(
-                active=False,
-                notification_id=cap_notification_id,
-                title="",
-                message="",
-            ),
-        )
+    # Sort + cap + build notifications via shared helper.
+    notifications = prepare_notifications(
+        results,
+        max_notifications,
+        "device_watchdog_cap",
+        "Device watchdog: notification cap reached",
+        "devices with issues",
+    )
 
     notifications += diag_notifications
     active_ids = _get_active_notification_ids(
@@ -1000,6 +959,7 @@ def device_watchdog(
     )
     stat_devices_excluded = sum([1 for r in results if r.device_excluded])
     stat_entities_excluded = sum([r.entities_filtered for r in results])
+    issues = [r for r in results if r.has_issue]
     stat_entity_issues = sum([len(r.unavailable_entities) for r in issues])
     stat_stale = sum([1 for r in issues if r.is_stale])
 
@@ -1521,59 +1481,16 @@ def entity_defaults_watchdog(
             ),
         )
 
-    # Evaluate drift (results are pre-sorted by the
-    # logic module for deterministic cap behavior)
     results = evaluate_devices(config, devices)
 
-    # Apply notification cap
-    drifted = [r for r in results if r.has_drift]
-    cap_notification_id = "entity_defaults_watchdog_cap"
-
-    notifications: list[PersistentNotification] = []
-    if max_notifications > 0 and len(drifted) > max_notifications:
-        shown = drifted[:max_notifications]
-        suppressed = drifted[max_notifications:]
-        for r in shown:
-            notifications.append(r.to_notification())
-        for r in suppressed:
-            notifications.append(
-                r.to_notification(suppress=True),
-            )
-        # Dismiss clean devices
-        for r in results:
-            if not r.has_drift:
-                notifications.append(
-                    r.to_notification(),
-                )
-        # Cap summary notification
-        notifications.append(
-            PersistentNotification(
-                active=True,
-                notification_id=cap_notification_id,
-                title=("Entity defaults watchdog: notification cap reached"),
-                message=(
-                    "Showing "
-                    + str(max_notifications)
-                    + " of "
-                    + str(len(drifted))
-                    + " devices with drift. "
-                    + str(len(suppressed))
-                    + " additional notifications"
-                    " were suppressed."
-                ),
-            ),
-        )
-    else:
-        notifications = [r.to_notification() for r in results]
-        # Dismiss cap notification if it existed
-        notifications.append(
-            PersistentNotification(
-                active=False,
-                notification_id=cap_notification_id,
-                title="",
-                message="",
-            ),
-        )
+    # Sort + cap + build notifications via shared helper.
+    notifications = prepare_notifications(
+        results,
+        max_notifications,
+        "entity_defaults_watchdog_cap",
+        "Entity defaults watchdog: notification cap reached",
+        "devices with drift",
+    )
 
     active_ids = _get_active_notification_ids(
         hass,  # noqa: F821
@@ -1595,12 +1512,13 @@ def entity_defaults_watchdog(
     )
     stat_devices_excluded = sum([1 for r in results if r.device_excluded])
     stat_entities_excluded = sum([r.entities_excluded for r in results])
-    stat_entity_issues = sum([len(r.drifted_entities) for r in drifted])
+    issues = [r for r in results if r.has_issue]
+    stat_entity_issues = sum([len(r.drifted_entities) for r in issues])
     stat_name_issues = sum(
-        [1 for r in drifted for d in r.drifted_entities if d.name_drifted]
+        [1 for r in issues for d in r.drifted_entities if d.name_drifted]
     )
     stat_id_issues = sum(
-        [1 for r in drifted for d in r.drifted_entities if d.id_drifted]
+        [1 for r in issues for d in r.drifted_entities if d.id_drifted]
     )
 
     _save_state(
@@ -1616,7 +1534,7 @@ def entity_defaults_watchdog(
             ),
             "devices_excluded": stat_devices_excluded,
             "entities_excluded": stat_entities_excluded,
-            "device_issues": len(drifted),
+            "device_issues": len(issues),
             "entity_issues": stat_entity_issues,
             "entity_name_issues": stat_name_issues,
             "entity_id_issues": stat_id_issues,
@@ -1633,6 +1551,6 @@ def entity_defaults_watchdog(
             len(all_integrations),
             len(results),
             stat_entities,
-            len(drifted),
+            len(issues),
             stat_entity_issues,
         )

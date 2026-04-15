@@ -1,11 +1,67 @@
 # Entity Defaults Watchdog
 
+## Summary
+
 Detects entity IDs and names that have drifted from their
 defaults. Creates a persistent notification per device
 with repair instructions. Clears notifications automatically
 when drift is resolved.
 
-## What is entity drift?
+## Features
+
+- Detect entity ID drift (when a device is renamed after
+  its entities already exist)
+- Detect name-override drift (stale name overrides left
+  behind when an integration's naming conventions change)
+- Detect redundant name prefixes (overrides that include
+  the device name when HA would add it automatically)
+- Per-device persistent notifications with auto-clear
+  on drift resolution
+- Selectable drift checks (ID only, name only, or both)
+- Include/exclude integration filtering
+- Regex-based device and entity exclusion filters
+- Notification cap to limit per-device notifications
+- Repair instructions tailored to the drift combination
+  (two-cycle fix for name + ID drift)
+- Optional debug logging
+
+## Requirements
+
+PyScript must be configured with:
+
+```yaml
+pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+```
+
+## Usage
+
+1. Install the automation (see main README)
+2. Go to **Settings > Automations & Scenes > Blueprints**
+3. Click **Entity Defaults Watchdog**
+4. Configure integrations and exclusions
+5. Save and enable
+
+## Configuration
+
+| Parameter | Description |
+|---|---|
+| Drift checks | Which checks to run (ID, name, or both). Empty means all. |
+| Include integrations | Integration IDs to check. Empty means all integrations. |
+| Exclude integrations | Integration IDs to skip even if included. |
+| Device exclude regex | Skip devices whose name matches. One pattern per line. |
+| Exclude entities | Specific entities to exclude from all checks. |
+| Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
+| Entity name exclude regex | Skip entities whose name matches. One pattern per line. |
+| Check interval (minutes) | Minutes between drift evaluations. |
+| Debug Logging | Log debug info to HA logs. |
+
+See the blueprint UI for default values.
+
+## Usage notes
+
+### What is entity drift?
 
 Home Assistant assigns entity IDs and names when entities
 are first created. These can drift from their expected
@@ -23,7 +79,7 @@ values over time:
   breaking automations. The override becomes stale when
   the integration's new name is what you actually want.
 
-## How drift is detected
+### How drift is detected
 
 The watchdog uses Home Assistant's entity and device
 registries to compare current values against expected
@@ -44,23 +100,7 @@ defaults:
   device name to the entity name. A name override that
   starts with the device name is redundant.
 
-## Configuration
-
-| Parameter | Description |
-|---|---|
-| Drift checks | Which checks to run (ID, name, or both). Empty means all. |
-| Include integrations | Integration IDs to check. Empty means all integrations. |
-| Exclude integrations | Integration IDs to skip even if included. |
-| Device exclude regex | Skip devices whose name matches. One pattern per line. |
-| Exclude entities | Specific entities to exclude from all checks. |
-| Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
-| Entity name exclude regex | Skip entities whose name matches. One pattern per line. |
-| Check interval (minutes) | Minutes between drift evaluations. |
-| Debug Logging | Log debug info to HA logs. |
-
-See the blueprint UI for default values.
-
-## Two-cycle fix sequence
+### Two-cycle fix sequence
 
 When a device has both name overrides and non-default
 entity IDs, the fix must happen in two steps:
@@ -89,7 +129,7 @@ on a device page, HA will also rename disabled entities,
 so the number of renames shown may be higher than what
 the watchdog reported.
 
-## Notification format
+### Notification format
 
 Each device with drift gets its own persistent
 notification. The notification body contains up to three
@@ -127,7 +167,7 @@ timestamps. Since all creates happen within milliseconds,
 the panel's display order is effectively random. The
 same devices are shown — only the panel ordering varies.
 
-## Exclusion configuration
+### Exclusion configuration
 
 Use exclusion settings to suppress drift notifications
 for entities with intentionally customized names or IDs:
@@ -142,25 +182,7 @@ for entities with intentionally customized names or IDs:
 - **Device exclude regex**: skip entire devices by
   name.
 
-## Requirements
-
-PyScript must be configured with:
-
-```yaml
-pyscript:
-  allow_all_imports: true
-  hass_is_global: true
-```
-
-## Usage
-
-1. Install the automation (see main README)
-2. Go to **Settings > Automations & Scenes > Blueprints**
-3. Click **Entity Defaults Watchdog**
-4. Configure integrations and exclusions
-5. Save and enable
-
-## Debugging
+## Developer notes
 
 ### Entity attributes
 

@@ -538,7 +538,7 @@ class TestEvaluateDevice:
         cfg = _config()
         device = _device(entities=[_entity_drift()])
         result = _evaluate_device(cfg, device)
-        assert result.has_drift is False
+        assert result.has_issue is False
         assert result.drifted_entities == []
 
     def test_drift_detected(self) -> None:
@@ -552,7 +552,7 @@ class TestEvaluateDevice:
             ],
         )
         result = _evaluate_device(cfg, device)
-        assert result.has_drift is True
+        assert result.has_issue is True
         assert len(result.drifted_entities) == 1
 
     def test_excluded_device(self) -> None:
@@ -567,7 +567,7 @@ class TestEvaluateDevice:
             ],
         )
         result = _evaluate_device(cfg, device)
-        assert result.has_drift is False
+        assert result.has_issue is False
         assert result.device_excluded is True
         assert result.entities_checked == 0
         assert result.entities_excluded == 0
@@ -656,8 +656,8 @@ class TestEvaluateDevices:
         ]
         results = evaluate_devices(cfg, devices)
         assert len(results) == 2
-        clean = [r for r in results if not r.has_drift]
-        drifted = [r for r in results if r.has_drift]
+        clean = [r for r in results if not r.has_issue]
+        drifted = [r for r in results if r.has_issue]
         assert len(clean) == 1
         assert len(drifted) == 1
 
@@ -673,7 +673,7 @@ class TestEvaluateDevices:
             _device("d2", "D2", entities=[_entity_drift()]),
         ]
         results = evaluate_devices(cfg, devices)
-        assert all(not r.has_drift for r in results)
+        assert all(not r.has_issue for r in results)
 
 
 class TestCodeQuality(CodeQualityBase):

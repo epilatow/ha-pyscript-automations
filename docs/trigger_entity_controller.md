@@ -1,5 +1,7 @@
 # Trigger Entity Controller
 
+## Summary
+
 Controls entities (lights, switches, fans, etc.) with optional
 trigger-based activation and auto-off timer. Supports
 time-of-day restrictions, disabling entities, force-on behavior,
@@ -24,6 +26,24 @@ and configurable notifications.
 - Entity validation: alerts via persistent notification if
   configured entities are missing or renamed
 - Optional debug logging
+
+## Requirements
+
+PyScript must be configured with:
+
+```yaml
+pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+```
+
+## Usage
+
+1. Install the automation (see main README)
+2. Go to **Settings > Automations & Scenes > Blueprints**
+3. Click **Trigger Entity Controller**
+4. Configure controlled entities and desired options
+5. Save and enable
 
 ## Configuration
 
@@ -52,15 +72,9 @@ and configurable notifications.
 
 See the blueprint UI for default values.
 
-## Usage
+## Usage notes
 
-1. Install the automation (see main README)
-2. Go to **Settings > Automations & Scenes > Blueprints**
-3. Click **Trigger Entity Controller**
-4. Configure controlled entities and desired options
-5. Save and enable
-
-## Example: Hallway Motion Light
+### Example: Hallway Motion Light
 
 A hallway light that always turns on with motion, except at
 night when the bedroom is occupied:
@@ -77,7 +91,7 @@ Result:
 - Night + bedroom not occupied: motion turns on the light
 - Night + bedroom occupied: motion is suppressed
 
-## Debugging
+## Developer notes
 
 ### Entity attributes
 

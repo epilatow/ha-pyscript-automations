@@ -1,5 +1,7 @@
 # Device Watchdog
 
+## Summary
+
 Monitors device health across Home Assistant integrations. Raises
 a persistent notification whenever monitored devices have
 unavailable entities or stop reporting state changes within a
@@ -25,23 +27,6 @@ devices recover.
   are disabled
 - Optional debug logging
 
-## Configuration
-
-| Parameter | Description |
-|---|---|
-| Include integrations | Integration IDs to monitor. Empty means all. |
-| Exclude integrations | Integration IDs to skip even if included. |
-| Device exclude regex | Skip devices whose name matches. One pattern per line. |
-| Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
-| Entity domains to monitor | Only check entities in these domains |
-| Check interval (minutes) | Minutes between watchdog evaluations |
-| Dead device threshold (minutes) | Staleness threshold for state changes |
-| Check diagnostic entities | Notify about disabled recommended diagnostics per device |
-| Max device notifications | Cap on per-device notifications. 0 = unlimited. |
-| Debug logging | Log debug info to HA logs |
-
-See the blueprint UI for default values.
-
 ## Requirements
 
 PyScript must be configured with:
@@ -60,7 +45,26 @@ pyscript:
 4. Configure integrations and thresholds
 5. Save and enable
 
-## Notifications
+## Configuration
+
+| Parameter | Description |
+|---|---|
+| Include integrations | Integration IDs to monitor. Empty means all. |
+| Exclude integrations | Integration IDs to skip even if included. |
+| Device exclude regex | Skip devices whose name matches. One pattern per line. |
+| Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
+| Entity domains to monitor | Only check entities in these domains |
+| Check interval (minutes) | Minutes between watchdog evaluations |
+| Dead device threshold (minutes) | Staleness threshold for state changes |
+| Check diagnostic entities | Notify about disabled recommended diagnostics per device |
+| Max device notifications | Cap on per-device notifications. 0 = unlimited. |
+| Debug logging | Log debug info to HA logs |
+
+See the blueprint UI for default values.
+
+## Usage notes
+
+### Notifications
 
 Each device with health issues gets its own persistent
 notification. Notifications are automatically dismissed
@@ -76,7 +80,7 @@ timestamps. Since all creates happen within milliseconds,
 the panel's display order is effectively random. The
 same devices are shown — only the panel ordering varies.
 
-## Debugging
+## Developer notes
 
 ### Entity attributes
 

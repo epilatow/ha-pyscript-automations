@@ -427,11 +427,4 @@ def evaluate_devices(
             current_time,
         )
         results.append(result)
-    # Sort so that notification cap shows a deterministic
-    # subset. Sorted here (in the logic module) rather
-    # than in the service wrapper because PyScript's AST
-    # evaluator interferes with sort operations.
-    results.sort(
-        key=lambda r: (r.device_name, r.device_id),
-    )
     return results

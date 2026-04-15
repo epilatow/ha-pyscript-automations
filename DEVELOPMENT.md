@@ -182,6 +182,36 @@ code comments (e.g., the `evaluate()` docstring), not in
 user-facing documentation. User docs should describe what
 the automation does and how to configure it.
 
+## Automation Docs
+
+User-facing documentation for each automation lives in
+`docs/<automation_name>.md`. Every automation doc follows
+the same top-level section order so users find the same
+information in the same place across automations:
+
+1. **Summary** — one paragraph describing what the
+   automation does.
+2. **Features** — bulleted list of capabilities.
+3. **Requirements** — prerequisite HA / PyScript config.
+4. **Usage** — install + enable steps.
+5. **Configuration** — blueprint input table.
+6. **Usage notes** — examples, exclusion cheatsheets,
+   behavior gotchas, and any user-facing detail that
+   doesn't fit under Configuration.
+7. **Developer notes** — state attributes, debug log
+   format, detection-mechanism internals, known
+   limitations, and follow-ups.
+
+User-facing sections come first so users don't have to
+scroll past developer notes to find their config.
+Developers read the whole file, so the ordering has no
+cost for them.
+
+Don't introduce new top-level sections. Anything that
+doesn't fit an existing bucket goes under "Usage notes"
+(if user-facing) or "Developer notes" (if internal) as a
+sub-heading.
+
 ## Comments
 
 Do not number steps in comments (e.g., `# 1. Parse state`).

@@ -74,7 +74,7 @@ class DeviceResult:
 
     device_id: str
     device_name: str
-    has_drift: bool
+    has_issue: bool
     device_excluded: bool
     notification_id: str
     notification_title: str
@@ -88,7 +88,7 @@ class DeviceResult:
         suppress: bool = False,
     ) -> PersistentNotification:
         return PersistentNotification(
-            active=self.has_drift and not suppress,
+            active=self.has_issue and not suppress,
             notification_id=self.notification_id,
             title=self.notification_title,
             message=self.notification_message,
@@ -436,7 +436,7 @@ def _evaluate_device(
         return DeviceResult(
             device_id=device.de.id,
             device_name=device.de.name,
-            has_drift=False,
+            has_issue=False,
             device_excluded=True,
             notification_id=notification_id,
             notification_title="",
@@ -460,10 +460,10 @@ def _evaluate_device(
         else:
             drifted.append(result)
 
-    has_drift = len(drifted) > 0
+    has_issue = len(drifted) > 0
     title = ""
     message = ""
-    if has_drift:
+    if has_issue:
         title = "Entity defaults watchdog: " + device.de.name
         message = _build_notification_message(
             device,
@@ -473,7 +473,7 @@ def _evaluate_device(
     return DeviceResult(
         device_id=device.de.id,
         device_name=device.de.name,
-        has_drift=has_drift,
+        has_issue=has_issue,
         device_excluded=False,
         notification_id=notification_id,
         notification_title=title,
@@ -514,11 +514,4 @@ def evaluate_devices(
     for device in devices:
         result = _evaluate_device(config, device)
         results.append(result)
-    # Sort so that notification cap shows a deterministic
-    # subset. Sorted here (in the logic module) rather
-    # than in the service wrapper because PyScript's AST
-    # evaluator interferes with sort operations.
-    results.sort(
-        key=lambda r: (r.device_name, r.device_id),
-    )
     return results
