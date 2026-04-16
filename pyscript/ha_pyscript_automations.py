@@ -16,6 +16,7 @@ would fail during test collection.
 """
 
 import json
+import os
 import time
 from datetime import UTC, datetime
 from enum import Enum
@@ -26,7 +27,6 @@ from helpers import (  # noqa: F821
     EntityRegistryInfo,
     PersistentNotification,
     on_interval,
-    prepare_notifications,
 )
 
 if TYPE_CHECKING:
@@ -738,6 +738,62 @@ def sensor_threshold_switch_controller(
         )
 
 
+# ── Worker thread executor ──────────────────────────
+
+
+@pyscript_executor  # type: ignore[name-defined,untyped-decorator]  # noqa: F821
+def _run_in_executor(
+    modules_dir: str,
+    func_name: str,
+    *args: object,
+) -> object:
+    """Import and call a logic module function in a worker thread.
+
+    Compiled to native Python by ``@pyscript_executor``.
+    PyScript's modules aren't in ``sys.modules``, so we
+    add the modules directory to ``sys.path`` and import
+    via standard Python's ``importlib``.
+
+    ``func_name`` is ``"module_name.function_name"``.
+
+    A pyscript reload refreshes the AST-evaluated code
+    but leaves the executor thread's ``sys.modules``
+    cache alone, so subsequent calls would otherwise
+    keep running the pre-reload module object. Force a
+    reload when the module is already cached so edits
+    on disk take effect on the next tick.  We reload the
+    shared ``helpers`` module first (every logic module
+    imports from it), then the target logic module,
+    because ``importlib.reload`` re-executes the target
+    body and its ``from helpers import ...`` statements
+    would otherwise pick up stale names from a cached
+    pre-deploy ``helpers``.
+    """
+    import importlib
+    import sys
+
+    if "." not in func_name:
+        raise ValueError(
+            f"func_name must be 'module.function', got {func_name!r}"
+        )
+    if modules_dir not in sys.path:
+        sys.path.insert(0, modules_dir)
+
+    helpers_mod = sys.modules.get("helpers")
+    if helpers_mod is not None:
+        helpers_origin = getattr(helpers_mod, "__file__", "") or ""
+        if helpers_origin.startswith(modules_dir):
+            importlib.reload(helpers_mod)
+
+    mod_name, attr_name = func_name.rsplit(".", 1)
+    if mod_name in sys.modules:
+        mod = importlib.reload(sys.modules[mod_name])
+    else:
+        mod = importlib.import_module(mod_name)
+    func = getattr(mod, attr_name)
+    return func(*args)
+
+
 # ── Device Watchdog ─────────────────────────────────
 
 
@@ -769,8 +825,6 @@ def device_watchdog(
         DeviceInfo,
         EntityInfo,
         RegistryEntry,
-        evaluate_devices,
-        evaluate_diagnostics,
     )
 
     start_time = time.monotonic()
@@ -922,63 +976,50 @@ def device_watchdog(
             ),
         )
 
-    results = evaluate_devices(config, devices, now)
-
-    # Check for disabled diagnostic entities
-    diag_notifications: list[PersistentNotification] = []
-    if check_diagnostics:
-        diag_notifications = evaluate_diagnostics(devices)
-
-    # Sort + cap + build notifications via shared helper.
-    notifications = prepare_notifications(
-        results,
+    # Run evaluation in a worker thread.
+    modules_dir = os.path.join(
+        hass.config.config_dir,  # noqa: F821
+        "pyscript",
+        "modules",
+    )
+    ev = _run_in_executor(
+        modules_dir,
+        "device_watchdog.run_evaluation",
+        config,
+        devices,
+        now,
+        check_diagnostics,
+        len(all_integrations),
         max_notifications,
-        "device_watchdog_cap",
-        "Device watchdog: notification cap reached",
-        "devices with issues",
     )
 
-    notifications += diag_notifications
     active_ids = _get_active_notification_ids(
         hass,  # noqa: F821
     )
     _process_persistent_notifications(
-        notifications,
+        ev.notifications,
         active_ids,
     )
 
-    # Compute stats and save state
     elapsed = time.monotonic() - start_time
     key = _state_key(instance_id)
-    stat_entities = sum(
-        [
-            r.entities_evaluated + r.entities_filtered
-            for r in results
-            if not r.device_excluded
-        ]
-    )
-    stat_devices_excluded = sum([1 for r in results if r.device_excluded])
-    stat_entities_excluded = sum([r.entities_filtered for r in results])
-    issues = [r for r in results if r.has_issue]
-    stat_entity_issues = sum([len(r.unavailable_entities) for r in issues])
-    stat_stale = sum([1 for r in issues if r.is_stale])
 
     _save_state(
         key,
         now,
         {
             "runtime": str(round(elapsed, 2)),
-            "integrations": len(all_integrations),
-            "devices": len(results),
-            "entities": stat_entities,
+            "integrations": ev.all_integrations_count,
+            "devices": len(ev.results),
+            "entities": ev.stat_entities,
             "integrations_excluded": (
-                len(all_integrations) - len(target_integrations)
+                ev.all_integrations_count - len(target_integrations)
             ),
-            "devices_excluded": stat_devices_excluded,
-            "entities_excluded": stat_entities_excluded,
-            "device_issues": len(issues),
-            "entity_issues": stat_entity_issues,
-            "device_stale_issues": stat_stale,
+            "devices_excluded": ev.stat_devices_excluded,
+            "entities_excluded": ev.stat_entities_excluded,
+            "device_issues": ev.issues_count,
+            "entity_issues": ev.stat_entity_issues,
+            "device_stale_issues": ev.stat_stale,
         },
     )
 
@@ -989,11 +1030,11 @@ def device_watchdog(
             " entities=%d device_issues=%d"
             " entity_issues=%d",
             tag,
-            len(all_integrations),
-            len(results),
-            stat_entities,
-            len(issues),
-            stat_entity_issues,
+            ev.all_integrations_count,
+            len(ev.results),
+            ev.stat_entities,
+            ev.issues_count,
+            ev.stat_entity_issues,
         )
 
 
@@ -1342,7 +1383,6 @@ def entity_defaults_watchdog(
         Config,
         DeviceInfo,
         EntityDriftInfo,
-        evaluate_devices,
     )
 
     start_time = time.monotonic()
@@ -1481,63 +1521,49 @@ def entity_defaults_watchdog(
             ),
         )
 
-    results = evaluate_devices(config, devices)
-
-    # Sort + cap + build notifications via shared helper.
-    notifications = prepare_notifications(
-        results,
+    # Run evaluation in a worker thread.
+    modules_dir = os.path.join(
+        hass.config.config_dir,  # noqa: F821
+        "pyscript",
+        "modules",
+    )
+    ev = _run_in_executor(
+        modules_dir,
+        "entity_defaults_watchdog.run_evaluation",
+        config,
+        devices,
+        len(all_integrations),
         max_notifications,
-        "entity_defaults_watchdog_cap",
-        "Entity defaults watchdog: notification cap reached",
-        "devices with drift",
     )
 
     active_ids = _get_active_notification_ids(
         hass,  # noqa: F821
     )
     _process_persistent_notifications(
-        notifications,
+        ev.notifications,
         active_ids,
     )
 
-    # Compute stats and save state
     elapsed = time.monotonic() - start_time
     key = _state_key(instance_id)
-    stat_entities = sum(
-        [
-            r.entities_checked + r.entities_excluded
-            for r in results
-            if not r.device_excluded
-        ]
-    )
-    stat_devices_excluded = sum([1 for r in results if r.device_excluded])
-    stat_entities_excluded = sum([r.entities_excluded for r in results])
-    issues = [r for r in results if r.has_issue]
-    stat_entity_issues = sum([len(r.drifted_entities) for r in issues])
-    stat_name_issues = sum(
-        [1 for r in issues for d in r.drifted_entities if d.name_drifted]
-    )
-    stat_id_issues = sum(
-        [1 for r in issues for d in r.drifted_entities if d.id_drifted]
-    )
 
     _save_state(
         key,
         now,
         {
             "runtime": str(round(elapsed, 2)),
-            "integrations": len(all_integrations),
-            "devices": len(results),
-            "entities": stat_entities,
+            "integrations": ev.all_integrations_count,
+            "devices": len(ev.results),
+            "entities": ev.stat_entities,
             "integrations_excluded": (
-                len(all_integrations) - len(target_integrations)
+                ev.all_integrations_count - len(target_integrations)
             ),
-            "devices_excluded": stat_devices_excluded,
-            "entities_excluded": stat_entities_excluded,
-            "device_issues": len(issues),
-            "entity_issues": stat_entity_issues,
-            "entity_name_issues": stat_name_issues,
-            "entity_id_issues": stat_id_issues,
+            "devices_excluded": ev.stat_devices_excluded,
+            "entities_excluded": ev.stat_entities_excluded,
+            "device_issues": ev.issues_count,
+            "entity_issues": ev.stat_entity_issues,
+            "entity_name_issues": ev.stat_name_issues,
+            "entity_id_issues": ev.stat_id_issues,
         },
     )
 
@@ -1548,9 +1574,9 @@ def entity_defaults_watchdog(
             " entities=%d device_issues=%d"
             " entity_issues=%d",
             tag,
-            len(all_integrations),
-            len(results),
-            stat_entities,
-            len(issues),
-            stat_entity_issues,
+            ev.all_integrations_count,
+            len(ev.results),
+            ev.stat_entities,
+            ev.issues_count,
+            ev.stat_entity_issues,
         )

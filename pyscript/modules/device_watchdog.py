@@ -1,7 +1,7 @@
 # This is AI generated code
 """Business logic for device health watchdog.
 
-No PyScript runtime dependencies.
+Does not use PyScript-injected globals.
 
 Monitors device health across integrations by checking for
 unavailable entities and stale state (no state change within
@@ -285,7 +285,9 @@ def _build_notification_message(
             "Integrations: " + ", ".join(integrations),
         )
 
-    for entity in sorted(unavailable, key=lambda e: e.entity_id):
+    sorted_unavail = [(e.entity_id, i, e) for i, e in enumerate(unavailable)]
+    sorted_unavail.sort()
+    for _, _, entity in sorted_unavail:
         lines.append(
             "Unavailable entity: " + entity.entity_id,
         )
@@ -428,3 +430,71 @@ def evaluate_devices(
         )
         results.append(result)
     return results
+
+
+@dataclass
+class EvaluationResult:
+    """Full evaluation result for the service wrapper."""
+
+    results: list[DeviceResult]
+    notifications: list[PersistentNotification]
+    all_integrations_count: int
+    stat_entities: int
+    stat_devices_excluded: int
+    stat_entities_excluded: int
+    issues_count: int
+    stat_entity_issues: int
+    stat_stale: int
+
+
+def run_evaluation(
+    config: Config,
+    devices: list[DeviceInfo],
+    current_time: datetime,
+    check_diagnostics: bool,
+    all_integrations_count: int,
+    max_notifications: int,
+) -> EvaluationResult:
+    """Run device evaluation in a worker thread.
+
+    Called via ``@pyscript_executor`` trampoline so the
+    event loop stays responsive. The service wrapper
+    builds the device list on the main thread (requires
+    HA registries), then hands it off here.
+    """
+    from helpers import prepare_notifications
+
+    results = evaluate_devices(config, devices, current_time)
+
+    diag_notifications: list[PersistentNotification] = []
+    if check_diagnostics:
+        diag_notifications = evaluate_diagnostics(devices)
+
+    notifications = prepare_notifications(
+        results,
+        max_notifications,
+        "device_watchdog_cap",
+        "Device watchdog: notification cap reached",
+        "devices with issues",
+    )
+    notifications += diag_notifications
+
+    issues = [r for r in results if r.has_issue]
+
+    return EvaluationResult(
+        results=results,
+        notifications=notifications,
+        all_integrations_count=all_integrations_count,
+        stat_entities=sum(
+            [
+                r.entities_evaluated + r.entities_filtered
+                for r in results
+                if not r.device_excluded
+            ]
+        ),
+        stat_devices_excluded=sum([1 for r in results if r.device_excluded]),
+        stat_entities_excluded=sum([r.entities_filtered for r in results]),
+        issues_count=len(issues),
+        stat_entity_issues=sum([len(r.unavailable_entities) for r in issues]),
+        stat_stale=sum([1 for r in issues if r.is_stale]),
+    )

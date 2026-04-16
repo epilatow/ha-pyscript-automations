@@ -1,7 +1,7 @@
 # This is AI generated code
 """Shared helpers for automation logic modules.
 
-No PyScript runtime dependencies.
+Does not use PyScript-injected globals.
 
 Provides dataclasses, persistent notification support,
 timestamp formatting, interval gating, regex matching,
@@ -244,12 +244,20 @@ def prepare_notifications(
         notification.
     """
     # Sort by title then id so the cap-exceeded split is
-    # deterministic run-to-run. Sorted() returns a new
-    # list so we don't mutate the caller's sequence.
-    sorted_results = sorted(
-        results,
-        key=lambda r: (r.notification_title, r.notification_id),
-    )
+    # deterministic run-to-run.
+    sorted_results = [
+        r
+        for _, _, r in sorted(
+            [
+                (
+                    (r.notification_title, r.notification_id),
+                    i,
+                    r,
+                )
+                for i, r in enumerate(results)
+            ]
+        )
+    ]
 
     notifications: list[PersistentNotification] = []
     issues = [r for r in sorted_results if r.has_issue]

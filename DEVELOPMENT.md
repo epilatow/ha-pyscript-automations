@@ -14,11 +14,13 @@ All automations follow a three-layer architecture:
    loads/saves state, calls the logic module, and executes
    the returned action. No business logic.
 3. **Logic module** (`pyscript/modules/name.py`) — runs
-   under standard Python import. Testable with pytest. No
-   PyScript runtime dependencies (cannot call `state.get()`,
-   `homeassistant.turn_on()`, etc.). May reference HA
-   concepts (entity IDs, integration names, device classes)
-   as data.
+   under PyScript's AST evaluator (not standard Python
+   import). Testable with pytest. Does not use PyScript-
+   injected globals (cannot call `state.get()`,
+   `homeassistant.turn_on()`, etc.). Must follow the
+   PyScript AST constraints listed below. May reference
+   HA concepts (entity IDs, integration names, device
+   classes) as data.
 
 **Execution model**: purely reactive. No sleeping, no
 waiting, no scheduling. Trigger fires, logic evaluates,
@@ -220,9 +222,15 @@ renumbering.
 
 ## PyScript AST Constraints
 
-The service wrapper (`ha_pyscript_automations.py`) runs
-under PyScript's custom AST evaluator, which has
-restrictions. These are enforced via the
+All pyscript files — both the service wrapper
+(`ha_pyscript_automations.py`) and logic modules
+(`pyscript/modules/*.py`) — run under PyScript's
+custom AST evaluator, which has restrictions. Even
+though some logic modules are called via
+`@pyscript_executor` (native Python in a worker
+thread), they may also be imported directly by the
+wrapper, so all code must be compatible with the AST
+evaluator. These are enforced via the
 `TestPyScriptCompatibility` test class:
 
 - No generator expressions (use list comprehensions)
@@ -234,9 +242,11 @@ restrictions. These are enforced via the
 - No `sort(key=func)` or `sorted(key=func)` (PyScript
   wraps function calls as coroutines; use tuple-based
   sorting instead)
-
-Logic modules (`pyscript/modules/*.py`) run under
-standard Python import and do not have these restrictions.
+- No bare `open()` (use `io.open()`)
+- No unquoted `TYPE_CHECKING`-only names in local
+  variable annotations. PyScript evaluates function-
+  body annotations at runtime, unlike standard Python.
+  Either remove the annotation or quote it.
 
 ## Testing
 

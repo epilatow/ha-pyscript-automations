@@ -1,7 +1,7 @@
 # This is AI generated code
 """Business logic for sensor-threshold-based switch control.
 
-No PyScript runtime dependencies.
+Does not use PyScript-injected globals.
 
 Controls a switch based on sensor value spikes (e.g., humidity),
 with manual override protection, auto-off, and notifications.

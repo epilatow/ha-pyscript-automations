@@ -1,7 +1,7 @@
 # This is AI generated code
 """Business logic for entity defaults watchdog.
 
-No PyScript runtime dependencies.
+Does not use PyScript-injected globals.
 
 Detects entity ID and name drift from their defaults.
 Entity IDs drift when device names change after entity
@@ -314,10 +314,30 @@ def _build_notification_message(
 
     # Sort each section by entity_id for consistent
     # output
-    name_clear.sort(key=lambda d: d.entity_id)
-    name_redundant.sort(key=lambda d: d.entity_id)
-    name_set.sort(key=lambda d: d.entity_id)
-    id_only.sort(key=lambda d: d.entity_id)
+    name_clear = [
+        d
+        for _, _, d in sorted(
+            [(d.entity_id, i, d) for i, d in enumerate(name_clear)]
+        )
+    ]
+    name_redundant = [
+        d
+        for _, _, d in sorted(
+            [(d.entity_id, i, d) for i, d in enumerate(name_redundant)]
+        )
+    ]
+    name_set = [
+        d
+        for _, _, d in sorted(
+            [(d.entity_id, i, d) for i, d in enumerate(name_set)]
+        )
+    ]
+    id_only = [
+        d
+        for _, _, d in sorted(
+            [(d.entity_id, i, d) for i, d in enumerate(id_only)]
+        )
+    ]
 
     has_name_issues = (
         len(name_clear) > 0 or len(name_redundant) > 0 or len(name_set) > 0
@@ -515,3 +535,68 @@ def evaluate_devices(
         result = _evaluate_device(config, device)
         results.append(result)
     return results
+
+
+@dataclass
+class EvaluationResult:
+    """Full evaluation result for the service wrapper."""
+
+    results: list[DeviceResult]
+    notifications: list[PersistentNotification]
+    all_integrations_count: int
+    stat_entities: int
+    stat_devices_excluded: int
+    stat_entities_excluded: int
+    issues_count: int
+    stat_entity_issues: int
+    stat_name_issues: int
+    stat_id_issues: int
+
+
+def run_evaluation(
+    config: Config,
+    devices: list[DeviceInfo],
+    all_integrations_count: int,
+    max_notifications: int,
+) -> EvaluationResult:
+    """Run entity defaults evaluation in a worker thread.
+
+    Called via ``@pyscript_executor`` trampoline so the
+    event loop stays responsive.
+    """
+    from helpers import prepare_notifications
+
+    results = evaluate_devices(config, devices)
+
+    notifications = prepare_notifications(
+        results,
+        max_notifications,
+        "entity_defaults_watchdog_cap",
+        "Entity defaults watchdog: notification cap reached",
+        "devices with drift",
+    )
+
+    issues = [r for r in results if r.has_issue]
+
+    return EvaluationResult(
+        results=results,
+        notifications=notifications,
+        all_integrations_count=all_integrations_count,
+        stat_entities=sum(
+            [
+                r.entities_checked + r.entities_excluded
+                for r in results
+                if not r.device_excluded
+            ]
+        ),
+        stat_devices_excluded=sum([1 for r in results if r.device_excluded]),
+        stat_entities_excluded=sum([r.entities_excluded for r in results]),
+        issues_count=len(issues),
+        stat_entity_issues=sum([len(r.drifted_entities) for r in issues]),
+        stat_name_issues=sum(
+            [1 for r in issues for d in r.drifted_entities if d.name_drifted]
+        ),
+        stat_id_issues=sum(
+            [1 for r in issues for d in r.drifted_entities if d.id_drifted]
+        ),
+    )

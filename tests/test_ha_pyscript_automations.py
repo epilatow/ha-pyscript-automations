@@ -145,11 +145,19 @@ class _MockHassServices:
         return self.has_service_result
 
 
+class _MockHassConfig:
+    """Mock for ``hass.config``."""
+
+    def __init__(self) -> None:
+        self.config_dir = str(REPO_ROOT)
+
+
 class _MockHass:
     """Mock for the pyscript-injected ``hass`` global."""
 
     def __init__(self) -> None:
         self.services = _MockHassServices()
+        self.config = _MockHassConfig()
 
 
 class _MockLog:
@@ -203,6 +211,7 @@ class _ServiceEnv:
         src = _SCRIPT_PATH.read_text()
         self._ns: dict[str, Any] = {
             "__builtins__": __builtins__,
+            "pyscript_executor": lambda fn: fn,
             "service": self.mock_service,
             "state": self.mock_state,
             "homeassistant": self.mock_ha,
@@ -1274,15 +1283,17 @@ class _WatchdogEnv:
         self.mock_service = _MockServiceObj()
         self.mock_log = _MockLog()
         self.mock_pn = _MockPersistentNotification()
+        self.mock_hass = _MockHass()
 
         src = _SCRIPT_PATH.read_text()
         self._ns: dict[str, Any] = {
             "__builtins__": __builtins__,
+            "pyscript_executor": lambda fn: fn,
             "service": self.mock_service,
             "state": self.mock_state,
             "homeassistant": self.mock_ha,
             "log": self.mock_log,
-            "hass": "mock_hass_obj",
+            "hass": self.mock_hass,
             "persistent_notification": self.mock_pn,
         }
         exec(
@@ -2070,6 +2081,7 @@ class _TecEnv:
         src = _SCRIPT_PATH.read_text()
         self._ns: dict[str, Any] = {
             "__builtins__": __builtins__,
+            "pyscript_executor": lambda fn: fn,
             "service": self.mock_service,
             "state": self.mock_state,
             "homeassistant": self.mock_ha,
@@ -2577,15 +2589,17 @@ class _EdwEnv:
         self.mock_service = _MockServiceObj()
         self.mock_log = _MockLog()
         self.mock_pn = _MockPersistentNotification()
+        self.mock_hass = _MockHass()
 
         src = _SCRIPT_PATH.read_text()
         self._ns: dict[str, Any] = {
             "__builtins__": __builtins__,
+            "pyscript_executor": lambda fn: fn,
             "service": self.mock_service,
             "state": self.mock_state,
             "homeassistant": self.mock_ha,
             "log": self.mock_log,
-            "hass": "mock_hass_obj",
+            "hass": self.mock_hass,
             "persistent_notification": self.mock_pn,
         }
         exec(
@@ -3276,10 +3290,14 @@ class TestCodeQuality(CodeQualityBase):
 class TestPyScriptCompatibility:
     """Guard against PyScript AST evaluator limitations.
 
-    PyScript evaluates service wrappers (pyscript/*.py) with
-    a custom AST interpreter, not standard Python.  Imported
-    modules (pyscript/modules/*.py) run under standard Python
-    import, but some constructs still fail at the boundary.
+    PyScript evaluates ALL pyscript files — both service
+    wrappers (pyscript/*.py) and logic modules
+    (pyscript/modules/*.py) — with a custom AST
+    interpreter, not standard Python. Even though some
+    logic modules run via ``@pyscript_executor`` (native
+    Python in a worker thread), they may also be imported
+    directly by the wrapper, so all code must be
+    compatible with the AST evaluator.
 
     Known limitations (pyscript 1.7.0):
       - @classmethod / @staticmethod / @property unsupported
@@ -3290,8 +3308,10 @@ class TestPyScriptCompatibility:
       - all pyscript functions are async, so dunder methods
         (__eq__, __str__, etc.) defined in pyscript don't work
       - print() is intercepted (use log.* instead)
+      - bare open() is not available (use io.open())
 
-    These tests scan source files to prevent regressions.
+    These tests scan all pyscript files to prevent
+    regressions.
     """
 
     @staticmethod
@@ -3368,14 +3388,14 @@ class TestPyScriptCompatibility:
                         " built-in decorators."
                     )
 
-    def test_no_lambda_in_service_wrappers(self) -> None:
+    def test_no_lambda_in_pyscript_files(self) -> None:
         """Lambda closures break under the AST evaluator.
 
         Lambda functions are compiled to native Python via
         @pyscript_compile, which cannot capture variables
         from the enclosing pyscript scope.
         """
-        for path in self._service_files():
+        for path in self._pyscript_files():
             src = path.read_text()
             tree = ast.parse(src, str(path))
             for node in ast.walk(tree):
@@ -3400,9 +3420,9 @@ class TestPyScriptCompatibility:
                     " a list comprehension instead."
                 )
 
-    def test_no_yield_in_service_wrappers(self) -> None:
+    def test_no_yield_in_pyscript_files(self) -> None:
         """yield / yield from are not supported."""
-        for path in self._service_files():
+        for path in self._pyscript_files():
             src = path.read_text()
             tree = ast.parse(src, str(path))
             for node in ast.walk(tree):
@@ -3431,7 +3451,7 @@ class TestPyScriptCompatibility:
                     " in PyScript. Use if/elif/else."
                 )
 
-    def test_no_sort_key_in_service_wrappers(
+    def test_no_sort_key_in_pyscript_files(
         self,
     ) -> None:
         """sort(key=func) breaks under PyScript.
@@ -3441,7 +3461,7 @@ class TestPyScriptCompatibility:
         instead of return values. Use tuple-based sorting
         instead: [(key, item) for item in items].sort().
         """
-        for path in self._service_files():
+        for path in self._pyscript_files():
             src = path.read_text()
             tree = ast.parse(src, str(path))
             for node in ast.walk(tree):
@@ -3469,9 +3489,9 @@ class TestPyScriptCompatibility:
                         " sorting instead."
                     )
 
-    def test_no_print_in_service_wrappers(self) -> None:
+    def test_no_print_in_pyscript_files(self) -> None:
         """print() is intercepted by PyScript; use log.*."""
-        for path in self._service_files():
+        for path in self._pyscript_files():
             src = path.read_text()
             # Simple regex: print( at start of line or
             # after whitespace, ignoring comments/strings

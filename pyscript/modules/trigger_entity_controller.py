@@ -1,7 +1,7 @@
 # This is AI generated code
 """Business logic for trigger entity controller.
 
-No PyScript runtime dependencies.
+Does not use PyScript-injected globals.
 
 Controls entities with optional trigger-based activation
 and auto-off timer.  Supports time-of-day restrictions,
