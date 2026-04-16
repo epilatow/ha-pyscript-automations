@@ -1,0 +1,188 @@
+blueprint:
+  name: Reference Watchdog
+  description: >
+    Scan Home Assistant configuration (YAML includes and
+    .storage JSON) for broken entity and device references.
+    Creates a persistent notification per owner (automation,
+    script, helper, dashboard, etc.) that contains a dead
+    reference. Clears notifications automatically when the
+    broken references are fixed.
+  domain: automation
+  author: epilatow
+
+  input:
+    scan_sources:
+      name: Scan sources
+      description: >
+        Which source types to scan. Leave empty to scan
+        all. Each dedicated type has its own owner
+        attribution (automations, scripts, template,
+        customize, config_entries, lovelace). The
+        "generic_yaml" catch-all handles every other YAML
+        file reachable via !include directives from
+        configuration.yaml with structural owner
+        derivation.
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Automations (automations.yaml)
+              value: automations
+            - label: Scripts (scripts.yaml)
+              value: scripts
+            - label: Templates (template.yaml)
+              value: template
+            - label: Customize (customize.yaml)
+              value: customize
+            - label: Config entries (.storage/core.config_entries)
+              value: config_entries
+            - label: Lovelace dashboards (.storage/lovelace.*)
+              value: lovelace
+            - label: Generic YAML (catch-all)
+              value: generic_yaml
+
+    exclude_paths:
+      name: Exclude paths
+      description: >
+        File paths to skip, using fnmatch-style glob
+        patterns. Matched against the source's relative
+        path (e.g. "plants.yaml" or
+        ".storage/lovelace.old_dashboard"). One pattern
+        per line. Use this to exclude a specific YAML
+        file or dashboard.
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    exclude_integrations:
+      name: Exclude integrations
+      description: >
+        Integrations to skip. Matches the `Integration:`
+        line shown at the top of each notification —
+        anything that renders an integration there can
+        be silenced here. Built-in adapters are listed
+        as quick-picks below (automation, script,
+        template, customize, lovelace). To filter a
+        config-entry integration (the `domain` field of
+        a `.storage/core.config_entries` entry — e.g.
+        `group`, `homekit`, or whatever HA integrations
+        you have installed), type its name as a custom
+        value. Legacy YAML integrations that don't
+        register entities (e.g. the `plant` integration)
+        have no `Integration:` line and aren't filterable
+        here — use "Exclude paths" to skip those files
+        directly.
+      default: []
+      selector:
+        select:
+          multiple: true
+          custom_value: true
+          options:
+            - automation
+            - script
+            - template
+            - customize
+            - lovelace
+
+    exclude_entities:
+      name: Exclude entities
+      description: >
+        Entities to exclude from checks. Applied
+        symmetrically: an entity in this list is never
+        flagged as a broken reference target, and if the
+        entity is itself a source owner its refs are not
+        scanned.
+      default: []
+      selector:
+        entity:
+          multiple: true
+
+    exclude_entity_regex:
+      name: Exclude entity regex
+      description: >
+        Regex patterns matched against entity IDs and
+        device IDs. Applied symmetrically to both sides
+        (target and source). One pattern per line. A
+        partial match is sufficient (use ^...$ to require
+        a full match).
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    check_disabled_entities:
+      name: Check disabled entities
+      description: >
+        When enabled, references to entities that exist
+        in the registry but are disabled are reported as
+        "Disabled-but-existing references" in the
+        notification body. When disabled, such references
+        are treated as valid.
+      default: true
+      selector:
+        boolean: {}
+
+    check_interval_minutes:
+      name: Check interval (minutes)
+      description: >
+        Minutes between reference-integrity evaluations.
+        Reference scans do more file I/O than the other
+        watchdogs, so the default is conservative.
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 10080
+          unit_of_measurement: minutes
+          mode: box
+
+    max_source_notifications:
+      name: Max source notifications
+      description: >
+        Maximum number of per-source (per-owner)
+        notifications. Set to 0 for unlimited. When the
+        cap is reached, a summary notification indicates
+        how many additional notifications were
+        suppressed.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+
+    debug_logging:
+      name: Debug logging
+      description: >
+        Enable debug logging. When enabled, emits a
+        log.warning line with stats on every evaluation.
+        Check Settings > System > Logs to view output.
+      default: false
+      selector:
+        boolean: {}
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+
+actions:
+  - action: pyscript.reference_watchdog
+    data:
+      instance_id: "{{ this.entity_id }}"
+      trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"
+      scan_sources_raw: !input scan_sources
+      exclude_paths_raw: !input exclude_paths
+      exclude_integrations_raw: !input exclude_integrations
+      exclude_entities_raw: !input exclude_entities
+      exclude_entity_regex_raw: !input exclude_entity_regex
+      check_disabled_entities_raw: !input check_disabled_entities
+      check_interval_minutes_raw: !input check_interval_minutes
+      max_source_notifications_raw: !input max_source_notifications
+      debug_logging_raw: !input debug_logging
+
+# Triggers every minute but most invocations exit
+# immediately (interval gate). If a real evaluation
+# overlaps the next tick, dropping it is fine.
+mode: single

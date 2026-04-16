@@ -97,6 +97,11 @@ if TYPE_CHECKING:
     persistent_notification: _PersistentNotification
     hass: Any
 
+    # Type-check-only import for the reference_watchdog
+    # logic module. Keeps mypy strict happy when the
+    # wrapper's _rw_build_truth_set return type is used.
+    from reference_watchdog import TruthSet
+
 # ── Shared helpers ──────────────────────────────────
 
 
@@ -1648,4 +1653,273 @@ def entity_defaults_watchdog(
             ev.stat_entities,
             ev.issues_count,
             ev.stat_entity_issues,
+        )
+
+
+# ── Reference Watchdog ────────────────────────────
+
+
+def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
+    """Assemble a TruthSet from live HA runtime state.
+
+    Pulls entity registry, device registry, hass.states,
+    hass.services (for the negative truth set), and
+    label registry into a single TruthSet dataclass
+    instance that the logic module uses for validation
+    and owner lookup. TruthSet is frozen, so accumulate
+    into mutable staging collections and construct it
+    once at the end.
+    """
+    import homeassistant.helpers.device_registry as dr  # noqa: F821
+    import homeassistant.helpers.entity_registry as er  # noqa: F821
+    from reference_watchdog import (  # noqa: F821
+        SEED_DOMAINS,
+        RegistryEntry,
+        TruthSet,
+    )
+
+    entity_ids: set[str] = set()
+    disabled_entity_ids: set[str] = set()
+    device_ids: set[str] = set()
+    service_names: set[str] = set()
+    label_ids: set[str] = set()
+    domains: set[str] = set(SEED_DOMAINS)
+    registry: dict[str, RegistryEntry] = {}
+    entity_by_unique_id: dict[tuple[str, str], str] = {}
+    config_entries_with_entities: set[str] = set()
+
+    ent_reg = er.async_get(hass_obj)
+    for entry in ent_reg.entities.values():
+        eid = entry.entity_id
+        entity_ids.add(eid)
+        domains.add(eid.split(".", 1)[0])
+        is_disabled = entry.disabled_by is not None
+        if is_disabled:
+            disabled_entity_ids.add(eid)
+        platform = entry.platform or ""
+        unique_id = str(entry.unique_id or "")
+        reg_entry = RegistryEntry(
+            entity_id=eid,
+            platform=platform,
+            unique_id=unique_id,
+            config_entry_id=entry.config_entry_id,
+            disabled=is_disabled,
+            name=entry.name,
+            original_name=entry.original_name,
+        )
+        registry[eid] = reg_entry
+        if platform and unique_id:
+            entity_by_unique_id[(platform, unique_id)] = eid
+        if entry.config_entry_id:
+            config_entries_with_entities.add(entry.config_entry_id)
+
+    dev_reg = dr.async_get(hass_obj)
+    for device in dev_reg.devices.values():
+        device_ids.add(device.id)
+
+    # Live states augment entity_ids (catches built-ins
+    # like sun.sun / weather.home that aren't in the
+    # registry) and domains.
+    try:
+        states = hass_obj.states.async_all()
+    except (AttributeError, TypeError):
+        states = []
+    for s in states:
+        eid = s.entity_id
+        entity_ids.add(eid)
+        domains.add(eid.split(".", 1)[0])
+
+    # Service registry — negative truth set that filters
+    # sniff matches that look like entity IDs but are
+    # actually registered services.
+    try:
+        services = hass_obj.services.async_services()
+    except (AttributeError, TypeError):
+        services = {}
+    for dom in services:
+        svcs = services[dom]
+        for svc_name in svcs:
+            service_names.add(str(dom) + "." + str(svc_name))
+
+    # Label registry (v1: stored but not yet validated
+    # by any adapter; see docs/reference_watchdog.md
+    # follow-ups).
+    try:
+        import homeassistant.helpers.label_registry as lr  # noqa: F821
+
+        lab_reg = lr.async_get(hass_obj)
+        for label in lab_reg.labels.values():
+            label_ids.add(label.label_id)
+    except (ImportError, AttributeError):
+        pass
+
+    return TruthSet(
+        entity_ids=frozenset(entity_ids),
+        disabled_entity_ids=frozenset(disabled_entity_ids),
+        device_ids=frozenset(device_ids),
+        service_names=frozenset(service_names),
+        label_ids=frozenset(label_ids),
+        domains=frozenset(domains),
+        registry=registry,
+        entity_by_unique_id=entity_by_unique_id,
+        config_entries_with_entities=frozenset(config_entries_with_entities),
+    )
+
+
+# Parameter defaults are defined in the blueprint YAML,
+# so don't duplicate them here.
+@service  # noqa: F821
+def reference_watchdog(
+    instance_id: str,
+    trigger_platform_raw: str,
+    scan_sources_raw: object,
+    exclude_paths_raw: str,
+    exclude_integrations_raw: object,
+    exclude_entities_raw: object,
+    exclude_entity_regex_raw: str,
+    check_disabled_entities_raw: str,
+    check_interval_minutes_raw: str,
+    max_source_notifications_raw: str,
+    debug_logging_raw: str,
+) -> None:
+    """Scan HA config for broken entity and device references.
+
+    Called by blueprint-generated automation.
+    Purely reactive: evaluate -> act -> exit.
+    No sleeping, no waiting.
+    """
+    from reference_watchdog import Config  # noqa: F821
+
+    start_time = time.monotonic()
+    now = datetime.now(tz=UTC)
+    auto_name = _automation_name(instance_id)
+    tag = "[RW: " + auto_name + "]"
+
+    # Parse inputs
+    scan_sources = _normalize_list(scan_sources_raw)
+    exclude_integrations = _normalize_list(exclude_integrations_raw)
+    exclude_entities = _normalize_list(exclude_entities_raw)
+    debug_logging = _parse_bool(debug_logging_raw)
+    check_disabled_entities = _parse_bool(check_disabled_entities_raw)
+    check_interval_minutes = int(check_interval_minutes_raw)
+    max_notifications = int(max_source_notifications_raw)
+
+    # Validate config (accumulate all errors)
+    errors: list[str] = []
+    if hass_err := _check_hass_available():
+        errors.append(hass_err)
+    exclude_entity_regex = _validate_and_join_patterns(
+        exclude_entity_regex_raw,
+        "exclude_entity_regex",
+        errors,
+    )
+    exclude_paths_list = [
+        p.strip()
+        for p in str(exclude_paths_raw or "").splitlines()
+        if p.strip()
+    ]
+    _manage_config_error_persistent_notification(
+        errors,
+        instance_id,
+        "Reference Watchdog",
+    )
+    if errors:
+        return
+
+    # Interval gating (skip for timed triggers only;
+    # manual UI runs always execute)
+    assert check_interval_minutes >= 1, (
+        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
+    )
+    if str(trigger_platform_raw) == "time_pattern":
+        if not on_interval(check_interval_minutes, now):
+            return
+
+    config = Config(
+        scan_sources=scan_sources,
+        exclude_paths=exclude_paths_list,
+        exclude_integrations=exclude_integrations,
+        exclude_entities=exclude_entities,
+        exclude_entity_regex=exclude_entity_regex,
+        check_disabled_entities=check_disabled_entities,
+    )
+
+    # Build truth set on the main thread (requires HA
+    # registries which are only accessible from the
+    # event loop).
+    truth_set = _rw_build_truth_set(hass)  # noqa: F821
+
+    try:
+        config_dir = hass.config.config_dir  # noqa: F821
+    except AttributeError:
+        return
+
+    # Run the heavy work in a worker thread so the event
+    # loop stays responsive. _run_in_executor is compiled
+    # to native Python via @pyscript_executor; it imports
+    # the logic module via standard Python importlib and
+    # calls run_evaluation in a thread pool.
+    modules_dir = os.path.join(config_dir, "pyscript", "modules")
+    ev = _run_in_executor(
+        modules_dir,
+        "reference_watchdog.run_evaluation",
+        config_dir,
+        config,
+        scan_sources,
+        truth_set,
+        exclude_paths_list,
+        max_notifications,
+    )
+
+    active_ids = _get_active_notification_ids(
+        hass,  # noqa: F821
+    )
+    _process_persistent_notifications(
+        ev.notifications,
+        instance_id,
+        active_ids,
+    )
+
+    # ── Stats ──────────────────────────────────────
+
+    elapsed = time.monotonic() - start_time
+    key = _state_key(instance_id)
+
+    _save_state(
+        key,
+        now,
+        {
+            "runtime": str(round(elapsed, 2)),
+            "paths_included": ev.paths_included,
+            "paths_excluded": ev.paths_excluded,
+            "owners_total": ev.owners_total,
+            "owners_with_refs": ev.owners_with_refs,
+            "owners_without_refs": ev.owners_without_refs,
+            "owners_with_issues": ev.owners_with_issues,
+            "total_findings": ev.total_findings,
+            "broken_entity_count": ev.broken_entity_count,
+            "broken_device_count": ev.broken_device_count,
+            "disabled_entity_count": ev.disabled_entity_count,
+            "refs_total": ev.refs_total,
+            "refs_structural": ev.refs_structural,
+            "refs_jinja": ev.refs_jinja,
+            "refs_sniff": ev.refs_sniff,
+            "refs_service_skipped": ev.refs_service_skipped,
+        },
+    )
+
+    # Debug logging
+    if debug_logging:
+        log.warning(  # noqa: F821
+            "%s owners=%d with_issues=%d findings=%d refs=%d"
+            " (struct=%d jinja=%d sniff=%d svc_skipped=%d)",
+            tag,
+            ev.owners_total,
+            ev.owners_with_issues,
+            ev.total_findings,
+            ev.refs_total,
+            ev.refs_structural,
+            ev.refs_jinja,
+            ev.refs_sniff,
+            ev.refs_service_skipped,
         )

@@ -26,3 +26,11 @@ cache_dir = "/tmp/mypy_cache"
 module = ["homeassistant.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["jinja2", "jinja2.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
+

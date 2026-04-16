@@ -29,6 +29,14 @@ runtime dependencies, making it fully testable with pytest.
   time-of-day gating, trigger disabling, force-on, and
   configurable notifications.
 
+- [Reference Watchdog](docs/reference_watchdog.md) -
+  Scans HA config (YAML includes and `.storage` JSON) for
+  broken entity and device references. Per-owner persistent
+  notifications with clickable links into the HA config UI
+  where available, YAML-only helper marking, and a
+  negative service-name truth set to eliminate false
+  positives.
+
 ## Prerequisites
 
 - Home Assistant with the
