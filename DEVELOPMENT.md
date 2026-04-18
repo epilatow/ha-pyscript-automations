@@ -234,7 +234,7 @@ evaluator. These are enforced via the
 `TestPyScriptCompatibility` test class:
 
 - No generator expressions (use list comprehensions)
-- No `@classmethod`, `@staticmethod`, or `@property`
+- No `@classmethod` or `@property`
 - No `lambda`
 - No `yield` / `yield from`
 - No `print()` (use `log.warning()`)
@@ -284,6 +284,33 @@ part of the test suite:
 - `test_ruff_lint` — ruff linting
 - `test_ruff_format` — ruff formatting
 - `test_mypy_strict` — mypy strict type checking
+
+### PyScript compatibility
+
+Two complementary mechanisms catch PyScript AST
+evaluator incompatibilities before deployment:
+
+- **Static scan**
+  (`TestPyScriptCompatibility` in
+  `test_ha_pyscript_automations.py`) — walks the AST
+  of every `pyscript/**/*.py` file and flags known-bad
+  patterns (generators, lambda, yield, bare `open()`,
+  `sorted(key=func)`, etc.). Fast and gives precise
+  file:line errors. When adding a new static ban, add
+  a paired negative test in `TestHarnessSanity` (see
+  below) to verify the evaluator actually rejects it.
+
+- **Real evaluator**
+  (`test_pyscript_eval_compat.py`) — instantiates
+  PyScript's actual `AstEval` interpreter and executes
+  every top-level statement of every pyscript file.
+  Catches issues the static scan can't express (e.g.
+  coroutine comparison from `sort(key=func)`, lambda
+  closure capture failures). `TestHarnessSanity`
+  pairs each static ban with a negative test through
+  the real evaluator; if a future pyscript release
+  starts accepting a banned construct, the paired
+  test fails and signals the ban can be removed.
 
 ### Standalone checks
 

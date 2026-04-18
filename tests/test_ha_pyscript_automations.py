@@ -3300,7 +3300,7 @@ class TestPyScriptCompatibility:
     compatible with the AST evaluator.
 
     Known limitations (pyscript 1.7.0):
-      - @classmethod / @staticmethod / @property unsupported
+      - @classmethod / @property unsupported
       - lambda closures cannot capture local variables
       - generator expressions (x for x in ...) unsupported
       - match/case unsupported
@@ -3309,9 +3309,27 @@ class TestPyScriptCompatibility:
         (__eq__, __str__, etc.) defined in pyscript don't work
       - print() is intercepted (use log.* instead)
       - bare open() is not available (use io.open())
+      - local variable annotations are evaluated at runtime
+        (TYPE_CHECKING-only names cause NameError)
 
     These tests scan all pyscript files to prevent
     regressions.
+
+    IMPORTANT — paired evaluator sanity tests:
+    When adding a new ``test_no_*`` guard here, add a
+    matching negative test to
+    ``TestHarnessSanity`` in
+    ``tests/test_pyscript_eval_compat.py`` that feeds
+    the banned construct through the real PyScript
+    AstEval and asserts it actually raises.  That
+    pairing is what makes this suite self-healing:
+    if a future pyscript release starts accepting a
+    construct we ban, the harness test fails and
+    signals that the static ban can be removed.
+    ``@staticmethod`` was one such case — banned
+    defensively but actually accepted by pyscript
+    1.7.0; the ban was removed once the harness
+    pairing confirmed it.
     """
 
     @staticmethod
@@ -3348,25 +3366,6 @@ class TestPyScriptCompatibility:
                         " -- PyScript cannot call"
                         " classmethods. Use a module-"
                         "level function instead."
-                    )
-
-    def test_no_staticmethod_decorator(self) -> None:
-        """@staticmethod is not supported by PyScript."""
-        for path in self._pyscript_files():
-            src = path.read_text()
-            tree = ast.parse(src, str(path))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.FunctionDef):
-                    continue
-                for dec in node.decorator_list:
-                    name = ""
-                    if isinstance(dec, ast.Name):
-                        name = dec.id
-                    assert name != "staticmethod", (
-                        f"{path.name}:{node.lineno}"
-                        f" @staticmethod on {node.name}()"
-                        " -- PyScript does not support"
-                        " built-in decorators."
                     )
 
     def test_no_property_decorator(self) -> None:
@@ -3505,6 +3504,123 @@ class TestPyScriptCompatibility:
                     " -- PyScript intercepts print()."
                     " Use log.warning/info/error."
                 )
+
+    def test_no_bare_open_in_pyscript_files(self) -> None:
+        """Bare open() is not available under the AST evaluator.
+
+        Use ``io.open()`` instead. PyScript removes the
+        ``open`` builtin from the process namespace.
+        """
+        for path in self._pyscript_files():
+            src = path.read_text()
+            tree = ast.parse(src, str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                if isinstance(func, ast.Name) and func.id == "open":
+                    raise AssertionError(
+                        f"{path.name}:{node.lineno}"
+                        " bare open() call -- not"
+                        " available under PyScript's"
+                        " AST evaluator. Use io.open()"
+                        " instead."
+                    )
+
+    def test_no_type_checking_names_in_local_annotations(
+        self,
+    ) -> None:
+        """TYPE_CHECKING names in local annotations fail at runtime.
+
+        PyScript's AST evaluator evaluates function-body
+        variable annotations at runtime, unlike standard
+        Python (which skips them per PEP 526). Any local
+        annotation that references a name only imported
+        under ``if TYPE_CHECKING:`` raises ``NameError``.
+
+        Function signature annotations (parameters, return
+        types) are fine — they're evaluated lazily or
+        written as string literals.
+        """
+        for path in self._pyscript_files():
+            src = path.read_text()
+            tree = ast.parse(src, str(path))
+
+            # Collect names defined under TYPE_CHECKING.
+            tc_names: set[str] = set()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.If):
+                    continue
+                test = node.test
+                if not (
+                    isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
+                ):
+                    continue
+                for child in ast.walk(node):
+                    if isinstance(child, ast.ClassDef):
+                        tc_names.add(child.name)
+                    elif isinstance(child, ast.ImportFrom):
+                        for alias in child.names:
+                            name = alias.asname or alias.name
+                            tc_names.add(name)
+                    elif isinstance(
+                        child,
+                        ast.AnnAssign,
+                    ) and isinstance(child.target, ast.Name):
+                        tc_names.add(child.target.id)
+
+            if not tc_names:
+                continue
+
+            # Walk function bodies for AnnAssign nodes
+            # that reference TYPE_CHECKING-only names.
+            for func_node in ast.walk(tree):
+                if not isinstance(
+                    func_node,
+                    ast.FunctionDef,
+                ):
+                    continue
+                # Collect names imported at runtime
+                # within this function — those are
+                # safe even if they share a name with
+                # a TYPE_CHECKING import.
+                runtime_names: set[str] = set()
+                for stmt in ast.walk(func_node):
+                    if isinstance(stmt, ast.ImportFrom):
+                        for alias in stmt.names:
+                            name = alias.asname or alias.name
+                            runtime_names.add(name)
+                    elif isinstance(stmt, ast.Import):
+                        for alias in stmt.names:
+                            name = alias.asname or alias.name
+                            runtime_names.add(name)
+                flaggable = tc_names - runtime_names
+                if not flaggable:
+                    continue
+                for child in ast.walk(func_node):
+                    if not isinstance(child, ast.AnnAssign):
+                        continue
+                    # Collect all Name references in the
+                    # annotation subtree.
+                    for name_node in ast.walk(
+                        child.annotation,
+                    ):
+                        if not isinstance(
+                            name_node,
+                            ast.Name,
+                        ):
+                            continue
+                        if name_node.id in flaggable:
+                            raise AssertionError(
+                                f"{path.name}:{child.lineno}"
+                                f" local annotation uses"
+                                f" TYPE_CHECKING name"
+                                f" '{name_node.id}'."
+                                f" PyScript evaluates"
+                                f" local annotations at"
+                                f" runtime. Remove the"
+                                f" annotation or quote it."
+                            )
 
 
 if __name__ == "__main__":
