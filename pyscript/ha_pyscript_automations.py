@@ -147,22 +147,66 @@ def _get_active_notification_ids(
         return None
 
 
+def _md_escape_link_text(s: str) -> str:
+    """Escape CommonMark link-text special chars.
+
+    Applied to the display portion of ``[text](url)`` so
+    brackets or backslashes in user-supplied names don't
+    break the link. Done as a single ``str.translate`` pass
+    so the backslashes we insert for ``[``/``]`` are not
+    themselves re-escaped by the ``\\`` mapping.
+    """
+    return s.translate(
+        {
+            ord("\\"): "\\\\",
+            ord("["): "\\[",
+            ord("]"): "\\]",
+        },
+    )
+
+
 def _process_persistent_notifications(
     notifications: "list[PersistentNotification]",
+    instance_id: str,
     active_ids: set[str] | None = None,
 ) -> None:
     """Create or dismiss persistent notifications.
+
+    Active notifications get an ``Automation: [<name>](<url>)``
+    line prepended to their message so the user can jump
+    straight to the generating automation's edit page.  If
+    the automation entity has no ``id`` attribute the link
+    is omitted and the message is dispatched unchanged.
 
     When active_ids is provided, dismissals are skipped
     for notification IDs not in the set (they were never
     created, so dismissing them is a no-op waste of an
     HA service call).
     """
+    try:
+        attrs = state.getattr(instance_id)  # noqa: F821
+    except Exception:
+        attrs = {}
+    auto_id = attrs.get("id", "")
+    auto_name = attrs.get("friendly_name", "") or instance_id
+    link_prefix = ""
+    if auto_id:
+        link_prefix = (
+            "Automation: ["
+            + _md_escape_link_text(auto_name)
+            + "](/config/automation/edit/"
+            + str(auto_id)
+            + ")\n"
+        )
+
     for n in notifications:
         if n.active:
+            message = n.message
+            if link_prefix:
+                message = link_prefix + message
             persistent_notification.create(  # noqa: F821
                 title=n.title,
-                message=n.message,
+                message=message,
                 notification_id=n.notification_id,
             )
         elif active_ids is None or n.notification_id in active_ids:
@@ -577,6 +621,7 @@ def _manage_config_error_persistent_notification(
                 message=message,
             ),
         ],
+        instance_id,
     )
 
 
@@ -998,6 +1043,7 @@ def device_watchdog(
     )
     _process_persistent_notifications(
         ev.notifications,
+        instance_id,
         active_ids,
     )
 
@@ -1541,6 +1587,7 @@ def entity_defaults_watchdog(
     )
     _process_persistent_notifications(
         ev.notifications,
+        instance_id,
         active_ids,
     )
 

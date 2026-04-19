@@ -908,6 +908,120 @@ class TestAutomationName:
         assert fn("automation.test") == "automation.test"
 
 
+class TestProcessPersistentNotifications:
+    """_process_persistent_notifications decorates active
+    notifications with an 'Automation: [name](url)' link
+    when the automation entity exposes an ``id`` attribute.
+    """
+
+    def _make(
+        self,
+        env: _ServiceEnv,
+        *,
+        active: bool,
+        message: str,
+    ) -> Any:
+        pn_cls = env._ns["PersistentNotification"]
+        return pn_cls(
+            active=active,
+            notification_id="nid",
+            title="t",
+            message=message,
+        )
+
+    def test_prepends_link_when_id_present(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_process_persistent_notifications"]
+        env.mock_state._attrs["automation.dw_main"] = {
+            "friendly_name": "Device Watchdog 73",
+            "id": "1700000000001",
+        }
+        n = self._make(env, active=True, message="body")
+        fn([n], "automation.dw_main")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        expected_prefix = (
+            "Automation: [Device Watchdog 73]"
+            "(/config/automation/edit/1700000000001)\n"
+        )
+        assert msg == expected_prefix + "body"
+
+    def test_no_prefix_when_id_missing(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_process_persistent_notifications"]
+        env.mock_state._attrs["automation.dw_main"] = {
+            "friendly_name": "Device Watchdog",
+        }
+        n = self._make(env, active=True, message="body")
+        fn([n], "automation.dw_main")
+        assert env.mock_pn.create_calls[0]["message"] == "body"
+
+    def test_no_prefix_when_id_empty_string(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_process_persistent_notifications"]
+        env.mock_state._attrs["automation.dw_main"] = {
+            "friendly_name": "Device Watchdog",
+            "id": "",
+        }
+        n = self._make(env, active=True, message="body")
+        fn([n], "automation.dw_main")
+        assert env.mock_pn.create_calls[0]["message"] == "body"
+
+    def test_falls_back_to_instance_id_when_no_friendly(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_process_persistent_notifications"]
+        env.mock_state._attrs["automation.dw_main"] = {
+            "id": "42",
+        }
+        n = self._make(env, active=True, message="body")
+        fn([n], "automation.dw_main")
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert msg.startswith(
+            "Automation: [automation.dw_main](/config/automation/edit/42)\n",
+        )
+
+    def test_escapes_brackets_in_friendly_name(self) -> None:
+        """Brackets in the automation name are legal but
+        would break the markdown link if inlined verbatim.
+        Backslash-escape them."""
+        env = _ServiceEnv()
+        fn = env._ns["_process_persistent_notifications"]
+        env.mock_state._attrs["automation.dw_main"] = {
+            "friendly_name": "Device [debug]\\ Watchdog",
+            "id": "42",
+        }
+        n = self._make(env, active=True, message="body")
+        fn([n], "automation.dw_main")
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert msg.startswith(
+            "Automation: [Device \\[debug\\]\\\\ Watchdog]"
+            "(/config/automation/edit/42)\n",
+        )
+
+    def test_dismissals_unaffected(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_process_persistent_notifications"]
+        env.mock_state._attrs["automation.dw_main"] = {
+            "friendly_name": "Device Watchdog",
+            "id": "42",
+        }
+        n = self._make(env, active=False, message="")
+        fn([n], "automation.dw_main", {"nid"})
+        # Dismissal fires with no message mutation.
+        assert env.mock_pn.create_calls == []
+        assert len(env.mock_pn.dismiss_calls) == 1
+
+    def test_getattr_error_skips_decoration(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_process_persistent_notifications"]
+        env.mock_state._getattr_error = True
+        n = self._make(env, active=True, message="body")
+        fn([n], "automation.dw_main")
+        assert env.mock_pn.create_calls[0]["message"] == "body"
+
+
 class TestStscEntityValidation:
     def test_missing_entity_creates_notification(
         self,
@@ -1544,6 +1658,23 @@ class TestDeviceWatchdogRegexValidation:
         assert "device_exclude_regex" in call["message"]
         assert "[invalid" in call["message"]
 
+    def test_config_error_includes_automation_link(self) -> None:
+        """Config-error notifications flow through
+        _process_persistent_notifications like device
+        notifications, so they get the same link header."""
+        env = _WatchdogEnv()
+        env.mock_state._attrs["auto.dw_test"] = {
+            "friendly_name": "Device Watchdog 73",
+            "id": "1700000000001",
+        }
+        env.call(device_exclude_regex_raw="[invalid")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert msg.startswith(
+            "Automation: [Device Watchdog 73]"
+            "(/config/automation/edit/1700000000001)\n",
+        )
+
     def test_invalid_entity_regex_notifies(self) -> None:
         env = _WatchdogEnv()
         env.call(entity_id_exclude_regex_raw="(unclosed")
@@ -1862,6 +1993,45 @@ class TestDeviceWatchdogNotifications:
             and "_cap" not in c["notification_id"]
         ]
         assert len(device_dismissals) == 1
+
+    def test_message_has_automation_link(self) -> None:
+        """When the automation exposes an ``id`` attribute,
+        notifications get an ``Automation: [name](url)``
+        header linking to the edit page."""
+        env = _WatchdogEnv()
+        env.mock_state._attrs["auto.dw_test"] = {
+            "friendly_name": "Device Watchdog 73",
+            "id": "1700000000001",
+        }
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Bad Device",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call()
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert msg.startswith(
+            "Automation: [Device Watchdog 73]"
+            "(/config/automation/edit/1700000000001)\n",
+        )
+
+    def test_message_no_link_when_id_missing(self) -> None:
+        """Without an ``id`` attribute, messages dispatch
+        unchanged."""
+        env = _WatchdogEnv()
+        env.mock_state._attrs["auto.dw_test"] = {
+            "friendly_name": "Device Watchdog 73",
+        }
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Bad Device",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call()
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert not msg.startswith("Automation:")
 
 
 class TestDeviceWatchdogDiagnostics:
