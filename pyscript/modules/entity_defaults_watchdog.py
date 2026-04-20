@@ -23,11 +23,43 @@ from helpers import (
 # and test ``in config.drift_checks`` at the use site.
 DRIFT_CHECK_DEVICE_ENTITY_ID = "device-entity-id"
 DRIFT_CHECK_DEVICE_ENTITY_NAME = "device-entity-name"
+DRIFT_CHECK_ENTITY_ID = "entity-id"
 
 CHECK_ALL: frozenset[str] = frozenset(
     {
         DRIFT_CHECK_DEVICE_ENTITY_ID,
         DRIFT_CHECK_DEVICE_ENTITY_NAME,
+        DRIFT_CHECK_ENTITY_ID,
+    },
+)
+
+# Domains eligible for the deviceless entity_id drift
+# check. Limited to user-named domains whose entity_ids
+# are derived from a user-supplied name (and therefore
+# drift when the user renames the name).  Integration-
+# entity domains (media_player, camera, climate, etc.)
+# are excluded because their entity_ids are derived from
+# device + integration names — the device_entity_id
+# check already covers those.
+DEVICELESS_DOMAINS: frozenset[str] = frozenset(
+    {
+        "automation",
+        "script",
+        "scene",
+        "group",
+        "schedule",
+        "timer",
+        "counter",
+        "input_boolean",
+        "input_number",
+        "input_text",
+        "input_select",
+        "input_datetime",
+        "input_button",
+        "sensor",
+        "binary_sensor",
+        "switch",
+        "light",
     },
 )
 
@@ -76,6 +108,68 @@ class DriftDetail:
     expected_name: str | None
     has_redundant_prefix: bool = False
     recommended_override: str | None = None
+
+
+@dataclass
+class DevicelessEntityInfo:
+    """Deviceless entity snapshot for drift evaluation."""
+
+    entity_id: str
+    # HA's effective display name for the entity.  For
+    # registry entries, ``entry.name or entry.original_name``;
+    # for state-only entities, ``attributes.friendly_name``.
+    # Empty string when no name is set.
+    effective_name: str
+    # Registry ``entry.platform`` — the integration that
+    # supplied the entity.  None for state-only entities.
+    platform: str | None
+    # Registry ``entry.unique_id`` — used to build the
+    # automation edit link.  None for state-only entities.
+    unique_id: str | None
+    # True if this entity has a registry entry.  False for
+    # state-only entities (YAML-defined without unique_id).
+    from_registry: bool
+    # Registry ``entry.config_entry_id`` — set when the
+    # entity was registered via a UI-created config entry,
+    # ``None`` when it came through a YAML platform setup
+    # (e.g. legacy ``sensor:`` YAML, ``template:`` YAML).
+    # Discriminates "integration page is useful" from
+    # "integration page doesn't show this entity, point
+    # the user at the YAML instead".
+    config_entry_id: str | None = None
+
+
+@dataclass
+class DevicelessDriftDetail:
+    """One deviceless entity drift finding."""
+
+    entity_id: str
+    expected_object_id: str
+    friendly_name: str
+    stale_suffix: bool
+    platform: str | None
+    unique_id: str | None
+    from_registry: bool
+    config_entry_id: str | None = None
+
+
+@dataclass
+class DevicelessResult:
+    """Aggregated deviceless drift result.
+
+    Unlike DeviceResult (one per device), this is a single
+    aggregate covering every drifted deviceless entity —
+    deviceless entities have no natural grouping, so we
+    emit one bucket notification instead of one per entity.
+    """
+
+    has_issue: bool
+    notification_id: str
+    notification_title: str
+    notification_message: str
+    drifted: list[DevicelessDriftDetail]
+    entities_checked: int
+    entities_excluded: int
 
 
 @dataclass
@@ -170,6 +264,69 @@ def _check_id_enabled(config: Config) -> bool:
 def _check_name_enabled(config: Config) -> bool:
     """True if device-entity-name check is active."""
     return DRIFT_CHECK_DEVICE_ENTITY_NAME in config.drift_checks
+
+
+def _check_deviceless_enabled(config: Config) -> bool:
+    """True if deviceless entity-id check is active."""
+    return DRIFT_CHECK_ENTITY_ID in config.drift_checks
+
+
+def _matches_with_collision_suffix(
+    obj_id: str,
+    expected: str,
+    peers: set[str],
+) -> tuple[bool, bool]:
+    """Decide whether ``obj_id`` is a match for ``expected``.
+
+    Returns ``(matches, stale_suffix)``:
+
+    - ``obj_id == expected`` → ``(True, False)``.
+    - ``obj_id`` equals ``<expected>_N`` for integer
+      ``N >= 2`` AND ``expected`` is in ``peers``
+      → ``(True, False)`` — a valid HA collision suffix.
+    - ``obj_id`` equals ``<expected>_N`` for ``N >= 2``,
+      ``expected`` is not in ``peers``, but a higher
+      ``<expected>_M`` (``M > N``) is in ``peers``
+      → ``(True, False)`` — not flagged; the highest
+      entry in the chain is flagged instead so renaming
+      it to ``expected`` resolves the whole chain.
+    - ``obj_id`` equals ``<expected>_N`` for ``N >= 2``,
+      no base peer, and no higher chain peer
+      → ``(False, True)`` — a stale suffix.
+    - Otherwise → ``(False, False)`` — plain drift.
+    """
+    if not expected:
+        return (False, False)
+    if obj_id == expected:
+        return (True, False)
+    if not obj_id.startswith(expected + "_"):
+        return (False, False)
+    rest = obj_id[len(expected) + 1 :]
+    if not rest.isdigit():
+        return (False, False)
+    # Reject leading-zero forms ("01", "0") so "_0"
+    # and "_01" aren't mistaken for HA suffixes; HA
+    # uses "_2", "_3", … starting at 2.
+    if rest.startswith("0"):
+        return (False, False)
+    n = int(rest)
+    if n < 2:
+        return (False, False)
+    if expected in peers:
+        return (True, False)
+    # No base peer. Scan for any higher-numbered chain
+    # peer; if present, defer flagging to it so the user
+    # fixes the chain in one rename.
+    prefix = expected + "_"
+    for p in peers:
+        if not p.startswith(prefix):
+            continue
+        rest_p = p[len(prefix) :]
+        if not rest_p.isdigit() or rest_p.startswith("0"):
+            continue
+        if int(rest_p) > n:
+            return (True, False)
+    return (False, True)
 
 
 def _is_excluded(
@@ -508,6 +665,231 @@ def _evaluate_device(
     )
 
 
+def _md_escape(s: str) -> str:
+    """Escape CommonMark ``\\``, ``[``, ``]``.
+
+    Applied to friendly names wherever they appear in a
+    deviceless bullet — both as link text in ``[name](url)``
+    and as plain text next to a trailing ``[platform](url)``
+    link, since an unescaped ``[`` in the plain portion can
+    still pair with a later ``](`` to form a bogus link.
+    """
+    return s.translate(
+        {
+            ord("\\"): "\\\\",
+            ord("["): "\\[",
+            ord("]"): "\\]",
+        },
+    )
+
+
+def _deviceless_line_suffix(
+    entity_id: str,
+    friendly_name: str,
+    platform: str | None,
+    unique_id: str | None,
+    from_registry: bool,
+    config_entry_id: str | None = None,
+) -> str:
+    """Build the indented second line of a deviceless
+    drift bullet.
+
+    The exact layout varies by entity kind:
+
+    - ``automation`` / ``script``: the friendly name is
+      itself the link to that entity's editor.
+    - registry-backed, UI-configured (``config_entry_id``
+      set): plain friendly name followed by
+      ``· integration [<platform>](…)`` so the user can
+      click through to the integration's config page.
+    - registry-backed, YAML-configured (``config_entry_id``
+      is ``None``): same but the integration name is plain
+      text with a ``· YAML-configuration`` note. The
+      integration page doesn't show YAML-defined entities,
+      so a link there would mislead — the user should edit
+      the YAML instead.
+    - otherwise (state-only YAML without ``unique_id:``):
+      plain friendly name followed by a nudge to add a
+      ``unique_id:`` — no per-entity exclusion suggestion.
+
+    The friendly name is markdown-escaped in every branch
+    so brackets or backslashes in the name can't break the
+    surrounding link markdown.
+
+    See docs/entity_defaults_watchdog.md for rationale.
+    """
+    dom, obj_id = entity_id.split(".", 1)
+    name = _md_escape(friendly_name)
+    if dom == "automation" and unique_id:
+        return f"[{name}](/config/automation/edit/{unique_id})"
+    if dom == "script":
+        return f"[{name}](/config/script/edit/{obj_id})"
+    if from_registry and platform:
+        if config_entry_id:
+            url = f"/config/integrations/integration/{platform}"
+            return f"{name} · integration [{platform}]({url})"
+        return f"{name} · integration {platform} · YAML-configuration"
+    return f"{name} · add `unique_id:` to make this entity manageable"
+
+
+def _build_deviceless_notification_message(
+    drift_items: list[DevicelessDriftDetail],
+    stale_items: list[DevicelessDriftDetail],
+) -> str:
+    """Build the deviceless-bucket notification body.
+
+    Two sections — generic drift and stale collision
+    suffixes — each shown only when non-empty. Bullets
+    carry current/expected entity_id, friendly name, and
+    a per-domain pointer (edit link or integration page).
+    """
+    sections: list[str] = []
+
+    if drift_items:
+        lines = [
+            "Entity IDs do not match their names ("
+            + str(len(drift_items))
+            + "):",
+        ]
+        sorted_drift = [(d.entity_id, i, d) for i, d in enumerate(drift_items)]
+        sorted_drift.sort()
+        for _, _, d in sorted_drift:
+            dom = d.entity_id.split(".", 1)[0]
+            suffix = _deviceless_line_suffix(
+                d.entity_id,
+                d.friendly_name,
+                d.platform,
+                d.unique_id,
+                d.from_registry,
+                d.config_entry_id,
+            )
+            lines.append(
+                "- `"
+                + d.entity_id
+                + "` → expected `"
+                + dom
+                + "."
+                + d.expected_object_id
+                + "`",
+            )
+            lines.append("  " + suffix)
+        sections.append("\n".join(lines))
+
+    if stale_items:
+        lines = [
+            "Stale collision suffixes"
+            " (original peer removed, rename recommended):",
+        ]
+        sorted_stale = [(d.entity_id, i, d) for i, d in enumerate(stale_items)]
+        sorted_stale.sort()
+        for _, _, d in sorted_stale:
+            dom = d.entity_id.split(".", 1)[0]
+            suffix = _deviceless_line_suffix(
+                d.entity_id,
+                d.friendly_name,
+                d.platform,
+                d.unique_id,
+                d.from_registry,
+                d.config_entry_id,
+            )
+            lines.append(
+                "- `"
+                + d.entity_id
+                + "` → rename to `"
+                + dom
+                + "."
+                + d.expected_object_id
+                + "`",
+            )
+            lines.append("  " + suffix)
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
+def _evaluate_deviceless(
+    config: Config,
+    entities: list[DevicelessEntityInfo],
+    peers_by_domain: dict[str, set[str]],
+) -> DevicelessResult:
+    """Evaluate entity_id drift for deviceless entities.
+
+    Classifies each entity into ok, drift, or stale
+    suffix, then builds a single bucket notification
+    covering all flagged entities.
+    """
+    from helpers import slugify
+
+    drift_items: list[DevicelessDriftDetail] = []
+    stale_items: list[DevicelessDriftDetail] = []
+    excluded = 0
+
+    for entity in entities:
+        if _is_excluded(
+            config,
+            entity.entity_id,
+            entity.effective_name,
+        ):
+            excluded += 1
+            continue
+
+        if not entity.effective_name:
+            continue
+
+        expected = slugify(entity.effective_name)
+        if not expected:
+            continue
+
+        dom, obj_id = entity.entity_id.split(".", 1)
+        peers = peers_by_domain.get(dom, set())
+        matches, stale = _matches_with_collision_suffix(
+            obj_id,
+            expected,
+            peers,
+        )
+        if matches:
+            continue
+
+        detail = DevicelessDriftDetail(
+            entity_id=entity.entity_id,
+            expected_object_id=expected,
+            friendly_name=entity.effective_name,
+            stale_suffix=stale,
+            platform=entity.platform,
+            unique_id=entity.unique_id,
+            from_registry=entity.from_registry,
+            config_entry_id=entity.config_entry_id,
+        )
+        if stale:
+            stale_items.append(detail)
+        else:
+            drift_items.append(detail)
+
+    has_issue = bool(drift_items) or bool(stale_items)
+    title = ""
+    message = ""
+    if has_issue:
+        title = "Entity defaults watchdog: deviceless entity drift"
+        message = _build_deviceless_notification_message(
+            drift_items,
+            stale_items,
+        )
+
+    all_drifted: list[DevicelessDriftDetail] = []
+    all_drifted.extend(drift_items)
+    all_drifted.extend(stale_items)
+
+    return DevicelessResult(
+        has_issue=has_issue,
+        notification_id="entity_defaults_watchdog_deviceless",
+        notification_title=title,
+        notification_message=message,
+        drifted=all_drifted,
+        entities_checked=len(entities) - excluded,
+        entities_excluded=excluded,
+    )
+
+
 def evaluate_devices(
     config: Config,
     devices: list[DeviceInfo],
@@ -555,11 +937,17 @@ class EvaluationResult:
     stat_entity_issues: int
     stat_name_issues: int
     stat_id_issues: int
+    stat_deviceless_entities: int
+    stat_deviceless_excluded: int
+    stat_deviceless_drift: int
+    stat_deviceless_stale: int
 
 
 def run_evaluation(
     config: Config,
     devices: list[DeviceInfo],
+    deviceless_entities: list[DevicelessEntityInfo],
+    peers_by_domain: dict[str, set[str]],
     all_integrations_count: int,
     max_notifications: int,
 ) -> EvaluationResult:
@@ -580,7 +968,36 @@ def run_evaluation(
         "devices with drift",
     )
 
+    if _check_deviceless_enabled(config):
+        deviceless = _evaluate_deviceless(
+            config,
+            deviceless_entities,
+            peers_by_domain,
+        )
+    else:
+        deviceless = DevicelessResult(
+            has_issue=False,
+            notification_id="entity_defaults_watchdog_deviceless",
+            notification_title="",
+            notification_message="",
+            drifted=[],
+            entities_checked=0,
+            entities_excluded=0,
+        )
+    notifications.append(
+        PersistentNotification(
+            active=deviceless.has_issue,
+            notification_id=deviceless.notification_id,
+            title=deviceless.notification_title,
+            message=deviceless.notification_message,
+        ),
+    )
+
     issues = [r for r in results if r.has_issue]
+    stat_deviceless_stale = sum(
+        [1 for d in deviceless.drifted if d.stale_suffix]
+    )
+    stat_deviceless_drift = len(deviceless.drifted) - stat_deviceless_stale
 
     return EvaluationResult(
         results=results,
@@ -603,4 +1020,8 @@ def run_evaluation(
         stat_id_issues=sum(
             [1 for r in issues for d in r.drifted_entities if d.id_drifted]
         ),
+        stat_deviceless_entities=deviceless.entities_checked,
+        stat_deviceless_excluded=deviceless.entities_excluded,
+        stat_deviceless_drift=stat_deviceless_drift,
+        stat_deviceless_stale=stat_deviceless_stale,
     )

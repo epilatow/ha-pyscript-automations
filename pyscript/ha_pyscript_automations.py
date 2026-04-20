@@ -97,9 +97,12 @@ if TYPE_CHECKING:
     persistent_notification: _PersistentNotification
     hass: Any
 
-    # Type-check-only import for the reference_watchdog
-    # logic module. Keeps mypy strict happy when the
-    # wrapper's _rw_build_truth_set return type is used.
+    # Type-check-only imports for logic-module types
+    # referenced by wrapper helper signatures. Keep mypy
+    # strict happy without importing at runtime (the
+    # modules run under PyScript's AST evaluator, not
+    # standard Python imports).
+    from entity_defaults_watchdog import DevicelessEntityInfo
     from reference_watchdog import TruthSet
 
 # ── Shared helpers ──────────────────────────────────
@@ -152,7 +155,7 @@ def _get_active_notification_ids(
         return None
 
 
-def _md_escape_link_text(s: str) -> str:
+def _md_escape(s: str) -> str:
     """Escape CommonMark link-text special chars.
 
     Applied to the display portion of ``[text](url)`` so
@@ -198,7 +201,7 @@ def _process_persistent_notifications(
     if auto_id:
         link_prefix = (
             "Automation: ["
-            + _md_escape_link_text(auto_name)
+            + _md_escape(auto_name)
             + "](/config/automation/edit/"
             + str(auto_id)
             + ")\n"
@@ -1429,6 +1432,137 @@ def _compute_expected_entity_id(
         return None
 
 
+def _default_friendly_name(obj_id: str) -> str:
+    """HA-style default friendly name for an ``obj_id``.
+
+    Mirrors what HA shows for an entity lacking a
+    ``friendly_name`` attribute: underscores become spaces
+    and the result is title-cased. ``slugify`` round-trips
+    this back to ``obj_id`` so a deviceless entity with no
+    explicit name is classified as non-drifting by default.
+    """
+    return obj_id.replace("_", " ").title()
+
+
+def _discover_deviceless_entities(
+    hass_obj: object,
+    domains: "frozenset[str]",
+    target_integrations: "set[str] | None" = None,
+) -> tuple[
+    "list[DevicelessEntityInfo]",
+    "dict[str, set[str]]",
+]:
+    """Walk registry and state list for deviceless entities.
+
+    Primary source: entity registry entries where
+    ``device_id is None`` and domain is in ``domains``.
+    Supplementary source: state-list entities in the same
+    domains not present in the registry at all (YAML-
+    defined entities without ``unique_id:``) — caught via
+    their state's ``friendly_name`` attribute.
+
+    ``target_integrations`` optionally restricts the
+    registry-backed slice to entries whose ``platform`` is
+    in the set.  State-only entries have no platform and
+    are unaffected by this filter.  Pass ``None`` for no
+    filtering.
+
+    Returns ``(entities, peers_by_domain)``.  ``peers``
+    is the union of registry and state-only object_ids
+    per domain and is NOT integration-filtered, so the
+    logic module's collision-suffix classifier still sees
+    every peer that could justify a ``_N`` suffix.
+    """
+    import homeassistant.helpers.entity_registry as er  # noqa: F821
+    from entity_defaults_watchdog import (  # noqa: F821
+        DevicelessEntityInfo,
+    )
+
+    entities: list[DevicelessEntityInfo] = []
+    peers: dict[str, set[str]] = {}
+    # Track every registry entity_id (including device-
+    # attached and disabled entries) so the state-list
+    # safety net below only picks up entities that truly
+    # have no registry entry. Without this, a device-
+    # attached registry entry whose device wasn't
+    # enumerated (or a disabled one) would get
+    # misclassified as ``from_registry=False`` and surface
+    # in the deviceless bucket with no integration info.
+    seen_eids: set[str] = set()
+
+    ent_reg = er.async_get(hass_obj)
+    for entry in ent_reg.entities.values():
+        seen_eids.add(entry.entity_id)
+        if entry.device_id is not None:
+            continue
+        if entry.disabled_by is not None:
+            continue
+        dom, obj = entry.entity_id.split(".", 1)
+        if dom not in domains:
+            continue
+        # Add to peers before the integration filter so
+        # collision-suffix detection still sees filtered
+        # peers (otherwise a ``foo_2`` whose ``foo`` peer
+        # was filtered out would be falsely flagged as
+        # stale).
+        peers.setdefault(dom, set()).add(obj)
+        if (
+            target_integrations is not None
+            and entry.platform
+            and entry.platform not in target_integrations
+        ):
+            continue
+        effective = str(
+            entry.name or entry.original_name or _default_friendly_name(obj),
+        )
+        entities.append(
+            DevicelessEntityInfo(
+                entity_id=entry.entity_id,
+                effective_name=effective,
+                platform=entry.platform,
+                unique_id=entry.unique_id,
+                from_registry=True,
+                config_entry_id=entry.config_entry_id,
+            ),
+        )
+
+    # State-only safety net — YAML entities without
+    # unique_id don't appear in the registry but do have
+    # state. We compare attributes.friendly_name; when it
+    # equals HA's default (title-cased obj_id) slugify
+    # will match obj_id exactly and the logic module
+    # won't flag it.
+    try:
+        states = hass_obj.states.async_all()  # type: ignore[attr-defined]
+    except AttributeError:
+        states = []
+    for st in states:
+        eid = st.entity_id
+        if eid in seen_eids:
+            continue
+        dom, obj = eid.split(".", 1)
+        if dom not in domains:
+            continue
+        try:
+            fn = str(st.attributes.get("friendly_name", "") or "")
+        except (AttributeError, TypeError):
+            continue
+        if not fn:
+            fn = _default_friendly_name(obj)
+        entities.append(
+            DevicelessEntityInfo(
+                entity_id=eid,
+                effective_name=fn,
+                platform=None,
+                unique_id=None,
+                from_registry=False,
+            ),
+        )
+        peers.setdefault(dom, set()).add(obj)
+
+    return (entities, peers)
+
+
 # Parameter defaults are defined in the blueprint YAML,
 # so don't duplicate them here.
 @service  # noqa: F821
@@ -1454,6 +1588,7 @@ def entity_defaults_watchdog(
     """
     from entity_defaults_watchdog import (  # noqa: F821
         CHECK_ALL,
+        DEVICELESS_DOMAINS,
         Config,
         DeviceInfo,
         EntityDriftInfo,
@@ -1607,6 +1742,18 @@ def entity_defaults_watchdog(
             ),
         )
 
+    # Discover deviceless entities (automations, helpers,
+    # template sensors, etc.) for the new entity-id check.
+    # Pass target_integrations so include/exclude filters
+    # apply to registry-backed deviceless entries too
+    # (state-only entries have no platform and can't be
+    # integration-filtered).
+    deviceless_entities, peers_by_domain = _discover_deviceless_entities(
+        hass,  # noqa: F821
+        DEVICELESS_DOMAINS,
+        target_integrations,
+    )
+
     # Run evaluation in a worker thread.
     modules_dir = os.path.join(
         hass.config.config_dir,  # noqa: F821
@@ -1618,6 +1765,8 @@ def entity_defaults_watchdog(
         "entity_defaults_watchdog.run_evaluation",
         config,
         devices,
+        deviceless_entities,
+        peers_by_domain,
         len(all_integrations),
         max_notifications,
     )
@@ -1651,6 +1800,10 @@ def entity_defaults_watchdog(
             "entity_issues": ev.stat_entity_issues,
             "entity_name_issues": ev.stat_name_issues,
             "entity_id_issues": ev.stat_id_issues,
+            "deviceless_entities": ev.stat_deviceless_entities,
+            "deviceless_excluded": ev.stat_deviceless_excluded,
+            "deviceless_drift": ev.stat_deviceless_drift,
+            "deviceless_stale": ev.stat_deviceless_stale,
         },
     )
 

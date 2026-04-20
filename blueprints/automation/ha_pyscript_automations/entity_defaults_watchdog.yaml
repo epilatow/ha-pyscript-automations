@@ -2,9 +2,11 @@ blueprint:
   name: Entity Defaults Watchdog
   description: >
     Detect entity IDs and names that have drifted from their
-    defaults. Creates a persistent notification per device
-    with repair instructions. Clears notifications automatically
-    when drift is resolved.
+    defaults. Covers device-attached entities (one
+    notification per drifted device) and deviceless entities
+    like automations, scripts, helpers, and template sensors
+    (one aggregate notification). Clears notifications
+    automatically when drift is resolved.
   domain: automation
   author: epilatow
 
@@ -23,6 +25,8 @@ blueprint:
               value: device-entity-id
             - label: Device entity name
               value: device-entity-name
+            - label: Entity ID (deviceless entities)
+              value: entity-id
 
     include_integrations:
       name: Include integrations

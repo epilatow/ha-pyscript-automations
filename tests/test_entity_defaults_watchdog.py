@@ -24,6 +24,7 @@ from entity_defaults_watchdog import (  # noqa: E402
     DRIFT_CHECK_DEVICE_ENTITY_NAME,
     Config,
     DeviceInfo,
+    DevicelessEntityInfo,
     DriftDetail,
     EntityDriftInfo,
     _build_notification_message,
@@ -32,7 +33,9 @@ from entity_defaults_watchdog import (  # noqa: E402
     _check_name_enabled,
     _compute_recommended_override,
     _evaluate_device,
+    _evaluate_deviceless,
     _is_excluded,
+    _matches_with_collision_suffix,
     evaluate_devices,
 )
 from helpers import DeviceEntry  # noqa: E402
@@ -690,6 +693,472 @@ class TestEvaluateDevices:
         ]
         results = evaluate_devices(cfg, devices)
         assert all(not r.has_issue for r in results)
+
+
+class TestMatchesWithCollisionSuffix:
+    """Validate the collision-suffix matcher.
+
+    Covers exact match, valid ``_N`` suffix (with peer),
+    stale ``_N`` suffix (no peer), and the leading-zero
+    edge cases.
+    """
+
+    def test_exact_match(self) -> None:
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "foo",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (True, False)
+
+    def test_plain_mismatch(self) -> None:
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "bar",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (False, False)
+
+    def test_valid_suffix_with_base_peer(self) -> None:
+        peers = {"foo"}
+        ok, stale = _matches_with_collision_suffix(
+            "foo_2",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (True, False)
+
+    def test_stale_suffix(self) -> None:
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "foo_2",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (False, True)
+
+    def test_chain_end_flagged(self) -> None:
+        # peers={foo_2, foo_3, foo_4}, no foo. Only the
+        # highest (foo_4) is flagged; renaming it to foo
+        # restores a base peer so the rest become valid.
+        peers = {"foo_2", "foo_3", "foo_4"}
+        ok, stale = _matches_with_collision_suffix(
+            "foo_4",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (False, True)
+
+    def test_chain_mid_deferred(self) -> None:
+        peers = {"foo_2", "foo_3", "foo_4"}
+        ok, stale = _matches_with_collision_suffix(
+            "foo_3",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (True, False)
+
+    def test_chain_bottom_deferred(self) -> None:
+        peers = {"foo_2", "foo_3", "foo_4"}
+        ok, stale = _matches_with_collision_suffix(
+            "foo_2",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (True, False)
+
+    def test_suffix_zero_rejected(self) -> None:
+        # HA never uses _0; treat as plain mismatch.
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "foo_0",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (False, False)
+
+    def test_suffix_one_rejected(self) -> None:
+        # HA never uses _1 either.
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "foo_1",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (False, False)
+
+    def test_leading_zero_rejected(self) -> None:
+        # "_02" is not a valid HA suffix.
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "foo_02",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (False, False)
+
+    def test_non_numeric_suffix_rejected(self) -> None:
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "foo_bar",
+            "foo",
+            peers,
+        )
+        assert (ok, stale) == (False, False)
+
+    def test_empty_expected(self) -> None:
+        peers: set[str] = set()
+        ok, stale = _matches_with_collision_suffix(
+            "foo",
+            "",
+            peers,
+        )
+        assert (ok, stale) == (False, False)
+
+
+def _deviceless(
+    entity_id: str,
+    effective_name: str = "",
+    platform: str | None = None,
+    unique_id: str | None = None,
+    from_registry: bool = True,
+    config_entry_id: str | None = "ui_entry",
+) -> DevicelessEntityInfo:
+    return DevicelessEntityInfo(
+        entity_id=entity_id,
+        effective_name=effective_name,
+        platform=platform,
+        unique_id=unique_id,
+        from_registry=from_registry,
+        config_entry_id=config_entry_id,
+    )
+
+
+class TestEvaluateDeviceless:
+    """Cover the rule end-to-end, including section split."""
+
+    def test_no_entities(self) -> None:
+        cfg = _config()
+        result = _evaluate_deviceless(cfg, [], {})
+        assert result.has_issue is False
+        assert result.drifted == []
+        assert result.entities_checked == 0
+
+    def test_matching_entity_not_flagged(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "automation.foo",
+                effective_name="Foo",
+                platform="automation",
+                unique_id="1234",
+            ),
+        ]
+        peers = {"automation": {"foo"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert result.has_issue is False
+        assert result.drifted == []
+
+    def test_drift_flagged(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "automation.old_name",
+                effective_name="Renamed Foo",
+                platform="automation",
+                unique_id="1234",
+            ),
+        ]
+        peers = {"automation": {"old_name"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert result.has_issue is True
+        assert len(result.drifted) == 1
+        d = result.drifted[0]
+        assert d.entity_id == "automation.old_name"
+        assert d.expected_object_id == "renamed_foo"
+        assert d.stale_suffix is False
+
+    def test_notification_bullet_includes_edit_link(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "automation.old",
+                effective_name="New Name",
+                platform="automation",
+                unique_id="1669687974816",
+            ),
+        ]
+        peers = {"automation": {"old"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        # Friendly name is itself the link for automations
+        assert (
+            "[New Name](/config/automation/edit/1669687974816)"
+            in result.notification_message
+        )
+        assert "`automation.old`" in result.notification_message
+        assert "→ expected `automation.new_name`" in (
+            result.notification_message
+        )
+        # Old quoted-name-plus-Edit-link format is gone
+        assert "[Edit]" not in result.notification_message
+        assert '"New Name"' not in result.notification_message
+
+    def test_script_pointer(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "script.old",
+                effective_name="New Name",
+                platform="script",
+                unique_id="old",
+            ),
+        ]
+        peers = {"script": {"old"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        # Friendly name is itself the link for scripts
+        assert "[New Name](/config/script/edit/old)" in (
+            result.notification_message
+        )
+        assert "[Edit]" not in result.notification_message
+
+    def test_template_pointer_uses_integration_page(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.template_sensor",
+                effective_name="Grid Import Power",
+                platform="template",
+                unique_id="grid_import_power",
+            ),
+        ]
+        peers = {"sensor": {"template_sensor"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        # Friendly name plain, integration name links to
+        # the integration's config page
+        assert (
+            "Grid Import Power · integration"
+            " [template](/config/integrations/integration/template)"
+            in result.notification_message
+        )
+
+    def test_yaml_configured_drops_integration_link(self) -> None:
+        """YAML-configured entities (no config_entry_id)
+        get a plain integration name and a ``YAML-configuration``
+        note. The integration page doesn't list YAML-defined
+        entities, so linking there would mislead."""
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.loft_thermostat_hvac_action",
+                effective_name="Loft HVAC Action",
+                platform="template",
+                unique_id="loft_hvac_action_uid",
+                config_entry_id=None,
+            ),
+        ]
+        peers = {"sensor": {"loft_thermostat_hvac_action"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert (
+            "Loft HVAC Action · integration template · YAML-configuration"
+            in result.notification_message
+        )
+        # And definitely no link to the integration page.
+        assert (
+            "/config/integrations/integration/template"
+            not in result.notification_message
+        )
+
+    def test_yaml_configured_escapes_friendly_name(self) -> None:
+        """Brackets in the friendly name must still be
+        markdown-escaped in the YAML-configured branch."""
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.template_sensor",
+                effective_name="Grid [Import] Power",
+                platform="template",
+                unique_id="grid",
+                config_entry_id=None,
+            ),
+        ]
+        peers = {"sensor": {"template_sensor"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        expected = (
+            "Grid \\[Import\\] Power · integration template"
+            " · YAML-configuration"
+        )
+        assert expected in result.notification_message
+
+    def test_state_only_pointer_nudges_unique_id(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.template_sensor",
+                effective_name="Grid Import Power",
+                platform=None,
+                unique_id=None,
+                from_registry=False,
+            ),
+        ]
+        peers = {"sensor": {"template_sensor"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        # No quotes, no integration link, no exclusion
+        # nudge — just the name and the unique_id: hint.
+        expected = (
+            "Grid Import Power · add `unique_id:`"
+            " to make this entity manageable"
+        )
+        assert expected in result.notification_message
+        assert '"Grid Import Power"' not in result.notification_message
+        assert "exclusion" not in result.notification_message
+
+    def test_link_text_escapes_markdown(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "automation.old",
+                effective_name="Name [with] brackets",
+                platform="automation",
+                unique_id="1234",
+            ),
+        ]
+        peers = {"automation": {"old"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        # Brackets in the friendly name must be escaped so
+        # the surrounding [text](url) markdown isn't
+        # broken by unbalanced brackets.
+        assert (
+            "[Name \\[with\\] brackets](/config/automation/edit/1234)"
+            in result.notification_message
+        )
+
+    def test_integration_link_escapes_friendly_name(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.template_sensor",
+                effective_name="Grid [Import] Power",
+                platform="template",
+                unique_id="grid",
+            ),
+        ]
+        peers = {"sensor": {"template_sensor"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        # Brackets in the friendly name must be escaped
+        # even in the non-link branch so they can't pair
+        # with the trailing `[template](url)` link text.
+        assert (
+            "Grid \\[Import\\] Power · integration"
+            " [template](/config/integrations/integration/template)"
+            in result.notification_message
+        )
+
+    def test_state_only_nudge_escapes_friendly_name(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.template_sensor",
+                effective_name="Grid [Import] Power",
+                platform=None,
+                unique_id=None,
+                from_registry=False,
+            ),
+        ]
+        peers = {"sensor": {"template_sensor"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert (
+            "Grid \\[Import\\] Power · add `unique_id:`"
+            " to make this entity manageable" in result.notification_message
+        )
+
+    def test_stale_suffix_separate_section(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "automation.foo_2",
+                effective_name="Foo",
+                platform="automation",
+                unique_id="111",
+            ),
+        ]
+        peers = {"automation": {"foo_2"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert result.has_issue is True
+        assert len(result.drifted) == 1
+        assert result.drifted[0].stale_suffix is True
+        assert "Stale collision suffixes" in (result.notification_message)
+        assert "→ rename to `automation.foo`" in (result.notification_message)
+
+    def test_valid_collision_suffix_not_flagged(self) -> None:
+        cfg = _config()
+        # Two automations both named "Foo"; one has the
+        # plain slug, the other the collision suffix.
+        entities = [
+            _deviceless(
+                "automation.foo",
+                effective_name="Foo",
+                platform="automation",
+                unique_id="111",
+            ),
+            _deviceless(
+                "automation.foo_2",
+                effective_name="Foo",
+                platform="automation",
+                unique_id="222",
+            ),
+        ]
+        peers = {"automation": {"foo", "foo_2"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert result.has_issue is False
+
+    def test_empty_name_skipped(self) -> None:
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.x",
+                effective_name="",
+                platform="template",
+                unique_id="x",
+                from_registry=True,
+            ),
+        ]
+        peers = {"sensor": {"x"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert result.has_issue is False
+
+    def test_exclusions_apply(self) -> None:
+        cfg = _config(
+            exclude_entity_ids=["automation.foo"],
+        )
+        entities = [
+            _deviceless(
+                "automation.foo",
+                effective_name="Bar",
+                platform="automation",
+                unique_id="111",
+            ),
+        ]
+        peers = {"automation": {"foo"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert result.has_issue is False
+        assert result.entities_excluded == 1
+
+    def test_entity_id_regex_exclusion(self) -> None:
+        cfg = _config(entity_id_exclude_regex="^sensor\\.")
+        entities = [
+            _deviceless(
+                "sensor.foo",
+                effective_name="Bar",
+                platform="template",
+                unique_id="foo",
+            ),
+        ]
+        peers = {"sensor": {"foo"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        assert result.has_issue is False
+        assert result.entities_excluded == 1
 
 
 class TestCodeQuality(CodeQualityBase):

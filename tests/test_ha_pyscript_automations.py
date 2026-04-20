@@ -24,6 +24,7 @@ import json
 import re
 import sys
 import types
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,8 @@ from conftest import CodeQualityBase  # noqa: E402
 from entity_defaults_watchdog import (  # noqa: E402
     DRIFT_CHECK_DEVICE_ENTITY_ID,
     DRIFT_CHECK_DEVICE_ENTITY_NAME,
+    DRIFT_CHECK_ENTITY_ID,
+    DevicelessEntityInfo,
 )
 from helpers import EntityRegistryInfo  # noqa: E402
 
@@ -2946,6 +2949,14 @@ class _EdwEnv:
         self._entity_info: dict[str, dict[str, object]] = {}
         self._entity_expected_ids: dict[str, str | None] = {}
         self._all_integration_ids: list[str] = []
+        # Deviceless mock state: list of DevicelessEntityInfo-shaped
+        # dicts plus the peer map.  Tests populate via
+        # setup_deviceless_entity().
+        self._deviceless_entities: list[dict[str, object]] = []
+        self._deviceless_peers: dict[str, set[str]] = {}
+        # Target-integration set captured from the most
+        # recent _discover_deviceless_entities call.
+        self.deviceless_target_integrations: Any = None
 
         # Wire mock helpers into the namespace
         self._ns["_get_integration_entities"] = (
@@ -2958,6 +2969,9 @@ class _EdwEnv:
         )
         self._ns["_get_all_integration_ids"] = (
             self._mock_get_all_integration_ids
+        )
+        self._ns["_discover_deviceless_entities"] = (
+            self._mock_discover_deviceless_entities
         )
 
     def _mock_get_integration_entities(
@@ -2998,6 +3012,52 @@ class _EdwEnv:
         ids = set(self._all_integration_ids)
         ids.update(self._integration_entities.keys())
         return sorted(ids)
+
+    def _mock_discover_deviceless_entities(
+        self,
+        _hass: Any,
+        _domains: Any,
+        target_integrations: Any = None,
+    ) -> Any:
+        # Record filter passed by the service wrapper so
+        # tests can assert filter propagation.
+        self.deviceless_target_integrations = target_integrations
+        entities = [
+            DevicelessEntityInfo(
+                entity_id=str(e["entity_id"]),
+                effective_name=str(e.get("effective_name", "")),
+                platform=e.get("platform"),  # type: ignore[arg-type]
+                unique_id=e.get("unique_id"),  # type: ignore[arg-type]
+                from_registry=bool(e.get("from_registry", True)),
+            )
+            for e in self._deviceless_entities
+        ]
+        return (entities, self._deviceless_peers)
+
+    def setup_deviceless_entity(
+        self,
+        entity_id: str,
+        effective_name: str = "",
+        platform: str | None = None,
+        unique_id: str | None = None,
+        from_registry: bool = True,
+    ) -> None:
+        """Add a deviceless entity the deviceless check will see.
+
+        Also registers it as a peer for collision-suffix
+        detection within its domain.
+        """
+        self._deviceless_entities.append(
+            {
+                "entity_id": entity_id,
+                "effective_name": effective_name,
+                "platform": platform,
+                "unique_id": unique_id,
+                "from_registry": from_registry,
+            },
+        )
+        dom, obj = entity_id.split(".", 1)
+        self._deviceless_peers.setdefault(dom, set()).add(obj)
 
     def set_now(self, dt: datetime) -> None:
         """Override datetime.now() for calls."""
@@ -3153,6 +3213,104 @@ class TestEdwRegexValidation:
         assert "entity_name_exclude_regex" in msg
 
 
+class TestEdwDevicelessE2E:
+    """End-to-end deviceless drift detection."""
+
+    def _find(
+        self,
+        calls: list[dict[str, Any]],
+        nid: str,
+    ) -> dict[str, Any]:
+        matches = [c for c in calls if c.get("notification_id") == nid]
+        assert len(matches) == 1, (
+            f"expected 1 call for {nid}, got {len(matches)}"
+        )
+        return matches[0]
+
+    def test_no_drift_emits_no_create(self) -> None:
+        env = _EdwEnv()
+        env.setup_deviceless_entity(
+            "automation.foo",
+            effective_name="Foo",
+            platform="automation",
+            unique_id="111",
+        )
+        env.call()
+        create_ids = [c["notification_id"] for c in env.mock_pn.create_calls]
+        assert "entity_defaults_watchdog_deviceless" not in create_ids
+
+    def test_rename_drift_creates_notification(self) -> None:
+        env = _EdwEnv()
+        env.setup_deviceless_entity(
+            "automation.old_name",
+            effective_name="New Name",
+            platform="automation",
+            unique_id="1669687974816",
+        )
+        env.call()
+        call = self._find(
+            env.mock_pn.create_calls,
+            "entity_defaults_watchdog_deviceless",
+        )
+        assert "deviceless entity drift" in call["title"]
+        assert "`automation.old_name`" in call["message"]
+        assert "`automation.new_name`" in call["message"]
+        assert "/config/automation/edit/1669687974816" in call["message"]
+
+    def test_deviceless_check_disabled_dismisses(self) -> None:
+        env = _EdwEnv()
+        env.setup_deviceless_entity(
+            "automation.old",
+            effective_name="New",
+            platform="automation",
+            unique_id="111",
+        )
+        env.call(drift_checks_raw=[DRIFT_CHECK_DEVICE_ENTITY_ID])
+        # Deviceless notification should be dismissed, not
+        # created, because the check is disabled.
+        created_ids = [c["notification_id"] for c in env.mock_pn.create_calls]
+        assert "entity_defaults_watchdog_deviceless" not in created_ids
+        dismissed_ids = [
+            c["notification_id"] for c in env.mock_pn.dismiss_calls
+        ]
+        assert "entity_defaults_watchdog_deviceless" in dismissed_ids
+
+    def test_stats_written_to_state(self) -> None:
+        env = _EdwEnv()
+        env.setup_deviceless_entity(
+            "automation.a",
+            effective_name="A",
+            platform="automation",
+            unique_id="1",
+        )
+        env.setup_deviceless_entity(
+            "automation.drifted_b",
+            effective_name="Renamed B",
+            platform="automation",
+            unique_id="2",
+        )
+        env.call()
+        attrs = env.mock_state._attrs.get(
+            "pyscript.auto_edw_test_state",
+            {},
+        )
+        assert attrs.get("deviceless_entities") == 2
+        assert attrs.get("deviceless_drift") == 1
+        assert attrs.get("deviceless_stale") == 0
+
+    def test_exclude_suppresses_deviceless(self) -> None:
+        env = _EdwEnv()
+        env.setup_deviceless_entity(
+            "automation.old",
+            effective_name="New",
+            platform="automation",
+            unique_id="111",
+        )
+        env.call(exclude_entities_raw=["automation.old"])
+        created_ids = [c["notification_id"] for c in env.mock_pn.create_calls]
+        assert "entity_defaults_watchdog_deviceless" not in created_ids
+
+
 class TestEdwDriftChecksValidation:
     """Test drift_checks unknown-value validation."""
 
@@ -3169,6 +3327,7 @@ class TestEdwDriftChecksValidation:
         assert "not-a-check" in msg
         assert DRIFT_CHECK_DEVICE_ENTITY_ID in msg
         assert DRIFT_CHECK_DEVICE_ENTITY_NAME in msg
+        assert DRIFT_CHECK_ENTITY_ID in msg
 
     def test_all_known_checks_no_error(self) -> None:
         env = _EdwEnv()
@@ -3176,6 +3335,7 @@ class TestEdwDriftChecksValidation:
             drift_checks_raw=[
                 DRIFT_CHECK_DEVICE_ENTITY_ID,
                 DRIFT_CHECK_DEVICE_ENTITY_NAME,
+                DRIFT_CHECK_ENTITY_ID,
             ],
         )
         config_errors = [
@@ -3528,12 +3688,14 @@ class TestEdwDiscovery:
         env.call()
         assert env.mock_pn.create_calls == []
         # Only the cap dismiss (always emitted when
-        # under cap)
+        # under cap) and the deviceless dismiss (always
+        # emitted when no deviceless drift).
         device_dismisses = [
             c
             for c in env.mock_pn.dismiss_calls
             if "_cap" not in c["notification_id"]
             and "config_error" not in c["notification_id"]
+            and "_deviceless" not in c["notification_id"]
         ]
         assert device_dismisses == []
 
@@ -3614,6 +3776,7 @@ class TestEdwNotifications:
             for c in env.mock_pn.dismiss_calls
             if "_cap" not in c["notification_id"]
             and "config_error" not in c["notification_id"]
+            and "_deviceless" not in c["notification_id"]
         ]
         assert len(device_dismisses) == 1
         assert (
@@ -3679,6 +3842,467 @@ class TestEdwDebugLogging:
         args = env.mock_log.warning_calls[0][1]
         formatted = msg % args
         assert "[EDW:" in formatted
+
+
+class _MockRegEntry:
+    """Minimal stand-in for a HA entity registry entry."""
+
+    def __init__(
+        self,
+        entity_id: str,
+        device_id: str | None = None,
+        disabled_by: str | None = None,
+        name: str | None = None,
+        original_name: str | None = None,
+        platform: str | None = None,
+        unique_id: str | None = None,
+        config_entry_id: str | None = None,
+    ) -> None:
+        self.entity_id = entity_id
+        self.device_id = device_id
+        self.disabled_by = disabled_by
+        self.name = name
+        self.original_name = original_name
+        self.platform = platform
+        self.unique_id = unique_id
+        self.config_entry_id = config_entry_id
+
+
+class _MockEntReg:
+    """Stand-in for HA's EntityRegistry exposing ``entities``."""
+
+    def __init__(self, entries: list[_MockRegEntry]) -> None:
+        self.entities = {e.entity_id: e for e in entries}
+
+
+class _MockStateEntry:
+    """Minimal stand-in for a HA state object."""
+
+    def __init__(
+        self,
+        entity_id: str,
+        friendly_name: str | None = None,
+    ) -> None:
+        self.entity_id = entity_id
+        self.attributes: dict[str, Any] = {}
+        if friendly_name is not None:
+            self.attributes["friendly_name"] = friendly_name
+
+
+class _MockStateMachine:
+    """Stand-in for ``hass.states`` with ``async_all``."""
+
+    def __init__(self, entries: list[_MockStateEntry]) -> None:
+        self._entries = entries
+
+    def async_all(self) -> list[_MockStateEntry]:
+        return list(self._entries)
+
+
+class _MockHassForDeviceless:
+    """Hass mock exposing only what the deviceless
+    discovery function reads.
+
+    Carries its own entity registry reference so each test
+    can build a fresh one without sharing state with
+    sibling tests that run in the same process.
+    """
+
+    def __init__(
+        self,
+        ent_reg: _MockEntReg,
+        state_entries: list[_MockStateEntry],
+    ) -> None:
+        self.ent_reg = ent_reg
+        self.states = _MockStateMachine(state_entries)
+
+
+_ER_MODULE_NAMES = (
+    "homeassistant",
+    "homeassistant.helpers",
+    "homeassistant.helpers.entity_registry",
+)
+
+
+class _DiscoverDevicelessEnv:
+    """Exec's ha_pyscript_automations.py and drives its
+    real ``_discover_deviceless_entities``.
+
+    Paired with the ``discover_env`` fixture, which handles
+    the ``sys.modules`` save/restore around the fake
+    ``homeassistant.helpers.entity_registry`` stub.
+
+    Other _EdwEnv tests substitute the discovery function
+    wholesale, so the safety-net bug lived untested. This
+    env drives the real implementation.
+    """
+
+    def __init__(self) -> None:
+        self.mock_state = _MockState()
+        self.mock_ha = _MockHA()
+        self.mock_service = _MockServiceObj()
+        self.mock_log = _MockLog()
+        self.mock_pn = _MockPersistentNotification()
+        self.mock_hass = _MockHass()
+
+        src = _SCRIPT_PATH.read_text()
+        self._ns: dict[str, Any] = {
+            "__builtins__": __builtins__,
+            "pyscript_executor": lambda fn: fn,
+            "service": self.mock_service,
+            "state": self.mock_state,
+            "homeassistant": self.mock_ha,
+            "log": self.mock_log,
+            "hass": self.mock_hass,
+            "persistent_notification": self.mock_pn,
+        }
+        exec(
+            compile(src, str(_SCRIPT_PATH), "exec"),
+            self._ns,
+        )
+
+    def discover(
+        self,
+        entries: list[_MockRegEntry],
+        state_entries: list[_MockStateEntry],
+        domains: frozenset[str],
+        target_integrations: set[str] | None = None,
+    ) -> Any:
+        ent_reg = _MockEntReg(entries)
+        hass_obj = _MockHassForDeviceless(ent_reg, state_entries)
+        return self._ns["_discover_deviceless_entities"](
+            hass_obj,
+            domains,
+            target_integrations,
+        )
+
+
+@pytest.fixture
+def discover_env() -> Iterator[_DiscoverDevicelessEnv]:
+    """Build a ``_DiscoverDevicelessEnv`` with an isolated
+    ``homeassistant.helpers.entity_registry`` stub, then
+    restore ``sys.modules`` on teardown.
+
+    Using a fixture (not a ``try/finally`` in every test)
+    guarantees restoration even if a test forgets — the
+    previous pattern put that responsibility on each test.
+    """
+    saved = {k: sys.modules.get(k) for k in _ER_MODULE_NAMES}
+
+    def async_get(hass_obj: Any) -> Any:
+        return hass_obj.ent_reg
+
+    mock_er = types.ModuleType("homeassistant.helpers.entity_registry")
+    mock_er.async_get = async_get  # type: ignore[attr-defined]
+    sys.modules["homeassistant"] = types.ModuleType("homeassistant")
+    sys.modules["homeassistant.helpers"] = types.ModuleType(
+        "homeassistant.helpers",
+    )
+    sys.modules["homeassistant.helpers.entity_registry"] = mock_er
+
+    try:
+        yield _DiscoverDevicelessEnv()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+class TestDiscoverDevicelessEntities:
+    """Direct tests for ``_discover_deviceless_entities``.
+
+    Covers the registry/state-list interplay that the
+    _EdwEnv tests skip by mocking the function wholesale.
+    """
+
+    DOMAINS = frozenset({"automation", "sensor", "switch"})
+
+    def test_deviceless_registry_entry_included(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        entries = [
+            _MockRegEntry(
+                entity_id="sensor.template_grid",
+                device_id=None,
+                platform="template",
+                unique_id="grid",
+                original_name="Grid Import Power",
+            ),
+        ]
+        entities, peers = discover_env.discover(entries, [], self.DOMAINS)
+        assert len(entities) == 1
+        e = entities[0]
+        assert e.entity_id == "sensor.template_grid"
+        assert e.platform == "template"
+        assert e.from_registry is True
+        # YAML-configured (no config_entry_id supplied to
+        # _MockRegEntry) threads through as ``None``.
+        assert e.config_entry_id is None
+        assert peers["sensor"] == {"template_grid"}
+
+    def test_config_entry_id_threaded_through(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        """UI-configured entities keep their config_entry_id
+        so ``_deviceless_line_suffix`` can emit the
+        integration link."""
+        entries = [
+            _MockRegEntry(
+                entity_id="sensor.ui_template",
+                device_id=None,
+                platform="template",
+                unique_id="ui",
+                config_entry_id="abc123",
+            ),
+        ]
+        entities, _ = discover_env.discover(entries, [], self.DOMAINS)
+        assert entities[0].config_entry_id == "abc123"
+
+    def test_device_attached_entry_not_flagged_as_state_only(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        """Regression: device-attached registry entries
+        used to leak into the state-list safety net and
+        surface as from_registry=False with platform=None.
+        """
+        entries = [
+            _MockRegEntry(
+                entity_id="switch.rachio_summer_schedule",
+                device_id="dev_controller",
+                platform="rachio",
+                unique_id="sched_summer",
+            ),
+        ]
+        states = [
+            _MockStateEntry(
+                entity_id="switch.rachio_summer_schedule",
+                friendly_name="Summer Schedule",
+            ),
+        ]
+        entities, _ = discover_env.discover(entries, states, self.DOMAINS)
+        # Entity must not appear at all: it belongs to the
+        # per-device path, not the deviceless bucket.
+        assert entities == []
+
+    def test_disabled_entry_not_flagged_as_state_only(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        entries = [
+            _MockRegEntry(
+                entity_id="sensor.disabled",
+                device_id=None,
+                disabled_by="user",
+                platform="template",
+                unique_id="dis",
+            ),
+        ]
+        states = [
+            _MockStateEntry(
+                entity_id="sensor.disabled",
+                friendly_name="Disabled",
+            ),
+        ]
+        entities, _ = discover_env.discover(entries, states, self.DOMAINS)
+        assert entities == []
+
+    def test_state_only_entity_uses_safety_net(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        states = [
+            _MockStateEntry(
+                entity_id="sensor.yaml_thing",
+                friendly_name="YAML Thing",
+            ),
+        ]
+        entities, _ = discover_env.discover([], states, self.DOMAINS)
+        assert len(entities) == 1
+        e = entities[0]
+        assert e.from_registry is False
+        assert e.platform is None
+        assert e.effective_name == "YAML Thing"
+
+    def test_target_integrations_filters_registry_entries(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        entries = [
+            _MockRegEntry(
+                entity_id="automation.keep_me",
+                device_id=None,
+                platform="automation",
+                unique_id="keep",
+                original_name="Keep Me",
+            ),
+            _MockRegEntry(
+                entity_id="sensor.rachio_schedule",
+                device_id=None,
+                platform="rachio",
+                unique_id="sched",
+                original_name="Summer Schedule",
+            ),
+        ]
+        entities, peers = discover_env.discover(
+            entries,
+            [],
+            self.DOMAINS,
+            target_integrations={"automation"},
+        )
+        eids = {e.entity_id for e in entities}
+        assert eids == {"automation.keep_me"}
+        # Peers still include filtered-out entries so
+        # collision-suffix classification stays right.
+        assert "rachio_schedule" in peers["sensor"]
+
+    def test_target_integrations_none_disables_filter(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        entries = [
+            _MockRegEntry(
+                entity_id="sensor.any",
+                device_id=None,
+                platform="anything",
+                unique_id="x",
+                original_name="Any",
+            ),
+        ]
+        entities, _ = discover_env.discover(
+            entries,
+            [],
+            self.DOMAINS,
+            target_integrations=None,
+        )
+        assert len(entities) == 1
+
+    def test_out_of_domain_entries_excluded(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        entries = [
+            _MockRegEntry(
+                entity_id="light.in_domain",
+                device_id=None,
+                platform="template",
+                unique_id="l",
+                original_name="Light",
+            ),
+        ]
+        # light is not in our DOMAINS frozenset
+        entities, _ = discover_env.discover(entries, [], self.DOMAINS)
+        assert entities == []
+
+    def test_registry_entry_without_name_uses_obj_id_fallback(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        """A registry entry with neither ``name`` nor
+        ``original_name`` falls back to an HA-style default
+        (title-cased obj_id) so downstream evaluation has
+        something to slugify against.
+        """
+        entries = [
+            _MockRegEntry(
+                entity_id="sensor.old_yaml_thing",
+                device_id=None,
+                platform="template",
+                unique_id="oyt",
+                name=None,
+                original_name=None,
+            ),
+        ]
+        entities, _ = discover_env.discover(entries, [], self.DOMAINS)
+        assert len(entities) == 1
+        assert entities[0].effective_name == "Old Yaml Thing"
+
+    def test_state_only_entry_without_friendly_name_uses_obj_id_fallback(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        """State-only entity with missing ``friendly_name``
+        attribute gets the obj_id-derived default, so it
+        round-trips through slugify to the same obj_id and
+        is classified as non-drifting rather than silently
+        skipped.
+        """
+        states = [_MockStateEntry(entity_id="sensor.yaml_thing")]
+        entities, _ = discover_env.discover([], states, self.DOMAINS)
+        assert len(entities) == 1
+        assert entities[0].effective_name == "Yaml Thing"
+        assert entities[0].from_registry is False
+
+    def test_state_only_entry_empty_friendly_name_uses_obj_id_fallback(
+        self,
+        discover_env: _DiscoverDevicelessEnv,
+    ) -> None:
+        """``friendly_name=""`` (empty string) is treated
+        the same as missing.
+        """
+        states = [
+            _MockStateEntry(
+                entity_id="sensor.yaml_thing",
+                friendly_name="",
+            ),
+        ]
+        entities, _ = discover_env.discover([], states, self.DOMAINS)
+        assert len(entities) == 1
+        assert entities[0].effective_name == "Yaml Thing"
+
+
+class TestEdwDevicelessIntegrationFilterPropagation:
+    """The service wrapper must hand the computed
+    ``target_integrations`` set to the discovery function
+    so registry-backed deviceless entries get filtered.
+    """
+
+    def test_filter_set_passed_to_discovery(self) -> None:
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "ZW Dev",
+            {
+                "sensor.zw": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.zw",
+                },
+            },
+        )
+        env.call(
+            include_integrations_raw=["zwave_js"],
+        )
+        # _mock_discover_deviceless_entities records the
+        # kwargs it received; include-only with a single
+        # integration should yield that set.
+        assert env.deviceless_target_integrations == {"zwave_js"}
+
+    def test_empty_include_passes_full_set(self) -> None:
+        env = _EdwEnv()
+        env._all_integration_ids = ["zwave_js", "template"]
+        env.call(include_integrations_raw=[])
+        # Empty include means "all integrations", so the
+        # discovery filter should be the union of every
+        # integration id.
+        assert env.deviceless_target_integrations == {
+            "zwave_js",
+            "template",
+        }
+
+    def test_exclude_removes_from_filter(self) -> None:
+        env = _EdwEnv()
+        env._all_integration_ids = ["zwave_js", "rachio"]
+        env.call(
+            exclude_integrations_raw=["rachio"],
+        )
+        assert env.deviceless_target_integrations == {"zwave_js"}
 
 
 class TestCodeQuality(CodeQualityBase):
