@@ -1594,7 +1594,10 @@ def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
         "monitored_entity_domains_raw": [],
         "check_interval_minutes_raw": "1",
         "dead_device_threshold_minutes_raw": "1440",
-        "check_diagnostic_entities_raw": "false",
+        "enabled_checks_raw": [
+            "unavailable-entities",
+            "device-updates",
+        ],
         "max_device_notifications_raw": "0",
         "debug_logging_raw": "false",
         "trigger_platform_raw": "time_pattern",
@@ -1726,6 +1729,119 @@ class TestDeviceWatchdogRegexValidation:
         env.call(device_exclude_regex_raw="|||||")
         assert len(env.mock_pn.create_calls) == 1
         assert "empty string" in (env.mock_pn.create_calls[0]["message"])
+
+
+class TestDeviceWatchdogEnabledChecks:
+    """Test enabled_checks parsing and validation."""
+
+    def test_unknown_check_notifies_and_skips(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.call(enabled_checks_raw=["not-a-check"])
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if "Invalid" in c.get("title", "")
+        ]
+        assert len(config_errors) == 1
+        assert "not-a-check" in config_errors[0]["message"]
+        device_creates = [
+            c
+            for c in env.mock_pn.create_calls
+            if c["notification_id"].startswith("device_watchdog_dev")
+        ]
+        assert device_creates == []
+
+    def test_empty_selection_runs_all_checks(self) -> None:
+        """Empty selection = all checks, including
+        diagnostics (which requires the registry)."""
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Stale",
+            {
+                "sensor.a": (
+                    "42",
+                    T0_UTC - timedelta(days=2),
+                ),
+            },
+        )
+        env._install_entity_registry_mock()
+        try:
+            env.call(enabled_checks_raw=[])
+            stale_creates = [
+                c
+                for c in env.mock_pn.create_calls
+                if c["notification_id"] == "device_watchdog_dev1"
+            ]
+            assert len(stale_creates) == 1
+            assert "No entity state change" in stale_creates[0]["message"]
+        finally:
+            env.cleanup_entity_registry_mock()
+
+    def test_staleness_only_ignores_unavailable(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev_u",
+            "UnavailOnly",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev_s",
+            "StaleOnly",
+            {
+                "sensor.b": (
+                    "42",
+                    T0_UTC - timedelta(days=2),
+                ),
+            },
+        )
+        env.call(enabled_checks_raw=["device-updates"])
+        creates = {
+            c["notification_id"]: c
+            for c in env.mock_pn.create_calls
+            if c["notification_id"].startswith("device_watchdog_dev")
+        }
+        assert "device_watchdog_dev_s" in creates
+        assert "device_watchdog_dev_u" not in creates
+
+    def test_unavailable_only_ignores_staleness(self) -> None:
+        env = _WatchdogEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev_u",
+            "UnavailOnly",
+            {"sensor.a": ("unavailable", T0_UTC)},
+        )
+        env.setup_device(
+            "zwave_js",
+            "dev_s",
+            "StaleOnly",
+            {
+                "sensor.b": (
+                    "42",
+                    T0_UTC - timedelta(days=2),
+                ),
+            },
+        )
+        env.call(
+            enabled_checks_raw=["unavailable-entities"],
+        )
+        creates = {
+            c["notification_id"]: c
+            for c in env.mock_pn.create_calls
+            if c["notification_id"].startswith("device_watchdog_dev")
+        }
+        assert "device_watchdog_dev_u" in creates
+        assert "device_watchdog_dev_s" not in creates
 
 
 class TestDeviceWatchdogIntervalGating:
@@ -2058,7 +2174,11 @@ class TestDeviceWatchdogDiagnostics:
         env._install_entity_registry_mock()
         try:
             env.call(
-                check_diagnostic_entities_raw="true",
+                enabled_checks_raw=[
+                    "unavailable-entities",
+                    "device-updates",
+                    "disabled-diagnostics",
+                ],
             )
             diag_creates = [
                 c
@@ -2093,7 +2213,11 @@ class TestDeviceWatchdogDiagnostics:
         env._install_entity_registry_mock()
         try:
             env.call(
-                check_diagnostic_entities_raw="true",
+                enabled_checks_raw=[
+                    "unavailable-entities",
+                    "device-updates",
+                    "disabled-diagnostics",
+                ],
             )
             diag_creates = [
                 c
@@ -2114,11 +2238,11 @@ class TestDeviceWatchdogDiagnostics:
         finally:
             env.cleanup_entity_registry_mock()
 
-    def test_diagnostics_disabled_no_registry_calls(
+    def test_diagnostics_not_selected_no_diag_notifs(
         self,
     ) -> None:
-        """When check_diagnostic_entities is false, no
-        diagnostic notifications are produced."""
+        """When disabled-diagnostics isn't in enabled_checks,
+        no diagnostic notifications are produced."""
         env = _WatchdogEnv()
         env.setup_device(
             "zwave_js",
@@ -2126,9 +2250,7 @@ class TestDeviceWatchdogDiagnostics:
             "Lock",
             {"sensor.a": ("ok", T0_UTC)},
         )
-        env.call(
-            check_diagnostic_entities_raw="false",
-        )
+        env.call()  # default omits disabled-diagnostics
         diag_notifs = [
             c
             for c in (env.mock_pn.create_calls + env.mock_pn.dismiss_calls)

@@ -25,6 +25,8 @@ devices recover.
 - Diagnostic entity check: notifies when recommended
   diagnostic entities (e.g., Last seen, Node status)
   are disabled
+- Per-check selection so exclusion lists can be scoped
+  per check (instantiate the blueprint once per check)
 - Optional debug logging
 
 ## Requirements
@@ -56,7 +58,7 @@ pyscript:
 | Entity domains to monitor | Only check entities in these domains |
 | Check interval (minutes) | Minutes between watchdog evaluations |
 | Dead device threshold (minutes) | Staleness threshold for state changes |
-| Check diagnostic entities | Notify about disabled recommended diagnostics per device |
+| Enabled checks | Which checks to run (`unavailable-entities`, `device-updates`, `disabled-diagnostics`). Empty means all. |
 | Max device notifications | Cap on per-device notifications. 0 = unlimited. |
 | Debug logging | Log debug info to HA logs |
 

@@ -17,6 +17,21 @@ from helpers import (
     matches_pattern,
 )
 
+# Check identifiers surfaced as blueprint options. Adding
+# a new check = one new constant, add it to ``CHECK_ALL``,
+# and test ``in config.enabled_checks`` at the use site.
+CHECK_UNAVAILABLE_ENTITIES = "unavailable-entities"
+CHECK_DEVICE_UPDATES = "device-updates"
+CHECK_DISABLED_DIAGNOSTICS = "disabled-diagnostics"
+
+CHECK_ALL: frozenset[str] = frozenset(
+    {
+        CHECK_UNAVAILABLE_ENTITIES,
+        CHECK_DEVICE_UPDATES,
+        CHECK_DISABLED_DIAGNOSTICS,
+    },
+)
+
 
 @dataclass
 class Config:
@@ -26,6 +41,7 @@ class Config:
     entity_id_exclude_regex: str
     monitored_entity_domains: list[str]
     dead_threshold_seconds: int
+    enabled_checks: frozenset[str]
 
 
 @dataclass
@@ -352,13 +368,19 @@ def _evaluate_device(
         device.entities,
     )
 
-    unavailable = [e for e in kept if e.state in ("unavailable", "unknown")]
+    if CHECK_UNAVAILABLE_ENTITIES in config.enabled_checks:
+        unavailable = [e for e in kept if e.state in ("unavailable", "unknown")]
+    else:
+        unavailable = []
 
-    is_stale, newest_entity, newest_ts = _check_staleness(
-        kept,
-        config.dead_threshold_seconds,
-        current_time,
-    )
+    if CHECK_DEVICE_UPDATES in config.enabled_checks:
+        is_stale, newest_entity, newest_ts = _check_staleness(
+            kept,
+            config.dead_threshold_seconds,
+            current_time,
+        )
+    else:
+        is_stale, newest_entity, newest_ts = False, None, None
 
     has_issue = bool(unavailable) or is_stale
 
@@ -414,8 +436,11 @@ def evaluate_devices(
     For each device, this function:
     1. Filters entities by domain and exclude regex
     2. Checks for unavailable/unknown entity states
+       (gated by CHECK_UNAVAILABLE_ENTITIES in
+       config.enabled_checks)
     3. Checks for staleness (no state change within
-       threshold)
+       threshold; gated by CHECK_DEVICE_UPDATES in
+       config.enabled_checks)
     4. Returns a DeviceResult per device
 
     The wrapper then creates persistent notifications
@@ -451,7 +476,6 @@ def run_evaluation(
     config: Config,
     devices: list[DeviceInfo],
     current_time: datetime,
-    check_diagnostics: bool,
     all_integrations_count: int,
     max_notifications: int,
 ) -> EvaluationResult:
@@ -467,7 +491,7 @@ def run_evaluation(
     results = evaluate_devices(config, devices, current_time)
 
     diag_notifications: list[PersistentNotification] = []
-    if check_diagnostics:
+    if CHECK_DISABLED_DIAGNOSTICS in config.enabled_checks:
         diag_notifications = evaluate_diagnostics(devices)
 
     notifications = prepare_notifications(

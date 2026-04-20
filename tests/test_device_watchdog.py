@@ -19,6 +19,10 @@ sys.path.insert(0, str(_SCRIPT_PATH.parent))
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
 from device_watchdog import (  # noqa: E402
+    CHECK_ALL,
+    CHECK_DEVICE_UPDATES,
+    CHECK_DISABLED_DIAGNOSTICS,
+    CHECK_UNAVAILABLE_ENTITIES,
     Config,
     DeviceInfo,
     EntityInfo,
@@ -30,6 +34,7 @@ from device_watchdog import (  # noqa: E402
     check_disabled_diagnostics,
     evaluate_devices,
     evaluate_diagnostics,
+    run_evaluation,
 )
 from helpers import (  # noqa: E402
     DeviceEntry,
@@ -48,6 +53,7 @@ def _config(**overrides: object) -> Config:
         "entity_id_exclude_regex": "",
         "monitored_entity_domains": [],
         "dead_threshold_seconds": 86400,
+        "enabled_checks": CHECK_ALL,
     }
     defaults.update(overrides)
     return Config(**defaults)  # type: ignore[arg-type]
@@ -345,6 +351,134 @@ class TestEvaluateDevice:
         result = _evaluate_device(cfg, device, T0)
         assert result.entities_evaluated == 2
         assert result.entities_filtered == 1
+
+
+class TestEnabledChecks:
+    """Per-check gating via Config.enabled_checks."""
+
+    def _unavailable_and_stale(self) -> DeviceInfo:
+        return _device(
+            entities=[
+                _entity(
+                    "sensor.temp",
+                    state="unavailable",
+                    last_changed=T0 - timedelta(hours=25),
+                ),
+            ],
+        )
+
+    def test_unavailable_only_flags_unavailable(self) -> None:
+        cfg = _config(
+            enabled_checks=frozenset({CHECK_UNAVAILABLE_ENTITIES}),
+        )
+        result = _evaluate_device(
+            cfg,
+            self._unavailable_and_stale(),
+            T0,
+        )
+        assert result.has_issue is True
+        assert "sensor.temp" in result.unavailable_entities
+        assert result.is_stale is False
+        assert result.newest_entity is None
+
+    def test_staleness_only_flags_stale(self) -> None:
+        cfg = _config(
+            enabled_checks=frozenset({CHECK_DEVICE_UPDATES}),
+        )
+        result = _evaluate_device(
+            cfg,
+            self._unavailable_and_stale(),
+            T0,
+        )
+        assert result.has_issue is True
+        assert result.unavailable_entities == []
+        assert result.is_stale is True
+
+    def test_neither_yields_no_issue(self) -> None:
+        cfg = _config(enabled_checks=frozenset())
+        result = _evaluate_device(
+            cfg,
+            self._unavailable_and_stale(),
+            T0,
+        )
+        assert result.has_issue is False
+        assert result.unavailable_entities == []
+        assert result.is_stale is False
+
+    def test_diagnostics_only_skips_device_health(self) -> None:
+        cfg = _config(
+            enabled_checks=frozenset({CHECK_DISABLED_DIAGNOSTICS}),
+        )
+        result = _evaluate_device(
+            cfg,
+            self._unavailable_and_stale(),
+            T0,
+        )
+        assert result.has_issue is False
+
+
+class TestRunEvaluationDiagnosticsGate:
+    """run_evaluation reads diagnostics toggle from Config."""
+
+    def _diag_device(self) -> DeviceInfo:
+        return DeviceInfo(
+            de=DeviceEntry(
+                id="d1",
+                url="/config/devices/device/d1",
+                name="Lock",
+                default_name="Lock",
+                integration_entities={"zwave_js": set()},
+            ),
+            registry_entries=[
+                RegistryEntry(
+                    entity_id="sensor.last_seen",
+                    original_name="Last seen",
+                    platform="zwave_js",
+                    entity_category="diagnostic",
+                    disabled=True,
+                ),
+            ],
+        )
+
+    def test_diagnostics_enabled_emits_diag_notification(
+        self,
+    ) -> None:
+        cfg = _config(enabled_checks=CHECK_ALL)
+        ev = run_evaluation(
+            cfg,
+            [self._diag_device()],
+            T0,
+            all_integrations_count=1,
+            max_notifications=0,
+        )
+        diag_ids = [
+            n.notification_id
+            for n in ev.notifications
+            if n.notification_id.startswith("dw_diag_")
+        ]
+        assert diag_ids == ["dw_diag_d1"]
+
+    def test_diagnostics_disabled_skips_diag_notifications(
+        self,
+    ) -> None:
+        cfg = _config(
+            enabled_checks=frozenset(
+                {CHECK_UNAVAILABLE_ENTITIES, CHECK_DEVICE_UPDATES},
+            ),
+        )
+        ev = run_evaluation(
+            cfg,
+            [self._diag_device()],
+            T0,
+            all_integrations_count=1,
+            max_notifications=0,
+        )
+        diag_ids = [
+            n.notification_id
+            for n in ev.notifications
+            if n.notification_id.startswith("dw_diag_")
+        ]
+        assert diag_ids == []
 
 
 class TestBuildNotificationMessage:

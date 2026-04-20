@@ -281,6 +281,16 @@ def _normalize_list(value: object) -> list[str]:
     return []
 
 
+def _normalize_frozenset(value: object) -> frozenset[str]:
+    """Ensure value is a frozenset of strings.
+
+    Same defensive parsing as ``_normalize_list`` but
+    returns a frozenset, suitable for ``in``-tests and
+    comparison against an all-checks constant.
+    """
+    return frozenset(_normalize_list(value))
+
+
 def _validate_regex(pattern: str) -> str | None:
     """Return error string if pattern is invalid regex.
 
@@ -854,7 +864,7 @@ def device_watchdog(
     monitored_entity_domains_raw: object,
     check_interval_minutes_raw: str,
     dead_device_threshold_minutes_raw: str,
-    check_diagnostic_entities_raw: str,
+    enabled_checks_raw: object,
     max_device_notifications_raw: str,
     debug_logging_raw: str,
     trigger_platform_raw: str,
@@ -866,6 +876,8 @@ def device_watchdog(
     No sleeping, no waiting.
     """
     from device_watchdog import (  # noqa: F821
+        CHECK_ALL,
+        CHECK_DISABLED_DIAGNOSTICS,
         Config,
         DeviceInfo,
         EntityInfo,
@@ -895,9 +907,7 @@ def device_watchdog(
         f" got {dead_device_threshold_minutes}"
     )
     dead_threshold_seconds = dead_device_threshold_minutes * 60
-    check_diagnostics = _parse_bool(
-        check_diagnostic_entities_raw,
-    )
+    enabled_checks = _normalize_frozenset(enabled_checks_raw)
     debug_logging = _parse_bool(debug_logging_raw)
     check_interval_minutes = int(
         check_interval_minutes_raw,
@@ -920,6 +930,18 @@ def device_watchdog(
         "entity_id_exclude_regex",
         errors,
     )
+    unknown_checks = [c for c in enabled_checks if c not in CHECK_ALL]
+    if unknown_checks:
+        bad = ", ".join(sorted(unknown_checks))
+        valid = ", ".join(sorted(CHECK_ALL))
+        errors.append(
+            f"enabled_checks: unknown value(s) {bad}. Valid values: {valid}.",
+        )
+    # Empty selection means "all checks" (blueprint default
+    # is also all three; this just mirrors the
+    # include_integrations convention of empty == all).
+    if not enabled_checks:
+        enabled_checks = CHECK_ALL
     _manage_config_error_persistent_notification(
         errors,
         instance_id,
@@ -942,6 +964,7 @@ def device_watchdog(
         entity_id_exclude_regex=entity_id_exclude_regex,
         monitored_entity_domains=monitored_entity_domains,
         dead_threshold_seconds=dead_threshold_seconds,
+        enabled_checks=enabled_checks,
     )
 
     # Determine target integrations.
@@ -958,7 +981,7 @@ def device_watchdog(
     # Discover devices (scans all integrations for
     # accurate multi-integration detection; only
     # populates entity IDs for target integrations).
-    if check_diagnostics:
+    if CHECK_DISABLED_DIAGNOSTICS in enabled_checks:
         import homeassistant.helpers.entity_registry as er  # noqa: F821
 
         ent_reg = er.async_get(hass)  # noqa: F821
@@ -974,7 +997,7 @@ def device_watchdog(
         # Build registry entries if diagnostic check
         # is enabled (requires entity registry access)
         registry_entries: list[RegistryEntry] = []
-        if check_diagnostics:
+        if CHECK_DISABLED_DIAGNOSTICS in enabled_checks:
             all_reg_entries = er.async_entries_for_device(
                 ent_reg,
                 dev_entry.id,
@@ -1033,7 +1056,6 @@ def device_watchdog(
         config,
         devices,
         now,
-        check_diagnostics,
         len(all_integrations),
         max_notifications,
     )
