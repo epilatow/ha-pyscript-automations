@@ -9,15 +9,17 @@ when drift is resolved.
 
 ## Features
 
-- Detect entity ID drift (when a device is renamed after
-  its entities already exist)
-- Detect name-override drift (stale name overrides left
-  behind when an integration's naming conventions change)
+- Detect device entity ID drift (when a device is renamed
+  after its entities already exist)
+- Detect device name-override drift (stale name overrides
+  left behind when an integration's naming conventions
+  change)
 - Detect redundant name prefixes (overrides that include
   the device name when HA would add it automatically)
 - Per-device persistent notifications with auto-clear
   on drift resolution
-- Selectable drift checks (ID only, name only, or both)
+- Selectable drift checks (device entity ID, device
+  entity name, or both). Empty means all.
 - Include/exclude integration filtering
 - Regex-based device and entity exclusion filters
 - Notification cap to limit per-device notifications
@@ -47,7 +49,7 @@ pyscript:
 
 | Parameter | Description |
 |---|---|
-| Drift checks | Which checks to run (ID, name, or both). Empty means all. |
+| Drift checks | Which checks to run: `device-entity-id`, `device-entity-name`, or both. Empty means all. |
 | Include integrations | Integration IDs to check. Empty means all integrations. |
 | Exclude integrations | Integration IDs to skip even if included. |
 | Device exclude regex | Skip devices whose name matches. One pattern per line. |
@@ -67,17 +69,18 @@ Home Assistant assigns entity IDs and names when entities
 are first created. These can drift from their expected
 values over time:
 
-- **ID drift** -- when a device is renamed after its
-  entities already exist, the entity IDs still reflect
-  the original device name. For example, renaming
-  "Kitchen Multisensor" to "Kitchen Sensor" leaves
-  `sensor.kitchen_multisensor_temperature` instead of
-  `sensor.kitchen_sensor_temperature`.
-- **Name drift** -- when an integration changes its
-  naming conventions (e.g., during an upgrade), HA
-  preserves the old name as a "name override" to avoid
-  breaking automations. The override becomes stale when
-  the integration's new name is what you actually want.
+- **Device entity ID drift** -- when a device is renamed
+  after its entities already exist, the entity IDs still
+  reflect the original device name. For example,
+  renaming "Kitchen Multisensor" to "Kitchen Sensor"
+  leaves `sensor.kitchen_multisensor_temperature` instead
+  of `sensor.kitchen_sensor_temperature`.
+- **Device entity name drift** -- when an integration
+  changes its naming conventions (e.g., during an
+  upgrade), HA preserves the old name as a "name
+  override" to avoid breaking automations. The override
+  becomes stale when the integration's new name is what
+  you actually want.
 
 ### How drift is detected
 
@@ -85,16 +88,16 @@ The watchdog uses Home Assistant's entity and device
 registries to compare current values against expected
 defaults:
 
-- **Entity ID drift**: compares each entity's current ID
-  against the value returned by
-  `async_regenerate_entity_id`, which computes the ID
+- **Device entity ID drift**: compares each device-
+  attached entity's current ID against the value returned
+  by `async_regenerate_entity_id`, which computes the ID
   that HA would assign today based on the current device
   name and entity name.
-- **Name drift**: checks whether `entry.name` (a name
-  override) differs from `entry.original_name` (the
-  integration-provided default). A name override exists
-  only when someone (or HA's migration logic) has
-  explicitly set a custom name.
+- **Device entity name drift**: checks whether
+  `entry.name` (a name override) differs from
+  `entry.original_name` (the integration-provided
+  default). A name override exists only when someone (or
+  HA's migration logic) has explicitly set a custom name.
 - **Redundant prefix**: for entities with
   `has_entity_name=True`, HA automatically prepends the
   device name to the entity name. A name override that

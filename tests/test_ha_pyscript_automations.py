@@ -44,6 +44,10 @@ from datetime import UTC  # noqa: E402
 
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
+from entity_defaults_watchdog import (  # noqa: E402
+    DRIFT_CHECK_DEVICE_ENTITY_ID,
+    DRIFT_CHECK_DEVICE_ENTITY_NAME,
+)
 from helpers import EntityRegistryInfo  # noqa: E402
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
@@ -3147,6 +3151,78 @@ class TestEdwRegexValidation:
         assert "device_exclude_regex" in msg
         assert "entity_id_exclude_regex" in msg
         assert "entity_name_exclude_regex" in msg
+
+
+class TestEdwDriftChecksValidation:
+    """Test drift_checks unknown-value validation."""
+
+    def test_unknown_check_notifies(self) -> None:
+        env = _EdwEnv()
+        env.call(drift_checks_raw=["not-a-check"])
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if "Invalid" in c.get("title", "")
+        ]
+        assert len(config_errors) == 1
+        msg = config_errors[0]["message"]
+        assert "not-a-check" in msg
+        assert DRIFT_CHECK_DEVICE_ENTITY_ID in msg
+        assert DRIFT_CHECK_DEVICE_ENTITY_NAME in msg
+
+    def test_all_known_checks_no_error(self) -> None:
+        env = _EdwEnv()
+        env.call(
+            drift_checks_raw=[
+                DRIFT_CHECK_DEVICE_ENTITY_ID,
+                DRIFT_CHECK_DEVICE_ENTITY_NAME,
+            ],
+        )
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if "Invalid" in c.get("title", "")
+        ]
+        assert config_errors == []
+
+    def test_empty_selection_runs_all_checks(self) -> None:
+        """Empty drift_checks = all checks active.
+
+        One entity drifts on ID only, another on name
+        only; an empty selection must surface both.
+        """
+        env = _EdwEnv()
+        env.setup_device(
+            "zwave_js",
+            "dev1",
+            "Dev",
+            {
+                "sensor.old_a": {
+                    "name": None,
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.dev_temp",
+                },
+                "sensor.b": {
+                    "name": "Custom",
+                    "original_name": "Temp",
+                    "has_entity_name": True,
+                    "expected_entity_id": "sensor.b",
+                },
+            },
+        )
+        env.call(drift_checks_raw=[])
+        device_creates = [
+            c
+            for c in env.mock_pn.create_calls
+            if c["notification_id"] == "entity_defaults_watchdog_dev1"
+        ]
+        assert len(device_creates) == 1
+        msg = device_creates[0]["message"]
+        assert "Name overrides to clear" in msg
+        assert "sensor.b" in msg
+        assert "Non-default entity IDs" in msg
+        assert "sensor.old_a" in msg
 
 
 class TestEdwMultilineRegex:

@@ -19,10 +19,10 @@ blueprint:
         select:
           multiple: true
           options:
-            - label: Entity ID
-              value: entity-id
-            - label: Entity name
-              value: entity-name
+            - label: Device entity ID
+              value: device-entity-id
+            - label: Device entity name
+              value: device-entity-name
 
     include_integrations:
       name: Include integrations

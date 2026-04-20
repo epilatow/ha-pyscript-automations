@@ -18,15 +18,25 @@ from helpers import (
     matches_pattern,
 )
 
-DRIFT_CHECK_ENTITY_ID = "entity-id"
-DRIFT_CHECK_ENTITY_NAME = "entity-name"
+# Check identifiers surfaced as blueprint options. Adding
+# a new check = one new constant, add it to ``CHECK_ALL``,
+# and test ``in config.drift_checks`` at the use site.
+DRIFT_CHECK_DEVICE_ENTITY_ID = "device-entity-id"
+DRIFT_CHECK_DEVICE_ENTITY_NAME = "device-entity-name"
+
+CHECK_ALL: frozenset[str] = frozenset(
+    {
+        DRIFT_CHECK_DEVICE_ENTITY_ID,
+        DRIFT_CHECK_DEVICE_ENTITY_NAME,
+    },
+)
 
 
 @dataclass
 class Config:
     """Configuration parameters (set per-instance)."""
 
-    drift_checks: list[str]
+    drift_checks: frozenset[str]
     device_exclude_regex: str
     exclude_entity_ids: list[str]
     entity_id_exclude_regex: str
@@ -153,19 +163,13 @@ def _compute_recommended_override(
 
 
 def _check_id_enabled(config: Config) -> bool:
-    """True if entity-id check is active."""
-    return (
-        len(config.drift_checks) == 0
-        or DRIFT_CHECK_ENTITY_ID in config.drift_checks
-    )
+    """True if device-entity-id check is active."""
+    return DRIFT_CHECK_DEVICE_ENTITY_ID in config.drift_checks
 
 
 def _check_name_enabled(config: Config) -> bool:
-    """True if entity-name check is active."""
-    return (
-        len(config.drift_checks) == 0
-        or DRIFT_CHECK_ENTITY_NAME in config.drift_checks
-    )
+    """True if device-entity-name check is active."""
+    return DRIFT_CHECK_DEVICE_ENTITY_NAME in config.drift_checks
 
 
 def _is_excluded(

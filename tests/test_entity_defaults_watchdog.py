@@ -19,6 +19,9 @@ sys.path.insert(0, str(_SCRIPT_PATH.parent))
 
 from conftest import CodeQualityBase  # noqa: E402
 from entity_defaults_watchdog import (  # noqa: E402
+    CHECK_ALL,
+    DRIFT_CHECK_DEVICE_ENTITY_ID,
+    DRIFT_CHECK_DEVICE_ENTITY_NAME,
     Config,
     DeviceInfo,
     DriftDetail,
@@ -39,7 +42,7 @@ from helpers import DeviceEntry  # noqa: E402
 
 def _config(**overrides: object) -> Config:
     defaults: dict[str, object] = {
-        "drift_checks": [],
+        "drift_checks": CHECK_ALL,
         "device_exclude_regex": "",
         "exclude_entity_ids": [],
         "entity_id_exclude_regex": "",
@@ -93,24 +96,33 @@ def _device(
 
 
 class TestCheckEnabled:
-    def test_empty_checks_enables_all(self) -> None:
-        cfg = _config(drift_checks=[])
+    def test_check_all_enables_all(self) -> None:
+        cfg = _config(drift_checks=CHECK_ALL)
         assert _check_id_enabled(cfg) is True
         assert _check_name_enabled(cfg) is True
 
     def test_id_only(self) -> None:
-        cfg = _config(drift_checks=["entity-id"])
+        cfg = _config(
+            drift_checks=frozenset({DRIFT_CHECK_DEVICE_ENTITY_ID}),
+        )
         assert _check_id_enabled(cfg) is True
         assert _check_name_enabled(cfg) is False
 
     def test_name_only(self) -> None:
-        cfg = _config(drift_checks=["entity-name"])
+        cfg = _config(
+            drift_checks=frozenset({DRIFT_CHECK_DEVICE_ENTITY_NAME}),
+        )
         assert _check_id_enabled(cfg) is False
         assert _check_name_enabled(cfg) is True
 
     def test_both_explicit(self) -> None:
         cfg = _config(
-            drift_checks=["entity-id", "entity-name"],
+            drift_checks=frozenset(
+                {
+                    DRIFT_CHECK_DEVICE_ENTITY_ID,
+                    DRIFT_CHECK_DEVICE_ENTITY_NAME,
+                },
+            ),
         )
         assert _check_id_enabled(cfg) is True
         assert _check_name_enabled(cfg) is True
@@ -201,7 +213,9 @@ class TestCheckEntityDrift:
         assert result is None
 
     def test_id_check_disabled(self) -> None:
-        cfg = _config(drift_checks=["entity-name"])
+        cfg = _config(
+            drift_checks=frozenset({DRIFT_CHECK_DEVICE_ENTITY_NAME}),
+        )
         entity = _entity_drift(
             entity_id="sensor.old",
             expected_entity_id="sensor.new",
@@ -209,7 +223,9 @@ class TestCheckEntityDrift:
         assert _check_entity_drift(cfg, entity, _device()) is None
 
     def test_name_check_disabled(self) -> None:
-        cfg = _config(drift_checks=["entity-id"])
+        cfg = _config(
+            drift_checks=frozenset({DRIFT_CHECK_DEVICE_ENTITY_ID}),
+        )
         entity = _entity_drift(
             has_name_override=True,
             current_name="Old",

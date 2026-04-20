@@ -1453,6 +1453,7 @@ def entity_defaults_watchdog(
     No sleeping, no waiting.
     """
     from entity_defaults_watchdog import (  # noqa: F821
+        CHECK_ALL,
         Config,
         DeviceInfo,
         EntityDriftInfo,
@@ -1464,7 +1465,7 @@ def entity_defaults_watchdog(
     tag = "[EDW: " + auto_name + "]"
 
     # Parse all config inputs
-    drift_checks = _normalize_list(drift_checks_raw)
+    drift_checks = _normalize_frozenset(drift_checks_raw)
     include_integrations = _normalize_list(
         include_integrations_raw,
     )
@@ -1486,6 +1487,18 @@ def entity_defaults_watchdog(
     errors: list[str] = []
     if hass_err := _check_hass_available():
         errors.append(hass_err)
+    unknown_checks = [c for c in drift_checks if c not in CHECK_ALL]
+    if unknown_checks:
+        bad = ", ".join(sorted(unknown_checks))
+        valid = ", ".join(sorted(CHECK_ALL))
+        errors.append(
+            f"drift_checks: unknown value(s) {bad}. Valid values: {valid}.",
+        )
+    # Empty selection means "all checks" (mirrors
+    # device_watchdog and the include_integrations
+    # convention of empty == all).
+    if not drift_checks:
+        drift_checks = CHECK_ALL
     device_exclude_regex = _validate_and_join_patterns(
         device_exclude_regex_raw,
         "device_exclude_regex",
