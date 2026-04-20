@@ -4,7 +4,7 @@
 
 Monitors device health across Home Assistant integrations. Raises
 a persistent notification whenever monitored devices have
-unavailable entities or stop reporting state changes within a
+unavailable entities or stop reporting state within a
 configurable window. Clears notifications automatically when
 devices recover.
 
@@ -13,7 +13,7 @@ devices recover.
 - Monitor devices across multiple integrations (Z-Wave,
   Matter, BLE, Shelly, etc.)
 - Detect unavailable or unknown entity states
-- Detect stale devices (no state change within threshold)
+- Detect stale devices (no state report within threshold)
 - Per-device persistent notifications with auto-clear
   on recovery
 - Include/exclude integration filtering (empty include
@@ -57,7 +57,7 @@ pyscript:
 | Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
 | Entity domains to monitor | Only check entities in these domains |
 | Check interval (minutes) | Minutes between watchdog evaluations |
-| Dead device threshold (minutes) | Staleness threshold for state changes |
+| Dead device threshold (minutes) | Staleness threshold for state reports |
 | Enabled checks | Which checks to run (`unavailable-entities`, `device-updates`, `disabled-diagnostics`). Empty means all. |
 | Max device notifications | Cap on per-device notifications. 0 = unlimited. |
 | Debug logging | Log debug info to HA logs |

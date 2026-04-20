@@ -3,8 +3,8 @@ blueprint:
   description: >
     Monitor device health across integrations. Raises a
     persistent notification whenever monitored devices have
-    unavailable entities or stop reporting state changes
-    within the configured window. Clears notifications
+    unavailable entities or stop reporting state within
+    the configured window. Clears notifications
     automatically when devices recover.
   domain: automation
   author: epilatow
@@ -20,7 +20,7 @@ blueprint:
           - unavailable-entities: flag entities in the
             unavailable/unknown state.
           - device-updates: flag devices whose entities
-            have not changed state within the dead-device
+            have not reported state within the dead-device
             threshold.
           - disabled-diagnostics: flag devices whose
             recommended diagnostic entities (e.g., Last
@@ -117,7 +117,7 @@ blueprint:
       name: Dead device threshold (minutes)
       description: >
         Only applies to the device-updates check. If no
-        entity associated with the device changes state
+        entity associated with the device reports state
         within this many minutes the device is considered
         offline.
       default: 1440

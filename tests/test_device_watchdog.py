@@ -59,15 +59,18 @@ def _config(**overrides: object) -> Config:
     return Config(**defaults)  # type: ignore[arg-type]
 
 
+_UNSET: datetime = datetime(1970, 1, 1)
+
+
 def _entity(
     entity_id: str = "sensor.test",
     state: str = "42.0",
-    last_changed: datetime | None = None,
+    last_reported: datetime | None = _UNSET,
 ) -> EntityInfo:
     return EntityInfo(
         entity_id=entity_id,
         state=state,
-        last_changed=last_changed or T0,
+        last_reported=T0 if last_reported is _UNSET else last_reported,
     )
 
 
@@ -160,7 +163,7 @@ class TestCheckStaleness:
 
     def test_recent_entity_not_stale(self) -> None:
         entities = [
-            _entity(last_changed=T0 - timedelta(minutes=5)),
+            _entity(last_reported=T0 - timedelta(minutes=5)),
         ]
         is_stale, _, _ = _check_staleness(
             entities,
@@ -171,7 +174,7 @@ class TestCheckStaleness:
 
     def test_old_entity_is_stale(self) -> None:
         entities = [
-            _entity(last_changed=T0 - timedelta(hours=25)),
+            _entity(last_reported=T0 - timedelta(hours=25)),
         ]
         is_stale, _, _ = _check_staleness(
             entities,
@@ -184,11 +187,11 @@ class TestCheckStaleness:
         entities = [
             _entity(
                 "sensor.old",
-                last_changed=T0 - timedelta(hours=2),
+                last_reported=T0 - timedelta(hours=2),
             ),
             _entity(
                 "sensor.new",
-                last_changed=T0 - timedelta(minutes=5),
+                last_reported=T0 - timedelta(minutes=5),
             ),
         ]
         _, newest_eid, newest_ts = _check_staleness(
@@ -201,7 +204,7 @@ class TestCheckStaleness:
 
     def test_exact_threshold_not_stale(self) -> None:
         entities = [
-            _entity(last_changed=T0 - timedelta(seconds=3600)),
+            _entity(last_reported=T0 - timedelta(seconds=3600)),
         ]
         is_stale, _, _ = _check_staleness(
             entities,
@@ -212,7 +215,7 @@ class TestCheckStaleness:
 
     def test_one_second_over_is_stale(self) -> None:
         entities = [
-            _entity(last_changed=T0 - timedelta(seconds=3601)),
+            _entity(last_reported=T0 - timedelta(seconds=3601)),
         ]
         is_stale, _, _ = _check_staleness(
             entities,
@@ -226,12 +229,12 @@ class TestCheckStaleness:
             _entity(
                 "sensor.bad",
                 state="unavailable",
-                last_changed=T0 - timedelta(hours=25),
+                last_reported=T0 - timedelta(hours=25),
             ),
             _entity(
                 "sensor.good",
                 state="42.0",
-                last_changed=T0 - timedelta(minutes=5),
+                last_reported=T0 - timedelta(minutes=5),
             ),
         ]
         is_stale, newest_eid, _ = _check_staleness(
@@ -242,6 +245,33 @@ class TestCheckStaleness:
         assert is_stale is False
         assert newest_eid == "sensor.good"
 
+    def test_all_none_timestamps_indeterminate(self) -> None:
+        entities = [
+            _entity("sensor.a", last_reported=None),
+            _entity("sensor.b", last_reported=None),
+        ]
+        is_stale, eid, ts = _check_staleness(entities, 3600, T0)
+        assert is_stale is False
+        assert eid is None
+        assert ts is None
+
+    def test_mixed_none_and_timestamped(self) -> None:
+        entities = [
+            _entity("sensor.missing", last_reported=None),
+            _entity(
+                "sensor.fresh",
+                last_reported=T0 - timedelta(minutes=5),
+            ),
+        ]
+        is_stale, newest_eid, newest_ts = _check_staleness(
+            entities,
+            3600,
+            T0,
+        )
+        assert is_stale is False
+        assert newest_eid == "sensor.fresh"
+        assert newest_ts == T0 - timedelta(minutes=5)
+
 
 class TestEvaluateDevice:
     def test_healthy_device(self) -> None:
@@ -250,7 +280,7 @@ class TestEvaluateDevice:
             entities=[
                 _entity(
                     state="42.0",
-                    last_changed=T0 - timedelta(minutes=5),
+                    last_reported=T0 - timedelta(minutes=5),
                 ),
             ],
         )
@@ -265,7 +295,7 @@ class TestEvaluateDevice:
                 _entity(
                     "sensor.temp",
                     state="unavailable",
-                    last_changed=T0 - timedelta(minutes=5),
+                    last_reported=T0 - timedelta(minutes=5),
                 ),
             ],
         )
@@ -280,7 +310,7 @@ class TestEvaluateDevice:
             entities=[
                 _entity(
                     state="unknown",
-                    last_changed=T0 - timedelta(minutes=5),
+                    last_reported=T0 - timedelta(minutes=5),
                 ),
             ],
         )
@@ -293,7 +323,7 @@ class TestEvaluateDevice:
             entities=[
                 _entity(
                     state="42.0",
-                    last_changed=T0 - timedelta(hours=2),
+                    last_reported=T0 - timedelta(hours=2),
                 ),
             ],
         )
@@ -362,7 +392,7 @@ class TestEnabledChecks:
                 _entity(
                     "sensor.temp",
                     state="unavailable",
-                    last_changed=T0 - timedelta(hours=25),
+                    last_reported=T0 - timedelta(hours=25),
                 ),
             ],
         )
@@ -511,7 +541,7 @@ class TestBuildNotificationMessage:
             ts,
             _config(),
         )
-        assert "No entity state change" in msg
+        assert "No entity state report" in msg
         assert "sensor.old" in msg
         assert ts.isoformat() in msg
 
@@ -560,7 +590,7 @@ class TestEvaluateDevices:
             _device(
                 "healthy",
                 "Healthy",
-                [_entity(last_changed=T0)],
+                [_entity(last_reported=T0)],
             ),
             _device(
                 "sick",
@@ -588,12 +618,12 @@ class TestEvaluateDevices:
             _device(
                 "d1",
                 "D1",
-                [_entity(last_changed=T0)],
+                [_entity(last_reported=T0)],
             ),
             _device(
                 "d2",
                 "D2",
-                [_entity(last_changed=T0)],
+                [_entity(last_reported=T0)],
             ),
         ]
         results = evaluate_devices(cfg, devices, T0)
@@ -606,12 +636,12 @@ class TestEvaluateDevices:
             _device(
                 "d1",
                 "D1",
-                [_entity(last_changed=old)],
+                [_entity(last_reported=old)],
             ),
             _device(
                 "d2",
                 "D2",
-                [_entity(last_changed=old)],
+                [_entity(last_reported=old)],
             ),
         ]
         results = evaluate_devices(cfg, devices, T0)

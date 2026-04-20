@@ -462,12 +462,12 @@ def _discover_devices(
 def _read_entity_state(
     entity_id: str,
 ) -> tuple[Any, Any]:
-    """Read entity state + last_changed."""
+    """Read entity state + last_reported."""
     entity_state = state.get(entity_id)  # noqa: F821
-    last_changed = state.get(  # noqa: F821
-        entity_id + ".last_changed",
+    last_reported = state.get(  # noqa: F821
+        entity_id + ".last_reported",
     )
-    return entity_state, last_changed
+    return entity_state, last_reported
 
 
 def _automation_name(instance_id: str) -> str:
@@ -1028,13 +1028,13 @@ def device_watchdog(
         for eids in dev_entry.integration_entities.values():
             for eid in eids:
                 try:
-                    ent_state, last_changed = _read_entity_state(eid)
+                    ent_state, last_reported = _read_entity_state(eid)
                     if ent_state is not None:
                         entity_infos.append(
                             EntityInfo(
                                 entity_id=eid,
                                 state=str(ent_state),
-                                last_changed=last_changed,
+                                last_reported=last_reported,
                             ),
                         )
                 except (NameError, AttributeError):

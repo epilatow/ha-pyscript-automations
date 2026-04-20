@@ -48,7 +48,7 @@ from helpers import EntityRegistryInfo  # noqa: E402
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
 # Timezone-aware version for watchdog tests (pyscript's
-# last_changed returns UTC-aware datetimes).
+# last_reported returns UTC-aware datetimes).
 T0_UTC = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
@@ -301,6 +301,42 @@ class TestStateKey:
     def test_multiple_dots(self, env: _ServiceEnv) -> None:
         result = env.state_key_fn("a.b.c")
         assert result == "pyscript.a_b_c_state"
+
+
+class TestReadEntityState:
+    """_read_entity_state() pyscript state.get access.
+
+    These tests exercise the real helper (not the watchdog
+    mock override) so a rename of the ``last_reported``
+    attribute path gets caught.
+    """
+
+    def test_reads_state_and_last_reported(self) -> None:
+        env = _ServiceEnv()
+        env.mock_state._store["sensor.foo"] = "on"
+        env.mock_state._store["sensor.foo.last_reported"] = T0_UTC
+        state_val, last_reported = env._ns["_read_entity_state"](
+            "sensor.foo",
+        )
+        assert state_val == "on"
+        assert last_reported == T0_UTC
+
+    def test_missing_entity_returns_none(self) -> None:
+        env = _ServiceEnv()
+        state_val, last_reported = env._ns["_read_entity_state"](
+            "sensor.absent",
+        )
+        assert state_val is None
+        assert last_reported is None
+
+    def test_missing_last_reported_returns_none(self) -> None:
+        env = _ServiceEnv()
+        env.mock_state._store["sensor.bar"] = "off"
+        state_val, last_reported = env._ns["_read_entity_state"](
+            "sensor.bar",
+        )
+        assert state_val == "off"
+        assert last_reported is None
 
 
 class TestServiceLoads:
@@ -1555,7 +1591,7 @@ class _WatchdogEnv:
     ) -> None:
         """Wire up a device with entities.
 
-        entities: {entity_id: (state, last_changed)}
+        entities: {entity_id: (state, last_reported)}
         """
         # Add entity to integration
         current = self._integration_entities.get(
@@ -1781,7 +1817,7 @@ class TestDeviceWatchdogEnabledChecks:
                 if c["notification_id"] == "device_watchdog_dev1"
             ]
             assert len(stale_creates) == 1
-            assert "No entity state change" in stale_creates[0]["message"]
+            assert "No entity state report" in stale_creates[0]["message"]
         finally:
             env.cleanup_entity_registry_mock()
 

@@ -4,7 +4,7 @@
 Does not use PyScript-injected globals.
 
 Monitors device health across integrations by checking for
-unavailable entities and stale state (no state change within
+unavailable entities and stale state (no state report within
 a configurable threshold).
 """
 
@@ -50,7 +50,7 @@ class EntityInfo:
 
     entity_id: str
     state: str
-    last_changed: datetime
+    last_reported: datetime | None
 
 
 @dataclass
@@ -256,9 +256,10 @@ def _check_staleness(
     """Check if all entities are stale.
 
     Returns (is_stale, newest_entity_id, newest_timestamp).
-    A device is stale if no entity has changed state within
-    the threshold window. If there are no entities to
-    evaluate, staleness is indeterminate — return False.
+    A device is stale if no entity has been reported within
+    the threshold window. Entities without a last_reported
+    timestamp are skipped. If no entity has a usable
+    timestamp, staleness is indeterminate — return False.
     """
     if not entities:
         return False, None, None
@@ -267,12 +268,14 @@ def _check_staleness(
     newest_ts: datetime | None = None
 
     for entity in entities:
-        if newest_ts is None or entity.last_changed > newest_ts:
-            newest_ts = entity.last_changed
+        if entity.last_reported is None:
+            continue
+        if newest_ts is None or entity.last_reported > newest_ts:
+            newest_ts = entity.last_reported
             newest_entity = entity.entity_id
 
     if newest_ts is None:
-        return True, None, None
+        return False, None, None
 
     age_seconds = (current_time - newest_ts).total_seconds()
     is_stale = age_seconds > threshold_seconds
@@ -313,7 +316,7 @@ def _build_notification_message(
         if newest_timestamp and newest_entity:
             last_seen = newest_timestamp.isoformat()
             lines.append(
-                "No entity state change within "
+                "No entity state report within "
                 + str(threshold_minutes)
                 + " minutes. Most recent update "
                 + last_seen
@@ -323,7 +326,7 @@ def _build_notification_message(
             )
         else:
             lines.append(
-                "No entity state change within "
+                "No entity state report within "
                 + str(threshold_minutes)
                 + " minutes. No prior updates detected.",
             )
@@ -438,7 +441,7 @@ def evaluate_devices(
     2. Checks for unavailable/unknown entity states
        (gated by CHECK_UNAVAILABLE_ENTITIES in
        config.enabled_checks)
-    3. Checks for staleness (no state change within
+    3. Checks for staleness (no state report within
        threshold; gated by CHECK_DEVICE_UPDATES in
        config.enabled_checks)
     4. Returns a DeviceResult per device
