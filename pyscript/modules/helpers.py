@@ -9,6 +9,7 @@ and shared notification-cap logic used by watchdog
 automations.
 """
 
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -140,18 +141,27 @@ def format_notification(
 def on_interval(
     check_interval_minutes: int,
     current_time: datetime,
+    instance_id: str,
 ) -> bool:
     """Return True if this tick should run evaluation.
 
     Uses modulo arithmetic on the minute-of-epoch to gate
     execution to every N minutes without persistent state.
+    Applies a per-instance jitter offset derived from a
+    stable hash of ``instance_id`` so multiple automations
+    sharing the same interval spread across the window
+    instead of firing simultaneously.
     """
     if check_interval_minutes <= 0:
         return True
     minutes_since_epoch = int(
         current_time.timestamp() // 60,
     )
-    return (minutes_since_epoch % check_interval_minutes) == 0
+    digest = hashlib.sha1(
+        instance_id.encode("utf-8"),
+    ).digest()
+    jitter = int.from_bytes(digest[:4], "big") % check_interval_minutes
+    return ((minutes_since_epoch + jitter) % check_interval_minutes) == 0
 
 
 def matches_pattern(

@@ -7,7 +7,7 @@
 """Tests for helpers module."""
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -82,25 +82,84 @@ class TestFormatNotification:
 
 
 class TestShouldRun:
-    def test_runs_on_interval_boundary(self) -> None:
-        t = datetime(2024, 1, 15, 12, 0, 0)
-        assert on_interval(60, t) is True
+    def test_fires_exactly_once_per_interval_window(self) -> None:
+        """An instance fires exactly once per N-min window.
 
-    def test_skips_off_interval(self) -> None:
-        t = datetime(2024, 1, 15, 12, 1, 0)
-        assert on_interval(60, t) is False
+        Jitter-agnostic replacement for the previous
+        on-boundary / off-boundary pair: regardless of
+        where the per-instance offset lands, every
+        consecutive 60-minute sweep must contain exactly
+        one firing.
+        """
+        base = datetime(2024, 1, 15, 12, 0, 0)
+        hits = [
+            on_interval(60, base + timedelta(minutes=i), "auto.dw_test")
+            for i in range(60)
+        ]
+        assert sum(hits) == 1
 
     def test_interval_one_always_runs(self) -> None:
         t = datetime(2024, 1, 15, 12, 37, 0)
-        assert on_interval(1, t) is True
+        assert on_interval(1, t, "auto.anything") is True
 
     def test_interval_zero_always_runs(self) -> None:
         t = datetime(2024, 1, 15, 12, 37, 0)
-        assert on_interval(0, t) is True
+        assert on_interval(0, t, "auto.anything") is True
 
     def test_negative_interval_always_runs(self) -> None:
         t = datetime(2024, 1, 15, 12, 37, 0)
-        assert on_interval(-5, t) is True
+        assert on_interval(-5, t, "auto.anything") is True
+
+    def test_jitter_is_deterministic(self) -> None:
+        """Same id + time + interval must be stable.
+
+        Guards against accidentally using Python's
+        per-process-randomized ``hash()`` for jitter.
+        """
+        t = datetime(2024, 1, 15, 12, 0, 0)
+        first = on_interval(5, t, "auto.dw_test")
+        for _ in range(5):
+            assert on_interval(5, t, "auto.dw_test") is first
+
+    def test_jitter_distributes_across_ids(self) -> None:
+        """Different ids land on different offsets.
+
+        Sweeps several distinct instance_ids through a
+        5-minute window, collects the minute each one
+        fires on, and asserts the set of offsets has
+        more than one value. This is the thundering-herd
+        mitigation property: 10 ids all hashing to the
+        same offset has probability ~5e-7.
+        """
+        base = datetime(2024, 1, 15, 12, 0, 0)
+        offsets: set[int] = set()
+        for n in range(10):
+            instance_id = f"auto.test_{n}"
+            for k in range(5):
+                t = base + timedelta(minutes=k)
+                if on_interval(5, t, instance_id):
+                    offsets.add(k)
+                    break
+        assert len(offsets) > 1
+
+    def test_interval_change_reshuffles_offset(self) -> None:
+        """Changing interval re-derives jitter, no state.
+
+        A given (id, time) pair can flip between firing
+        and not firing when the interval changes — this
+        is the expected side of the "no stored state"
+        tradeoff and documents it explicitly.
+        """
+        t = datetime(2024, 1, 15, 12, 3, 0)
+        id_ = "auto.dw_test"
+        window = [
+            on_interval(interval, t, id_) for interval in (2, 3, 4, 5, 6, 7)
+        ]
+        # At least one fires and at least one doesn't
+        # across the sweep — proves the offset varies
+        # with the interval rather than being cached.
+        assert any(window)
+        assert not all(window)
 
 
 class TestMatchesPattern:

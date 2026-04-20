@@ -51,12 +51,35 @@ from entity_defaults_watchdog import (  # noqa: E402
     DRIFT_CHECK_ENTITY_ID,
     DevicelessEntityInfo,
 )
-from helpers import EntityRegistryInfo  # noqa: E402
+from helpers import EntityRegistryInfo, on_interval  # noqa: E402
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
 # Timezone-aware version for watchdog tests (pyscript's
 # last_reported returns UTC-aware datetimes).
 T0_UTC = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
+
+
+def _boundary_time(
+    instance_id: str,
+    interval_minutes: int,
+    base: datetime,
+) -> datetime:
+    """Earliest ``base + k min`` where ``on_interval`` fires.
+
+    Interval gating is now instance-jittered, so tests that
+    need an on-boundary tick can't just use a round wall-clock
+    time — they have to find the minute within ``[base,
+    base + interval)`` that matches this instance's offset.
+    """
+    for k in range(interval_minutes):
+        candidate = base + timedelta(minutes=k)
+        if on_interval(interval_minutes, candidate, instance_id):
+            return candidate
+    msg = (
+        "no boundary found within one interval window"
+        f" for {instance_id!r} at interval={interval_minutes}"
+    )
+    raise AssertionError(msg)
 
 
 # ── Mock infrastructure ──────────────────────────────
@@ -1922,17 +1945,8 @@ class TestDeviceWatchdogIntervalGating:
         assert device_dismisses == []
 
     def test_runs_on_interval_boundary(self) -> None:
-        env = _WatchdogEnv(
-            current_time=datetime(
-                2024,
-                1,
-                15,
-                12,
-                0,
-                0,
-                tzinfo=UTC,
-            ),
-        )
+        boundary = _boundary_time("auto.dw_test", 60, T0_UTC)
+        env = _WatchdogEnv(current_time=boundary)
         env.setup_device(
             "zwave_js",
             "dev1",
@@ -1943,16 +1957,9 @@ class TestDeviceWatchdogIntervalGating:
         assert len(env.mock_pn.create_calls) == 1
 
     def test_no_debug_attrs_when_gated(self) -> None:
+        boundary = _boundary_time("auto.dw_test", 60, T0_UTC)
         env = _WatchdogEnv(
-            current_time=datetime(
-                2024,
-                1,
-                15,
-                12,
-                1,
-                0,
-                tzinfo=UTC,
-            ),
+            current_time=boundary + timedelta(minutes=1),
         )
         env.call(check_interval_minutes_raw="60")
         key = "pyscript.auto_dw_test_state"
@@ -3465,17 +3472,11 @@ class TestEdwIntervalGating:
     """Test check interval gating for EDW."""
 
     def test_skips_when_off_interval(self) -> None:
-        # Odd minute with interval=2 -> skip
+        # One minute past this instance's boundary with
+        # interval=2 lands on the opposite parity -> skip.
+        boundary = _boundary_time("auto.edw_test", 2, T0_UTC)
         env = _EdwEnv(
-            current_time=datetime(
-                2024,
-                1,
-                15,
-                12,
-                1,
-                0,
-                tzinfo=UTC,
-            ),
+            current_time=boundary + timedelta(minutes=1),
         )
         env.setup_device(
             "zwave_js",
@@ -3502,17 +3503,8 @@ class TestEdwIntervalGating:
         assert device_dismisses == []
 
     def test_runs_on_interval_boundary(self) -> None:
-        env = _EdwEnv(
-            current_time=datetime(
-                2024,
-                1,
-                15,
-                12,
-                0,
-                0,
-                tzinfo=UTC,
-            ),
-        )
+        boundary = _boundary_time("auto.edw_test", 60, T0_UTC)
+        env = _EdwEnv(current_time=boundary)
         env.setup_device(
             "zwave_js",
             "dev1",

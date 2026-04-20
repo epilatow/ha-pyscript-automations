@@ -964,7 +964,7 @@ def device_watchdog(
         f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
     )
     if str(trigger_platform_raw) == "time_pattern":
-        if not on_interval(check_interval_minutes, now):
+        if not on_interval(check_interval_minutes, now, instance_id):
             return
 
     config = Config(
@@ -1663,7 +1663,7 @@ def entity_defaults_watchdog(
         f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
     )
     if str(trigger_platform_raw) == "time_pattern":
-        if not on_interval(check_interval_minutes, now):
+        if not on_interval(check_interval_minutes, now, instance_id):
             return
 
     config = Config(
@@ -1998,7 +1998,7 @@ def reference_watchdog(
         f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
     )
     if str(trigger_platform_raw) == "time_pattern":
-        if not on_interval(check_interval_minutes, now):
+        if not on_interval(check_interval_minutes, now, instance_id):
             return
 
     config = Config(
