@@ -10,6 +10,7 @@ automations.
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -169,6 +170,33 @@ def matches_pattern(
         )
     except re.error:
         return False
+
+
+def slugify(text: str) -> str:
+    """Return a Home Assistant-compatible slug from ``text``.
+
+    Mirrors ``homeassistant.util.slugify(text, separator="_")``
+    for the ASCII-only common case: NFKD decomposition,
+    drop non-ASCII characters, lowercase, collapse runs of
+    non-alphanumeric characters into a single underscore,
+    and strip leading and trailing underscores. Empty input
+    returns ``""``; non-empty input that collapses to an
+    empty slug (e.g. emoji-only, punctuation-only) returns
+    ``"unknown"``, matching HA's fallback.
+    """
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = (
+        normalized.encode(
+            "ascii",
+            "ignore",
+        )
+        .decode("ascii")
+        .lower()
+    )
+    slug = re.sub(r"[^a-z0-9]+", "_", ascii_text).strip("_")
+    return slug or "unknown"
 
 
 def prepare_notifications(

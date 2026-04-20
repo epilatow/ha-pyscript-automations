@@ -24,6 +24,7 @@ from helpers import (  # noqa: E402
     matches_pattern,
     on_interval,
     prepare_notifications,
+    slugify,
 )
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
@@ -123,6 +124,63 @@ class TestMatchesPattern:
 
     def test_invalid_regex_no_crash(self) -> None:
         assert not matches_pattern("test", "[invalid")
+
+
+class TestSlugify:
+    def test_basic_ascii(self) -> None:
+        assert slugify("Foo Bar") == "foo_bar"
+
+    def test_already_slug(self) -> None:
+        assert slugify("foo_bar") == "foo_bar"
+
+    def test_empty(self) -> None:
+        assert slugify("") == ""
+
+    def test_only_separators(self) -> None:
+        # Non-empty input that collapses to an empty slug
+        # falls back to "unknown", matching HA.
+        assert slugify("   ") == "unknown"
+        assert slugify("---") == "unknown"
+
+    def test_non_ascii_only_fallback(self) -> None:
+        # Emoji-only / non-decomposable-only input collapses
+        # to empty after NFKD + ASCII drop, so the HA
+        # "unknown" fallback kicks in.
+        assert slugify("🌟") == "unknown"
+
+    def test_collapses_runs(self) -> None:
+        assert slugify("foo   bar") == "foo_bar"
+        assert slugify("foo---bar") == "foo_bar"
+        assert slugify("foo.!@#bar") == "foo_bar"
+
+    def test_strips_leading_trailing(self) -> None:
+        assert slugify("  foo bar  ") == "foo_bar"
+        assert slugify("!foo_bar!") == "foo_bar"
+
+    def test_diacritics(self) -> None:
+        assert slugify("Café") == "cafe"
+        assert slugify("Zürich") == "zurich"
+        assert slugify("naïve") == "naive"
+
+    def test_apostrophes(self) -> None:
+        assert slugify("Bob's House") == "bob_s_house"
+
+    def test_colons_and_punctuation(self) -> None:
+        assert (
+            slugify(
+                "Auto-On: Sunset Lights: Sunset to 8pm",
+            )
+            == "auto_on_sunset_lights_sunset_to_8pm"
+        )
+
+    def test_digits_preserved(self) -> None:
+        assert slugify("Indoor PM2.5") == "indoor_pm2_5"
+        assert slugify("10am") == "10am"
+
+    def test_non_ascii_dropped(self) -> None:
+        # Emoji and non-decomposable non-ASCII get dropped
+        # entirely, not replaced with separators.
+        assert slugify("Living Room 🌟") == "living_room"
 
 
 class _FakeResult:
