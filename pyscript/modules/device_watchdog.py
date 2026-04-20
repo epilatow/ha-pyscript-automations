@@ -117,6 +117,7 @@ RECOMMENDED_DIAGNOSTICS: dict[str, list[str]] = {
     "zwave_js": ["Last seen", "Node status"],
     "bthome": ["Signal strength"],
     "shelly": ["RSSI"],
+    "unifiprotect": ["Wi-Fi signal strength", "Uptime"],
 }
 
 

@@ -776,6 +776,25 @@ class TestCheckDisabledDiagnostics:
         )
         assert result == ["Node status"]
 
+    def test_unifiprotect_disabled_flagged(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Wi-Fi signal strength",
+                platform="unifiprotect",
+                disabled=True,
+            ),
+            _reg_entry(
+                original_name="Uptime",
+                platform="unifiprotect",
+                disabled=False,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "unifiprotect",
+            entries,
+        )
+        assert result == ["Wi-Fi signal strength"]
+
 
 class TestEvaluateDiagnostics:
     def _diag_device(
