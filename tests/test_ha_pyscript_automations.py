@@ -409,7 +409,7 @@ class TestStateLoading:
         key = env.state_key_fn("auto.test_instance")
         s = State(initialized=True)
         env.mock_state.setattr(
-            key + ".data",
+            f"{key}.data",
             json.dumps(s.to_dict()),
         )
         env.call()
@@ -419,7 +419,7 @@ class TestStateLoading:
         env = _ServiceEnv()
         key = env.state_key_fn("auto.test_instance")
         env.mock_state.setattr(
-            key + ".data",
+            f"{key}.data",
             "{not valid json",
         )
         env.call()
@@ -548,7 +548,7 @@ class TestActionExecution:
             initialized=True,
         )
         env.mock_state.setattr(
-            key + ".data",
+            f"{key}.data",
             json.dumps(s.to_dict()),
         )
         env.call(
@@ -672,7 +672,7 @@ class TestErrorResilience:
         env = _ServiceEnv()
         key = env.state_key_fn("auto.test_instance")
         env.mock_state.setattr(
-            key + ".data",
+            f"{key}.data",
             "{not valid json",
         )
         env.call()
@@ -1010,7 +1010,7 @@ class TestProcessPersistentNotifications:
             "Automation: [Device Watchdog 73]"
             "(/config/automation/edit/1700000000001)\n"
         )
-        assert msg == expected_prefix + "body"
+        assert msg == f"{expected_prefix}body"
 
     def test_no_prefix_when_id_missing(self) -> None:
         env = _ServiceEnv()
@@ -1148,11 +1148,11 @@ class TestSweepOrphanNotifications:
         fn = env._ns["_sweep_orphan_notifications"]
         prefix = "device_watchdog_auto_a__"
         notifications = [
-            self._make(env, active=True, nid=prefix + "device_dev1"),
+            self._make(env, active=True, nid=f"{prefix}device_dev1"),
         ]
         active_ids = {
-            prefix + "device_dev1",
-            prefix + "device_dev_gone",
+            f"{prefix}device_dev1",
+            f"{prefix}device_dev_gone",
         }
         fn(prefix, active_ids, notifications)
         # dev1 stays; dev_gone added as dismissal.
@@ -1166,10 +1166,10 @@ class TestSweepOrphanNotifications:
         fn = env._ns["_sweep_orphan_notifications"]
         prefix_a = "device_watchdog_auto_a__"
         notifications = [
-            self._make(env, active=True, nid=prefix_a + "device_dev1"),
+            self._make(env, active=True, nid=f"{prefix_a}device_dev1"),
         ]
         active_ids = {
-            prefix_a + "device_dev1",
+            f"{prefix_a}device_dev1",
             "device_watchdog_auto_b__device_dev2",
         }
         fn(prefix_a, active_ids, notifications)
@@ -1203,9 +1203,9 @@ class TestSweepOrphanNotifications:
         env = _ServiceEnv()
         fn = env._ns["_sweep_orphan_notifications"]
         prefix = "device_watchdog_auto_a__"
-        n = self._make(env, active=True, nid=prefix + "device_dev1")
+        n = self._make(env, active=True, nid=f"{prefix}device_dev1")
         notifications = [n]
-        fn(prefix, {prefix + "device_dev1"}, notifications)
+        fn(prefix, {f"{prefix}device_dev1"}, notifications)
         assert notifications == [n]
 
 
@@ -1526,7 +1526,7 @@ class TestStscStateSavedWhenNotifyRaises:
             initialized=True,
         )
         env.mock_state.setattr(
-            key + ".data",
+            f"{key}.data",
             json.dumps(s.to_dict()),
         )
 
@@ -2840,7 +2840,7 @@ class TestTecActions:
         past = (T0 - timedelta(seconds=1)).isoformat()
         env.mock_state.set(key, "ok")
         env.mock_state.setattr(
-            key + ".auto_off_at",
+            f"{key}.auto_off_at",
             past,
         )
         env.call()

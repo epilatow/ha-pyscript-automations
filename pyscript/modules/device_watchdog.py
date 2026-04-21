@@ -192,21 +192,20 @@ def evaluate_diagnostics(
                 integration,
                 device.registry_entries,
             )
-        notification_id = config.notification_prefix + "diag_" + device.de.id
+        notification_id = f"{config.notification_prefix}diag_{device.de.id}"
         if disabled:
             entity_list = "\n- ".join(disabled)
             message = (
                 "Recommended diagnostic entities"
-                " are disabled:\n\n- " + entity_list + "\n\nEnable in"
-                " [Settings > Devices]("
-                + device.de.url
-                + ") for better health monitoring."
+                f" are disabled:\n\n- {entity_list}\n\nEnable in"
+                f" [Settings > Devices]({device.de.url})"
+                " for better health monitoring."
             )
             results.append(
                 PersistentNotification(
                     active=True,
                     notification_id=notification_id,
-                    title=(device.de.name + ": Disabled Diagnostics"),
+                    title=f"{device.de.name}: Disabled Diagnostics",
                     message=message,
                 ),
             )
@@ -302,21 +301,21 @@ def _build_notification_message(
     """Build the notification body for an unhealthy device."""
     lines: list[str] = []
     lines.append(
-        "Device: [" + device.de.name + "](" + device.de.url + ")",
+        f"Device: [{device.de.name}]({device.de.url})",
     )
     integrations = sorted(
         device.de.integration_entities.keys(),
     )
     if integrations:
         lines.append(
-            "Integrations: " + ", ".join(integrations),
+            f"Integrations: {', '.join(integrations)}",
         )
 
     sorted_unavail = [(e.entity_id, i, e) for i, e in enumerate(unavailable)]
     sorted_unavail.sort()
     for _, _, entity in sorted_unavail:
         lines.append(
-            "Unavailable entity: " + entity.entity_id,
+            f"Unavailable entity: {entity.entity_id}",
         )
 
     if is_stale:
@@ -324,19 +323,14 @@ def _build_notification_message(
         if newest_timestamp and newest_entity:
             last_seen = newest_timestamp.isoformat()
             lines.append(
-                "No entity state report within "
-                + str(threshold_minutes)
-                + " minutes. Most recent update "
-                + last_seen
-                + " via "
-                + newest_entity
-                + ".",
+                f"No entity state report within {threshold_minutes}"
+                f" minutes. Most recent update {last_seen}"
+                f" via {newest_entity}.",
             )
         else:
             lines.append(
-                "No entity state report within "
-                + str(threshold_minutes)
-                + " minutes. No prior updates detected.",
+                f"No entity state report within {threshold_minutes}"
+                " minutes. No prior updates detected.",
             )
 
     assert len(lines) > 1, "Expected unavailable or stale content but got none"
@@ -350,7 +344,7 @@ def _evaluate_device(
     current_time: datetime,
 ) -> DeviceResult:
     """Evaluate health of a single device."""
-    notification_id = config.notification_prefix + "device_" + device.de.id
+    notification_id = f"{config.notification_prefix}device_{device.de.id}"
 
     # Skip excluded devices
     device_excluded = matches_pattern(
@@ -398,7 +392,7 @@ def _evaluate_device(
     message = ""
     title = ""
     if has_issue:
-        title = "Device watchdog: " + device.de.name
+        title = f"Device watchdog: {device.de.name}"
         message = _build_notification_message(
             device,
             unavailable,
@@ -508,7 +502,7 @@ def run_evaluation(
     notifications = prepare_notifications(
         results,
         max_notifications,
-        config.notification_prefix + "cap",
+        f"{config.notification_prefix}cap",
         "Device watchdog: notification cap reached",
         "devices with issues",
     )

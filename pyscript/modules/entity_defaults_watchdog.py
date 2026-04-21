@@ -305,7 +305,7 @@ def _matches_with_collision_suffix(
         return (False, False)
     if obj_id == expected:
         return (True, False)
-    if not obj_id.startswith(expected + "_"):
+    if not obj_id.startswith(f"{expected}_"):
         return (False, False)
     rest = obj_id[len(expected) + 1 :]
     if not rest.isdigit():
@@ -323,7 +323,7 @@ def _matches_with_collision_suffix(
     # No base peer. Scan for any higher-numbered chain
     # peer; if present, defer flagging to it so the user
     # fixes the chain in one rename.
-    prefix = expected + "_"
+    prefix = f"{expected}_"
     for p in peers:
         if not p.startswith(prefix):
             continue
@@ -453,14 +453,14 @@ def _build_notification_message(
     """
     lines: list[str] = []
     lines.append(
-        "Device: [" + device.de.name + "](" + device.de.url + ")",
+        f"Device: [{device.de.name}]({device.de.url})",
     )
     integrations = sorted(
         device.de.integration_entities.keys(),
     )
     if integrations:
         lines.append(
-            "Integrations: " + ", ".join(integrations),
+            f"Integrations: {', '.join(integrations)}",
         )
 
     # Group entities by notification section
@@ -515,7 +515,7 @@ def _build_notification_message(
         lines.append("**Name overrides to clear:**")
         for d in name_clear:
             lines.append(
-                "- `" + d.entity_id + '`: "' + d.current_name + '"',
+                f'- `{d.entity_id}`: "{d.current_name}"',
             )
         lines.append("")
         lines.append(
@@ -529,32 +529,24 @@ def _build_notification_message(
             "**Name overrides with redundant device name:**",
         )
         for d in name_redundant:
+            expected = d.expected_name or ""
             lines.append(
-                "- `"
-                + d.entity_id
-                + '`: "'
-                + d.current_name
-                + '" \u2192 "'
-                + (d.expected_name or "")
-                + '"',
+                f'- `{d.entity_id}`: "{d.current_name}" \u2192 "{expected}"',
             )
         lines.append(
             "  The override includes the device name,"
             " which Home Assistant already adds."
             " Edit the override to remove"
-            ' "' + device.de.name + ' " or clear it entirely.',
+            f' "{device.de.name} " or clear it entirely.',
         )
 
     if name_set:
         lines.append("")
         lines.append("**Name overrides to set:**")
         for d in name_set:
+            override = d.recommended_override or ""
             lines.append(
-                "- `"
-                + d.entity_id
-                + '`: set to "'
-                + (d.recommended_override or "")
-                + '"',
+                f'- `{d.entity_id}`: set to "{override}"',
             )
         lines.append("")
         lines.append(
@@ -568,7 +560,7 @@ def _build_notification_message(
         lines.append("")
         lines.append("**Non-default entity IDs:**")
         for d in id_only:
-            lines.append("- `" + d.entity_id + "`")
+            lines.append(f"- `{d.entity_id}`")
 
     # How to fix section
     lines.append("")
@@ -613,7 +605,7 @@ def _evaluate_device(
     device: DeviceInfo,
 ) -> DeviceResult:
     """Evaluate drift for a single device."""
-    notification_id = config.notification_prefix + "device_" + device.de.id
+    notification_id = f"{config.notification_prefix}device_{device.de.id}"
 
     # Skip excluded devices
     if matches_pattern(
@@ -651,7 +643,7 @@ def _evaluate_device(
     title = ""
     message = ""
     if has_issue:
-        title = "Entity defaults watchdog: " + device.de.name
+        title = f"Entity defaults watchdog: {device.de.name}"
         message = _build_notification_message(
             device,
             drifted,
@@ -753,9 +745,7 @@ def _build_deviceless_notification_message(
 
     if drift_items:
         lines = [
-            "Entity IDs do not match their names ("
-            + str(len(drift_items))
-            + "):",
+            f"Entity IDs do not match their names ({len(drift_items)}):",
         ]
         sorted_drift = [(d.entity_id, i, d) for i, d in enumerate(drift_items)]
         sorted_drift.sort()
@@ -770,15 +760,9 @@ def _build_deviceless_notification_message(
                 d.config_entry_id,
             )
             lines.append(
-                "- `"
-                + d.entity_id
-                + "` → expected `"
-                + dom
-                + "."
-                + d.expected_object_id
-                + "`",
+                f"- `{d.entity_id}` → expected `{dom}.{d.expected_object_id}`",
             )
-            lines.append("  " + suffix)
+            lines.append(f"  {suffix}")
         sections.append("\n".join(lines))
 
     if stale_items:
@@ -799,15 +783,9 @@ def _build_deviceless_notification_message(
                 d.config_entry_id,
             )
             lines.append(
-                "- `"
-                + d.entity_id
-                + "` → rename to `"
-                + dom
-                + "."
-                + d.expected_object_id
-                + "`",
+                f"- `{d.entity_id}` → rename to `{dom}.{d.expected_object_id}`",
             )
-            lines.append("  " + suffix)
+            lines.append(f"  {suffix}")
         sections.append("\n".join(lines))
 
     return "\n\n".join(sections)
@@ -887,7 +865,7 @@ def _evaluate_deviceless(
 
     return DevicelessResult(
         has_issue=has_issue,
-        notification_id=config.notification_prefix + "deviceless",
+        notification_id=f"{config.notification_prefix}deviceless",
         notification_title=title,
         notification_message=message,
         drifted=all_drifted,
@@ -969,7 +947,7 @@ def run_evaluation(
     notifications = prepare_notifications(
         results,
         max_notifications,
-        config.notification_prefix + "cap",
+        f"{config.notification_prefix}cap",
         "Entity defaults watchdog: notification cap reached",
         "devices with drift",
     )
@@ -983,7 +961,7 @@ def run_evaluation(
     else:
         deviceless = DevicelessResult(
             has_issue=False,
-            notification_id=config.notification_prefix + "deviceless",
+            notification_id=f"{config.notification_prefix}deviceless",
             notification_title="",
             notification_message="",
             drifted=[],

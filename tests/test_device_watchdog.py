@@ -83,7 +83,7 @@ def _device(
     return DeviceInfo(
         de=DeviceEntry(
             id=device_id,
-            url="/config/devices/device/" + device_id,
+            url=f"/config/devices/device/{device_id}",
             name=device_name,
             default_name=device_name,
         ),
@@ -810,7 +810,7 @@ class TestEvaluateDiagnostics:
         return DeviceInfo(
             de=DeviceEntry(
                 id=device_id,
-                url="/config/devices/device/" + device_id,
+                url=f"/config/devices/device/{device_id}",
                 name=device_name,
                 default_name=device_name,
                 integration_entities=ie,
@@ -926,14 +926,14 @@ class TestNotificationPrefixIsolation:
         return DeviceInfo(
             de=DeviceEntry(
                 id=device_id,
-                url="/config/devices/device/" + device_id,
+                url=f"/config/devices/device/{device_id}",
                 name=device_id,
                 default_name=device_id,
                 integration_entities=ie,
             ),
             registry_entries=[
                 RegistryEntry(
-                    entity_id="sensor." + device_id,
+                    entity_id=f"sensor.{device_id}",
                     original_name="Last seen",
                     platform="zwave_js",
                     entity_category="diagnostic",

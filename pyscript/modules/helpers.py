@@ -321,16 +321,10 @@ def prepare_notifications(
                 notification_id=cap_notification_id,
                 title=cap_title,
                 message=(
-                    "Showing "
-                    + str(max_notifications)
-                    + " of "
-                    + str(len(issues))
-                    + " "
-                    + cap_item_label
-                    + ". "
-                    + str(len(suppressed))
-                    + " additional notifications were"
-                    " suppressed. Increase the"
+                    f"Showing {max_notifications} of"
+                    f" {len(issues)} {cap_item_label}."
+                    f" {len(suppressed)} additional notifications"
+                    " were suppressed. Increase the"
                     " notification cap or fix existing"
                     " issues to see more."
                 ),

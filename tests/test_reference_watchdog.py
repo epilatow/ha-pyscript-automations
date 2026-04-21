@@ -92,7 +92,7 @@ def _reg_entry(
     return RegistryEntry(
         entity_id=entity_id,
         platform=platform,
-        unique_id=unique_id or (entity_id + "_uid"),
+        unique_id=unique_id or f"{entity_id}_uid",
         config_entry_id=config_entry_id,
         disabled=disabled,
         name=name,

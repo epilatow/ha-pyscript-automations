@@ -435,9 +435,9 @@ def _owner_display_name(owner: Owner) -> str:
     if owner.friendly_name:
         return owner.friendly_name
     if owner.integration and owner.block_path:
-        return owner.integration + " - " + owner.block_path
+        return f"{owner.integration} - {owner.block_path}"
     if owner.block_path:
-        return owner.source_file + " - " + owner.block_path
+        return f"{owner.source_file} - {owner.block_path}"
     return owner.source_file
 
 
@@ -452,7 +452,7 @@ def _owner_header_label(owner: Owner) -> str:
     the user both *where* in the file and *what* it is.
     """
     if owner.block_path and owner.friendly_name:
-        return owner.block_path + " - " + owner.friendly_name
+        return f"{owner.block_path} - {owner.friendly_name}"
     return _owner_display_name(owner)
 
 
@@ -1461,11 +1461,11 @@ def _build_notification_body(
     if owner.entity_id:
         entity_line = f"Entity: `{owner.entity_id}`"
         if show_yaml_note:
-            entity_line += " (YAML-only, edit `" + owner.source_file + "`)"
+            entity_line += f" (YAML-only, edit `{owner.source_file}`)"
         lines.append(entity_line)
     elif show_yaml_note:
         lines.append(
-            "(YAML-only, edit `" + owner.source_file + "`)",
+            f"(YAML-only, edit `{owner.source_file}`)",
         )
 
     if owner.integration:
@@ -1538,24 +1538,17 @@ def _build_owner_result(
     # against collisions when two distinct identities
     # sanitize to the same string.
     raw_id = (
-        owner.source_file
-        + "\0"
-        + (owner.block_path or "")
-        + "\0"
-        + (owner.friendly_name or "")
+        f"{owner.source_file}\0"
+        f"{owner.block_path or ''}\0"
+        f"{owner.friendly_name or ''}"
     )
     suffix = hashlib.sha1(raw_id.encode("utf-8")).hexdigest()[:8]
-    notification_id = (
-        config.notification_prefix
-        + "owner_"
-        + _sanitize_notification_id(raw_id)
-        + "_"
-        + suffix
-    )
+    sanitized = _sanitize_notification_id(raw_id)
+    notification_id = f"{config.notification_prefix}owner_{sanitized}_{suffix}"
     title = ""
     message = ""
     if has_issue:
-        title = "Reference watchdog: " + _owner_display_name(owner)
+        title = f"Reference watchdog: {_owner_display_name(owner)}"
         message = _build_notification_body(owner, findings)
     return OwnerResult(
         owner=owner,
@@ -1715,8 +1708,8 @@ def _register_yaml_tag_constructors() -> None:
         ) -> str:
             _ = loader
             if isinstance(node, yaml.ScalarNode):
-                return "<" + _tag + ":" + str(node.value) + ">"
-            return "<" + _tag + ">"
+                return f"<{_tag}:{node.value}>"
+            return f"<{_tag}>"
 
         yaml.SafeLoader.add_constructor(tag, _ctor)
 
@@ -1935,14 +1928,12 @@ def _enumerate_json_sources(
                                 continue
                             dash_id = item.get("id", "")
                             if dash_id:
+                                url_path = item.get("url_path") or dash_id
                                 dashboards_index[dash_id] = {
                                     "title": str(
                                         item.get("title") or dash_id,
                                     ),
-                                    "url_path": "/"
-                                    + str(
-                                        item.get("url_path") or dash_id,
-                                    ),
+                                    "url_path": f"/{url_path}",
                                 }
 
         try:
@@ -1963,13 +1954,13 @@ def _enumerate_json_sources(
                 dash_id,
                 {
                     "title": dash_id,
-                    "url_path": "/" + dash_id,
+                    "url_path": f"/{dash_id}",
                 },
             )
             sources.append(
                 SourceInput(
                     source_type="lovelace",
-                    path=".storage/" + fname,
+                    path=f".storage/{fname}",
                     parsed=parsed,
                     extra=extra,
                 ),
@@ -2077,7 +2068,7 @@ def run_evaluation(
     notifications = prepare_notifications(
         results,
         max_notifications,
-        config.notification_prefix + "cap",
+        f"{config.notification_prefix}cap",
         "Reference watchdog: notification cap reached",
         "owners with broken references",
     )

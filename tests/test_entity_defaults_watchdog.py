@@ -87,7 +87,7 @@ def _device(
     return DeviceInfo(
         de=DeviceEntry(
             id=device_id,
-            url="/config/devices/device/" + device_id,
+            url=f"/config/devices/device/{device_id}",
             name=device_name,
             default_name=default_name,
             integration_entities=ie,

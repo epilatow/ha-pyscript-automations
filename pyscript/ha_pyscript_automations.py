@@ -126,12 +126,12 @@ def _save_state(
     """
     state.set(key, "ok")  # noqa: F821
     state.setattr(  # noqa: F821
-        key + ".last_run",
+        f"{key}.last_run",
         now.isoformat(),
     )
     for name, value in attrs.items():
         state.setattr(  # noqa: F821
-            key + "." + name,
+            f"{key}.{name}",
             value,
         )
 
@@ -171,7 +171,7 @@ def _notification_prefix(
     """
     service_slug = service_label.lower().replace(" ", "_")
     safe_id = instance_id.replace(".", "_")
-    return service_slug + "_" + safe_id + "__"
+    return f"{service_slug}_{safe_id}__"
 
 
 def _sweep_orphan_notifications(
@@ -261,18 +261,15 @@ def _process_persistent_notifications(
     link_prefix = ""
     if auto_id:
         link_prefix = (
-            "Automation: ["
-            + _md_escape(auto_name)
-            + "](/config/automation/edit/"
-            + str(auto_id)
-            + ")\n"
+            f"Automation: [{_md_escape(auto_name)}]"
+            f"(/config/automation/edit/{auto_id})\n"
         )
 
     for n in notifications:
         if n.active:
             message = n.message
             if link_prefix:
-                message = link_prefix + message
+                message = f"{link_prefix}{message}"
             persistent_notification.create(  # noqa: F821
                 title=n.title,
                 message=message,
@@ -320,7 +317,7 @@ def _send_notification(
         return
     svc = str(notification_service)
     if not svc.startswith("notify."):
-        svc = "notify." + svc
+        svc = f"notify.{svc}"
     parts = svc.split(".", 1)
     try:
         service.call(  # noqa: F821
@@ -508,7 +505,7 @@ def _discover_devices(
                 continue
             dev_id = info["id"]
             if dev_id not in device_map:
-                url = "/config/devices/device/" + dev_id
+                url = f"/config/devices/device/{dev_id}"
                 device_map[dev_id] = DeviceEntry(
                     id=dev_id,
                     url=url,
@@ -529,7 +526,7 @@ def _read_entity_state(
     """Read entity state + last_reported."""
     entity_state = state.get(entity_id)  # noqa: F821
     last_reported = state.get(  # noqa: F821
-        entity_id + ".last_reported",
+        f"{entity_id}.last_reported",
     )
     return entity_state, last_reported
 
@@ -621,14 +618,14 @@ def _validate_entities(
             val = None
         if val is None:
             errors.append(
-                eid + " does not exist",
+                f"{eid} does not exist",
             )
         elif entity_type in _DOMAIN_MAP:
             allowed, msg = _DOMAIN_MAP[entity_type]
             domain = _entity_domain(eid)
             if domain not in allowed:
                 errors.append(
-                    eid + " (domain: " + domain + ") " + msg,
+                    f"{eid} (domain: {domain}) {msg}",
                 )
     return errors
 
@@ -654,7 +651,7 @@ def _validate_notification_service(
         return []
     svc = str(notification_service)
     if not svc.startswith("notify."):
-        svc = "notify." + svc
+        svc = f"notify.{svc}"
     parts = svc.split(".", 1)
     try:
         if hass.services.has_service(  # noqa: F821
@@ -664,7 +661,7 @@ def _validate_notification_service(
             return []
     except (NameError, AttributeError, TypeError):
         return []
-    return [svc + " notify service does not exist"]
+    return [f"{svc} notify service does not exist"]
 
 
 def _manage_config_error_persistent_notification(
@@ -677,22 +674,16 @@ def _manage_config_error_persistent_notification(
     service_label: label used in the notification ID
       prefix.
     """
-    notif_id = (
-        _notification_prefix(
-            service_label,
-            instance_id,
-        )
-        + "config_error"
-    )
+    prefix = _notification_prefix(service_label, instance_id)
+    notif_id = f"{prefix}config_error"
     name = _automation_name(instance_id)
 
     message = ""
     if errors:
+        error_list = "\n- ".join(errors)
         message = (
-            "Configuration errors:\n\n- "
-            + "\n- ".join(errors)
-            + "\n\nPlease fix the"
-            " automation configuration."
+            f"Configuration errors:\n\n- {error_list}"
+            "\n\nPlease fix the automation configuration."
         )
 
     _process_persistent_notifications(
@@ -700,7 +691,7 @@ def _manage_config_error_persistent_notification(
             PersistentNotification(
                 active=bool(errors),
                 notification_id=notif_id,
-                title=(name + ": Invalid Configuration"),
+                title=f"{name}: Invalid Configuration",
                 message=message,
             ),
         ],
@@ -760,7 +751,7 @@ def sensor_threshold_switch_controller(
     now = datetime.now()
     debug_logging = _parse_bool(debug_logging_raw)
     auto_name = _automation_name(instance_id)
-    tag = "[STSC: " + auto_name + "]"
+    tag = f"[STSC: {auto_name}]"
 
     # Validate entities and notification service
     errors = _validate_entities(
@@ -960,7 +951,7 @@ def device_watchdog(
     start_time = time.monotonic()
     now = datetime.now(tz=UTC)
     auto_name = _automation_name(instance_id)
-    tag = "[DW: " + auto_name + "]"
+    tag = f"[DW: {auto_name}]"
 
     # Parse all config inputs
     include_integrations = _normalize_list(
@@ -1231,7 +1222,7 @@ def trigger_entity_controller(
     now = datetime.now()
     debug_logging = _parse_bool(debug_logging_raw)
     auto_name = _automation_name(instance_id)
-    tag = "[TEC: " + auto_name + "]"
+    tag = f"[TEC: {auto_name}]"
 
     # Parse inputs
     controlled_entities = _normalize_list(
@@ -1247,8 +1238,8 @@ def trigger_entity_controller(
         auto_off_disabling_entities_raw,
     )
     auto_off_minutes = int(auto_off_minutes_raw)
-    assert auto_off_minutes >= 0, "auto_off_minutes must be >= 0, got " + str(
-        auto_off_minutes
+    assert auto_off_minutes >= 0, (
+        f"auto_off_minutes must be >= 0, got {auto_off_minutes}"
     )
     notification_events = parse_notification_events(
         _normalize_list(notification_events_raw),
@@ -1271,15 +1262,15 @@ def trigger_entity_controller(
     dis_set = set(all_disabling)
     for eid in ctrl_set & trig_set:
         errors.append(
-            eid + " is in both controlled and trigger entities",
+            f"{eid} is in both controlled and trigger entities",
         )
     for eid in ctrl_set & dis_set:
         errors.append(
-            eid + " is in both controlled and disabling entities",
+            f"{eid} is in both controlled and disabling entities",
         )
     for eid in trig_set & dis_set:
         errors.append(
-            eid + " is in both trigger and disabling entities",
+            f"{eid} is in both trigger and disabling entities",
         )
     errors += _validate_notification_service(
         notification_service,
@@ -1671,7 +1662,7 @@ def entity_defaults_watchdog(
     start_time = time.monotonic()
     now = datetime.now(tz=UTC)
     auto_name = _automation_name(instance_id)
-    tag = "[EDW: " + auto_name + "]"
+    tag = f"[EDW: {auto_name}]"
 
     # Parse all config inputs
     drift_checks = _normalize_frozenset(drift_checks_raw)
@@ -1988,7 +1979,7 @@ def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
     for dom in services:
         svcs = services[dom]
         for svc_name in svcs:
-            service_names.add(str(dom) + "." + str(svc_name))
+            service_names.add(f"{dom}.{svc_name}")
 
     # Label registry (v1: stored but not yet validated
     # by any adapter; see docs/reference_watchdog.md
@@ -2042,7 +2033,7 @@ def reference_watchdog(
     start_time = time.monotonic()
     now = datetime.now(tz=UTC)
     auto_name = _automation_name(instance_id)
-    tag = "[RW: " + auto_name + "]"
+    tag = f"[RW: {auto_name}]"
 
     # Parse inputs
     scan_sources = _normalize_list(scan_sources_raw)
