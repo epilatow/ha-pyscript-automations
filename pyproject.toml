@@ -34,3 +34,10 @@ ignore_missing_imports = true
 module = ["yaml"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# scripts/zwave_network_info.py bootstraps its own venv for
+# these at runtime; the host dev environment may not have them
+# installed, and they're unused in the rest of the repo.
+module = ["socketio", "aiohttp"]
+ignore_missing_imports = true
+

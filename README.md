@@ -37,6 +37,21 @@ runtime dependencies, making it fully testable with pytest.
   negative service-name truth set to eliminate false
   positives.
 
+## Scripts
+
+Standalone diagnostic and inspection tools that ship alongside
+the automations. Live in `scripts/` and run from the HA host.
+
+- [Z-Wave Network Info](scripts/zwave_network_info.py) -
+  Tabular per-node view of the Z-Wave mesh: protocol (Mesh/LR),
+  signal-strength quality, configured priority routes, and
+  opt-in stat columns (RX/TX counts, drop counts, drop rates,
+  RTT, battery, status, neighbors, firmware, etc.). Historical
+  columns pull from HA's recorder; current state comes from
+  zwave-js-ui. Self-bootstraps a venv on first run; see `--help`
+  for the full column list and aliases.
+
+
 ## Prerequisites
 
 - Home Assistant with the
