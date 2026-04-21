@@ -42,6 +42,12 @@ class Config:
     monitored_entity_domains: list[str]
     dead_threshold_seconds: int
     enabled_checks: frozenset[str]
+    # Per-instance notification ID prefix, ending with
+    # the canonical ``__`` separator. Every notification
+    # this module mints must start with this string so
+    # the service wrapper's orphan sweep can safely scope
+    # dismissals to one instance.
+    notification_prefix: str = ""
 
 
 @dataclass
@@ -156,6 +162,7 @@ def check_disabled_diagnostics(
 
 
 def evaluate_diagnostics(
+    config: Config,
     devices: list[DeviceInfo],
 ) -> list[PersistentNotification]:
     """Check all devices for disabled diagnostics.
@@ -185,7 +192,7 @@ def evaluate_diagnostics(
                 integration,
                 device.registry_entries,
             )
-        notification_id = "dw_diag_" + device.de.id
+        notification_id = config.notification_prefix + "diag_" + device.de.id
         if disabled:
             entity_list = "\n- ".join(disabled)
             message = (
@@ -343,7 +350,7 @@ def _evaluate_device(
     current_time: datetime,
 ) -> DeviceResult:
     """Evaluate health of a single device."""
-    notification_id = "device_watchdog_" + device.de.id
+    notification_id = config.notification_prefix + "device_" + device.de.id
 
     # Skip excluded devices
     device_excluded = matches_pattern(
@@ -496,12 +503,12 @@ def run_evaluation(
 
     diag_notifications: list[PersistentNotification] = []
     if CHECK_DISABLED_DIAGNOSTICS in config.enabled_checks:
-        diag_notifications = evaluate_diagnostics(devices)
+        diag_notifications = evaluate_diagnostics(config, devices)
 
     notifications = prepare_notifications(
         results,
         max_notifications,
-        "device_watchdog_cap",
+        config.notification_prefix + "cap",
         "Device watchdog: notification cap reached",
         "devices with issues",
     )

@@ -50,6 +50,7 @@ def _config(**overrides: object) -> Config:
         "exclude_entity_ids": [],
         "entity_id_exclude_regex": "",
         "entity_name_exclude_regex": "",
+        "notification_prefix": "entity_defaults_watchdog_test__",
     }
     defaults.update(overrides)
     return Config(**defaults)  # type: ignore[arg-type]
@@ -611,7 +612,9 @@ class TestEvaluateDevice:
         cfg = _config()
         device = _device(device_id="abc123")
         result = _evaluate_device(cfg, device)
-        assert result.notification_id == ("entity_defaults_watchdog_abc123")
+        assert result.notification_id == (
+            "entity_defaults_watchdog_test__device_abc123"
+        )
 
     def test_notification_title(self) -> None:
         cfg = _config()
@@ -649,7 +652,7 @@ class TestEvaluateDevice:
         notif = result.to_notification()
         assert notif.active is True
         assert notif.notification_id.startswith(
-            "entity_defaults_watchdog_",
+            "entity_defaults_watchdog_test__device_",
         )
 
 

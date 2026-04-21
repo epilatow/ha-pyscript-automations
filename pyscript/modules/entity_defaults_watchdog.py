@@ -73,6 +73,12 @@ class Config:
     exclude_entity_ids: list[str]
     entity_id_exclude_regex: str
     entity_name_exclude_regex: str
+    # Per-instance notification ID prefix, ending with
+    # the canonical ``__`` separator. Every notification
+    # this module mints must start with this string so
+    # the service wrapper's orphan sweep can safely scope
+    # dismissals to one instance.
+    notification_prefix: str = ""
 
 
 @dataclass
@@ -607,7 +613,7 @@ def _evaluate_device(
     device: DeviceInfo,
 ) -> DeviceResult:
     """Evaluate drift for a single device."""
-    notification_id = "entity_defaults_watchdog_" + device.de.id
+    notification_id = config.notification_prefix + "device_" + device.de.id
 
     # Skip excluded devices
     if matches_pattern(
@@ -881,7 +887,7 @@ def _evaluate_deviceless(
 
     return DevicelessResult(
         has_issue=has_issue,
-        notification_id="entity_defaults_watchdog_deviceless",
+        notification_id=config.notification_prefix + "deviceless",
         notification_title=title,
         notification_message=message,
         drifted=all_drifted,
@@ -963,7 +969,7 @@ def run_evaluation(
     notifications = prepare_notifications(
         results,
         max_notifications,
-        "entity_defaults_watchdog_cap",
+        config.notification_prefix + "cap",
         "Entity defaults watchdog: notification cap reached",
         "devices with drift",
     )
@@ -977,7 +983,7 @@ def run_evaluation(
     else:
         deviceless = DevicelessResult(
             has_issue=False,
-            notification_id="entity_defaults_watchdog_deviceless",
+            notification_id=config.notification_prefix + "deviceless",
             notification_title="",
             notification_message="",
             drifted=[],

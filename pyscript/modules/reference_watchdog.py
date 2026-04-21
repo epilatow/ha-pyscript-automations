@@ -255,6 +255,12 @@ class Config:
     exclude_entities: list[str]
     exclude_entity_regex: str
     check_disabled_entities: bool
+    # Per-instance notification ID prefix, ending with
+    # the canonical ``__`` separator. Every notification
+    # this module mints must start with this string so
+    # the service wrapper's orphan sweep can safely scope
+    # dismissals to one instance.
+    notification_prefix: str = ""
 
 
 @dataclass(frozen=True)
@@ -1517,6 +1523,7 @@ def _build_notification_body(
 
 
 def _build_owner_result(
+    config: Config,
     owner: Owner,
     findings: list[Finding],
     stats: _OwnerStats,
@@ -1539,7 +1546,11 @@ def _build_owner_result(
     )
     suffix = hashlib.sha1(raw_id.encode("utf-8")).hexdigest()[:8]
     notification_id = (
-        "reference_watchdog_" + _sanitize_notification_id(raw_id) + "_" + suffix
+        config.notification_prefix
+        + "owner_"
+        + _sanitize_notification_id(raw_id)
+        + "_"
+        + suffix
     )
     title = ""
     message = ""
@@ -1631,7 +1642,12 @@ def _evaluate_sources(
                 tree,
                 truth_set,
             )
-            result = _build_owner_result(owner, findings, stats)
+            result = _build_owner_result(
+                config,
+                owner,
+                findings,
+                stats,
+            )
             results.append(result)
 
     return results
@@ -2061,7 +2077,7 @@ def run_evaluation(
     notifications = prepare_notifications(
         results,
         max_notifications,
-        "reference_watchdog_cap",
+        config.notification_prefix + "cap",
         "Reference watchdog: notification cap reached",
         "owners with broken references",
     )

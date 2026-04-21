@@ -155,6 +155,67 @@ def _get_active_notification_ids(
         return None
 
 
+def _notification_prefix(
+    service_label: str,
+    instance_id: str,
+) -> str:
+    """Build the canonical per-instance notification prefix.
+
+    Every persistent notification emitted by this codebase
+    must use the form ``<service_slug>_<safe_id>__<context>``.
+    This helper returns the prefix including the trailing
+    ``__`` separator so callers just append a context string
+    (e.g. ``"cap"``, ``"device_<id>"``). Using a single builder
+    guarantees the orphan sweep can reliably scope dismissals
+    to one instance.
+    """
+    service_slug = service_label.lower().replace(" ", "_")
+    safe_id = instance_id.replace(".", "_")
+    return service_slug + "_" + safe_id + "__"
+
+
+def _sweep_orphan_notifications(
+    prefix: str,
+    active_ids: "set[str] | None",
+    notifications: "list[PersistentNotification]",
+) -> None:
+    """Append dismissals for orphaned per-instance notifications.
+
+    Finds every existing persistent notification whose ID
+    starts with ``prefix`` but isn't in ``notifications``,
+    and appends an ``active=False`` entry so
+    ``_process_persistent_notifications`` dismisses it.
+
+    Orphans arise when the thing a notification tracks
+    (device, node, reference owner) is deleted between
+    runs — the current run no longer emits an ID for it,
+    so without this sweep the stale notification would
+    linger forever.
+
+    The prefix encodes both the service label and the
+    instance ID, so the sweep never touches notifications
+    owned by a different service or a different instance
+    of the same service.
+
+    ``active_ids`` is ``None`` in tests (no live hass
+    data); the sweep is a no-op in that case, which is
+    fine because there's nothing to orphan.
+    """
+    if active_ids is None:
+        return
+    current_ids = {n.notification_id for n in notifications}
+    for nid in active_ids:
+        if nid.startswith(prefix) and nid not in current_ids:
+            notifications.append(
+                PersistentNotification(  # noqa: F821
+                    active=False,
+                    notification_id=nid,
+                    title="",
+                    message="",
+                ),
+            )
+
+
 def _md_escape(s: str) -> str:
     """Escape CommonMark link-text special chars.
 
@@ -616,9 +677,13 @@ def _manage_config_error_persistent_notification(
     service_label: label used in the notification ID
       prefix.
     """
-    safe_id = instance_id.replace(".", "_")
-    prefix = service_label.lower().replace(" ", "_")
-    notif_id = prefix + "_config_error_" + safe_id
+    notif_id = (
+        _notification_prefix(
+            service_label,
+            instance_id,
+        )
+        + "config_error"
+    )
     name = _automation_name(instance_id)
 
     message = ""
@@ -973,6 +1038,10 @@ def device_watchdog(
         monitored_entity_domains=monitored_entity_domains,
         dead_threshold_seconds=dead_threshold_seconds,
         enabled_checks=enabled_checks,
+        notification_prefix=_notification_prefix(
+            "Device Watchdog",
+            instance_id,
+        ),
     )
 
     # Determine target integrations.
@@ -1070,6 +1139,11 @@ def device_watchdog(
 
     active_ids = _get_active_notification_ids(
         hass,  # noqa: F821
+    )
+    _sweep_orphan_notifications(
+        config.notification_prefix,
+        active_ids,
+        ev.notifications,
     )
     _process_persistent_notifications(
         ev.notifications,
@@ -1672,6 +1746,10 @@ def entity_defaults_watchdog(
         exclude_entity_ids=exclude_entities,
         entity_id_exclude_regex=entity_id_exclude_regex,
         entity_name_exclude_regex=(entity_name_exclude_regex),
+        notification_prefix=_notification_prefix(
+            "Entity Defaults Watchdog",
+            instance_id,
+        ),
     )
 
     # Determine target integrations.
@@ -1773,6 +1851,11 @@ def entity_defaults_watchdog(
 
     active_ids = _get_active_notification_ids(
         hass,  # noqa: F821
+    )
+    _sweep_orphan_notifications(
+        config.notification_prefix,
+        active_ids,
+        ev.notifications,
     )
     _process_persistent_notifications(
         ev.notifications,
@@ -2008,6 +2091,10 @@ def reference_watchdog(
         exclude_entities=exclude_entities,
         exclude_entity_regex=exclude_entity_regex,
         check_disabled_entities=check_disabled_entities,
+        notification_prefix=_notification_prefix(
+            "Reference Watchdog",
+            instance_id,
+        ),
     )
 
     # Build truth set on the main thread (requires HA
@@ -2039,6 +2126,11 @@ def reference_watchdog(
 
     active_ids = _get_active_notification_ids(
         hass,  # noqa: F821
+    )
+    _sweep_orphan_notifications(
+        config.notification_prefix,
+        active_ids,
+        ev.notifications,
     )
     _process_persistent_notifications(
         ev.notifications,

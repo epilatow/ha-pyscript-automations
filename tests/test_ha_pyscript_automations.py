@@ -1088,6 +1088,127 @@ class TestProcessPersistentNotifications:
         assert env.mock_pn.create_calls[0]["message"] == "body"
 
 
+class TestNotificationPrefix:
+    """The canonical per-instance notification prefix builder."""
+
+    def test_slug_and_safe_id(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_notification_prefix"]
+        assert (
+            fn("Device Watchdog", "automation.dw_main")
+            == "device_watchdog_automation_dw_main__"
+        )
+
+    def test_distinct_instances_distinct_prefixes(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_notification_prefix"]
+        a = fn("Device Watchdog", "automation.inst_a")
+        b = fn("Device Watchdog", "automation.inst_b")
+        assert a != b
+        # Same service label so both must share the service portion.
+        assert a.startswith("device_watchdog_")
+        assert b.startswith("device_watchdog_")
+
+    def test_distinct_services_distinct_prefixes(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_notification_prefix"]
+        a = fn("Device Watchdog", "automation.shared")
+        b = fn("Reference Watchdog", "automation.shared")
+        assert a != b
+
+
+class TestSweepOrphanNotifications:
+    """_sweep_orphan_notifications dismisses prefix-matching
+    notifications that aren't in the current run's output.
+
+    This is the fix for the 'device deleted, notification
+    lingers' bug: whatever the watchdog used to emit for a
+    now-gone device/node/owner no longer appears in the
+    current notifications list, so the sweep appends an
+    ``active=False`` entry that the dispatcher will dismiss.
+    """
+
+    def _make(
+        self,
+        env: _ServiceEnv,
+        *,
+        active: bool,
+        nid: str,
+    ) -> Any:
+        pn_cls = env._ns["PersistentNotification"]
+        return pn_cls(
+            active=active,
+            notification_id=nid,
+            title="",
+            message="",
+        )
+
+    def test_orphan_appended_as_dismissal(self) -> None:
+        env = _ServiceEnv()
+        fn = env._ns["_sweep_orphan_notifications"]
+        prefix = "device_watchdog_auto_a__"
+        notifications = [
+            self._make(env, active=True, nid=prefix + "device_dev1"),
+        ]
+        active_ids = {
+            prefix + "device_dev1",
+            prefix + "device_dev_gone",
+        }
+        fn(prefix, active_ids, notifications)
+        # dev1 stays; dev_gone added as dismissal.
+        gone = [n for n in notifications if "dev_gone" in n.notification_id]
+        assert len(gone) == 1
+        assert gone[0].active is False
+
+    def test_different_instance_untouched(self) -> None:
+        """Sweep for instance A must not touch instance B's IDs."""
+        env = _ServiceEnv()
+        fn = env._ns["_sweep_orphan_notifications"]
+        prefix_a = "device_watchdog_auto_a__"
+        notifications = [
+            self._make(env, active=True, nid=prefix_a + "device_dev1"),
+        ]
+        active_ids = {
+            prefix_a + "device_dev1",
+            "device_watchdog_auto_b__device_dev2",
+        }
+        fn(prefix_a, active_ids, notifications)
+        # B's id must not appear in notifications at all.
+        assert all("auto_b" not in n.notification_id for n in notifications)
+
+    def test_different_service_untouched(self) -> None:
+        """Sweep for one service must not touch another's IDs."""
+        env = _ServiceEnv()
+        fn = env._ns["_sweep_orphan_notifications"]
+        dw_prefix = "device_watchdog_auto_x__"
+        notifications: list[Any] = []
+        active_ids = {
+            "reference_watchdog_auto_x__owner_foo",
+            "entity_defaults_watchdog_auto_x__device_dev1",
+        }
+        fn(dw_prefix, active_ids, notifications)
+        assert notifications == []
+
+    def test_none_active_ids_is_noop(self) -> None:
+        """In tests hass.data isn't populated; sweep must be safe."""
+        env = _ServiceEnv()
+        fn = env._ns["_sweep_orphan_notifications"]
+        notifications: list[Any] = []
+        fn("device_watchdog_auto_a__", None, notifications)
+        assert notifications == []
+
+    def test_current_ids_not_reemitted(self) -> None:
+        """An ID already in the current list stays as-is (no
+        duplicate dismissal appended)."""
+        env = _ServiceEnv()
+        fn = env._ns["_sweep_orphan_notifications"]
+        prefix = "device_watchdog_auto_a__"
+        n = self._make(env, active=True, nid=prefix + "device_dev1")
+        notifications = [n]
+        fn(prefix, {prefix + "device_dev1"}, notifications)
+        assert notifications == [n]
+
+
 class TestStscEntityValidation:
     def test_missing_entity_creates_notification(
         self,
@@ -1675,7 +1796,7 @@ def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
 class TestDeviceWatchdogHassDetection:
     """Test hass_is_global detection."""
 
-    _NOTIF_ID = "device_watchdog_config_error_auto_dw_test"
+    _NOTIF_ID = "device_watchdog_auto_dw_test__config_error"
 
     def test_missing_hass_notifies_and_skips(
         self,
@@ -1819,7 +1940,9 @@ class TestDeviceWatchdogEnabledChecks:
         device_creates = [
             c
             for c in env.mock_pn.create_calls
-            if c["notification_id"].startswith("device_watchdog_dev")
+            if c["notification_id"].startswith(
+                "device_watchdog_auto_dw_test__device_",
+            )
         ]
         assert device_creates == []
 
@@ -1844,7 +1967,8 @@ class TestDeviceWatchdogEnabledChecks:
             stale_creates = [
                 c
                 for c in env.mock_pn.create_calls
-                if c["notification_id"] == "device_watchdog_dev1"
+                if c["notification_id"]
+                == "device_watchdog_auto_dw_test__device_dev1"
             ]
             assert len(stale_creates) == 1
             assert "No entity state report" in stale_creates[0]["message"]
@@ -1874,10 +1998,12 @@ class TestDeviceWatchdogEnabledChecks:
         creates = {
             c["notification_id"]: c
             for c in env.mock_pn.create_calls
-            if c["notification_id"].startswith("device_watchdog_dev")
+            if c["notification_id"].startswith(
+                "device_watchdog_auto_dw_test__device_",
+            )
         }
-        assert "device_watchdog_dev_s" in creates
-        assert "device_watchdog_dev_u" not in creates
+        assert "device_watchdog_auto_dw_test__device_dev_s" in creates
+        assert "device_watchdog_auto_dw_test__device_dev_u" not in creates
 
     def test_unavailable_only_ignores_staleness(self) -> None:
         env = _WatchdogEnv()
@@ -1904,10 +2030,12 @@ class TestDeviceWatchdogEnabledChecks:
         creates = {
             c["notification_id"]: c
             for c in env.mock_pn.create_calls
-            if c["notification_id"].startswith("device_watchdog_dev")
+            if c["notification_id"].startswith(
+                "device_watchdog_auto_dw_test__device_",
+            )
         }
-        assert "device_watchdog_dev_u" in creates
-        assert "device_watchdog_dev_s" not in creates
+        assert "device_watchdog_auto_dw_test__device_dev_u" in creates
+        assert "device_watchdog_auto_dw_test__device_dev_s" not in creates
 
 
 class TestDeviceWatchdogIntervalGating:
@@ -2035,7 +2163,10 @@ class TestDeviceWatchdogDiscovery:
         )
         # Should dismiss (healthy device)
         assert len(dismissals) == 1
-        assert dismissals[0]["notification_id"] == "device_watchdog_dev1"
+        assert (
+            dismissals[0]["notification_id"]
+            == "device_watchdog_auto_dw_test__device_dev1"
+        )
 
     def test_deduplicates_devices(self) -> None:
         env = _WatchdogEnv()
@@ -2102,7 +2233,9 @@ class TestDeviceWatchdogNotifications:
         env.call()
         assert len(env.mock_pn.create_calls) == 1
         call = env.mock_pn.create_calls[0]
-        assert call["notification_id"] == ("device_watchdog_dev1")
+        assert call["notification_id"] == (
+            "device_watchdog_auto_dw_test__device_dev1"
+        )
         assert "Bad Device" in call["title"]
 
     def test_dismisses_for_healthy(self) -> None:
@@ -2121,7 +2254,10 @@ class TestDeviceWatchdogNotifications:
             and "_cap" not in c["notification_id"]
         ]
         assert len(device_dismissals) == 1
-        assert device_dismissals[0]["notification_id"] == "device_watchdog_dev1"
+        assert (
+            device_dismissals[0]["notification_id"]
+            == "device_watchdog_auto_dw_test__device_dev1"
+        )
 
     def test_creates_for_stale(self) -> None:
         old = T0_UTC - timedelta(hours=25)
@@ -2234,7 +2370,7 @@ class TestDeviceWatchdogDiagnostics:
                 c
                 for c in env.mock_pn.create_calls
                 if c["notification_id"].startswith(
-                    "dw_diag_",
+                    "device_watchdog_auto_dw_test__diag_",
                 )
             ]
             assert len(diag_creates) == 1
@@ -2273,14 +2409,14 @@ class TestDeviceWatchdogDiagnostics:
                 c
                 for c in env.mock_pn.create_calls
                 if c["notification_id"].startswith(
-                    "dw_diag_",
+                    "device_watchdog_auto_dw_test__diag_",
                 )
             ]
             diag_dismissals = [
                 c
                 for c in env.mock_pn.dismiss_calls
                 if c["notification_id"].startswith(
-                    "dw_diag_",
+                    "device_watchdog_auto_dw_test__diag_",
                 )
             ]
             assert diag_creates == []
@@ -2304,7 +2440,9 @@ class TestDeviceWatchdogDiagnostics:
         diag_notifs = [
             c
             for c in (env.mock_pn.create_calls + env.mock_pn.dismiss_calls)
-            if c["notification_id"].startswith("dw_diag_")
+            if c["notification_id"].startswith(
+                "device_watchdog_auto_dw_test__diag_",
+            )
         ]
         assert diag_notifs == []
 
@@ -3160,7 +3298,7 @@ class TestEdwHassDetection:
         call = env.mock_pn.create_calls[0]
         assert "hass_is_global" in call["message"]
         assert call["notification_id"] == (
-            "entity_defaults_watchdog_config_error_auto_edw_test"
+            "entity_defaults_watchdog_auto_edw_test__config_error"
         )
 
     def test_present_hass_no_config_error(
@@ -3244,7 +3382,10 @@ class TestEdwDevicelessE2E:
         )
         env.call()
         create_ids = [c["notification_id"] for c in env.mock_pn.create_calls]
-        assert "entity_defaults_watchdog_deviceless" not in create_ids
+        assert (
+            "entity_defaults_watchdog_auto_edw_test__deviceless"
+            not in create_ids
+        )
 
     def test_rename_drift_creates_notification(self) -> None:
         env = _EdwEnv()
@@ -3257,7 +3398,7 @@ class TestEdwDevicelessE2E:
         env.call()
         call = self._find(
             env.mock_pn.create_calls,
-            "entity_defaults_watchdog_deviceless",
+            "entity_defaults_watchdog_auto_edw_test__deviceless",
         )
         assert "deviceless entity drift" in call["title"]
         assert "`automation.old_name`" in call["message"]
@@ -3276,11 +3417,17 @@ class TestEdwDevicelessE2E:
         # Deviceless notification should be dismissed, not
         # created, because the check is disabled.
         created_ids = [c["notification_id"] for c in env.mock_pn.create_calls]
-        assert "entity_defaults_watchdog_deviceless" not in created_ids
+        assert (
+            "entity_defaults_watchdog_auto_edw_test__deviceless"
+            not in created_ids
+        )
         dismissed_ids = [
             c["notification_id"] for c in env.mock_pn.dismiss_calls
         ]
-        assert "entity_defaults_watchdog_deviceless" in dismissed_ids
+        assert (
+            "entity_defaults_watchdog_auto_edw_test__deviceless"
+            in dismissed_ids
+        )
 
     def test_stats_written_to_state(self) -> None:
         env = _EdwEnv()
@@ -3315,7 +3462,10 @@ class TestEdwDevicelessE2E:
         )
         env.call(exclude_entities_raw=["automation.old"])
         created_ids = [c["notification_id"] for c in env.mock_pn.create_calls]
-        assert "entity_defaults_watchdog_deviceless" not in created_ids
+        assert (
+            "entity_defaults_watchdog_auto_edw_test__deviceless"
+            not in created_ids
+        )
 
 
 class TestEdwDriftChecksValidation:
@@ -3382,7 +3532,8 @@ class TestEdwDriftChecksValidation:
         device_creates = [
             c
             for c in env.mock_pn.create_calls
-            if c["notification_id"] == "entity_defaults_watchdog_dev1"
+            if c["notification_id"]
+            == "entity_defaults_watchdog_auto_edw_test__device_dev1"
         ]
         assert len(device_creates) == 1
         msg = device_creates[0]["message"]
@@ -3713,7 +3864,9 @@ class TestEdwNotifications:
         env.call()
         assert len(env.mock_pn.create_calls) == 1
         call = env.mock_pn.create_calls[0]
-        assert call["notification_id"] == ("entity_defaults_watchdog_dev1")
+        assert call["notification_id"] == (
+            "entity_defaults_watchdog_auto_edw_test__device_dev1"
+        )
         assert "Drifted Dev" in call["title"]
 
     def test_duplicate_device_names(self) -> None:
@@ -3773,7 +3926,7 @@ class TestEdwNotifications:
         assert len(device_dismisses) == 1
         assert (
             device_dismisses[0]["notification_id"]
-            == "entity_defaults_watchdog_dev1"
+            == "entity_defaults_watchdog_auto_edw_test__device_dev1"
         )
 
 

@@ -54,6 +54,7 @@ def _config(**overrides: object) -> Config:
         "monitored_entity_domains": [],
         "dead_threshold_seconds": 86400,
         "enabled_checks": CHECK_ALL,
+        "notification_prefix": "device_watchdog_test__",
     }
     defaults.update(overrides)
     return Config(**defaults)  # type: ignore[arg-type]
@@ -349,7 +350,7 @@ class TestEvaluateDevice:
         cfg = _config()
         device = _device(device_id="abc123")
         result = _evaluate_device(cfg, device, T0)
-        assert result.notification_id == ("device_watchdog_abc123")
+        assert result.notification_id == ("device_watchdog_test__device_abc123")
 
     def test_notification_title(self) -> None:
         cfg = _config()
@@ -484,9 +485,9 @@ class TestRunEvaluationDiagnosticsGate:
         diag_ids = [
             n.notification_id
             for n in ev.notifications
-            if n.notification_id.startswith("dw_diag_")
+            if "__diag_" in n.notification_id
         ]
-        assert diag_ids == ["dw_diag_d1"]
+        assert diag_ids == ["device_watchdog_test__diag_d1"]
 
     def test_diagnostics_disabled_skips_diag_notifications(
         self,
@@ -506,7 +507,7 @@ class TestRunEvaluationDiagnosticsGate:
         diag_ids = [
             n.notification_id
             for n in ev.notifications
-            if n.notification_id.startswith("dw_diag_")
+            if "__diag_" in n.notification_id
         ]
         assert diag_ids == []
 
@@ -829,7 +830,7 @@ class TestEvaluateDiagnostics:
                 ),
             ],
         )
-        results = evaluate_diagnostics([device])
+        results = evaluate_diagnostics(_config(), [device])
         assert len(results) == 1
         assert results[0].active is True
         assert "Last seen" in results[0].message
@@ -846,7 +847,7 @@ class TestEvaluateDiagnostics:
                 ),
             ],
         )
-        results = evaluate_diagnostics([device])
+        results = evaluate_diagnostics(_config(), [device])
         assert len(results) == 1
         assert results[0].active is False
 
@@ -862,8 +863,10 @@ class TestEvaluateDiagnostics:
                 ),
             ],
         )
-        results = evaluate_diagnostics([device])
-        assert results[0].notification_id == ("dw_diag_abc123")
+        results = evaluate_diagnostics(_config(), [device])
+        assert results[0].notification_id == (
+            "device_watchdog_test__diag_abc123"
+        )
 
     def test_returns_persistent_notification(
         self,
@@ -876,7 +879,7 @@ class TestEvaluateDiagnostics:
                 ),
             ],
         )
-        results = evaluate_diagnostics([device])
+        results = evaluate_diagnostics(_config(), [device])
         assert isinstance(
             results[0],
             PersistentNotification,
@@ -888,7 +891,7 @@ class TestEvaluateDiagnostics:
         device = self._diag_device(
             integrations=["unknown_integration"],
         )
-        results = evaluate_diagnostics([device])
+        results = evaluate_diagnostics(_config(), [device])
         assert results == []
 
     def test_mixed_known_and_unknown_integrations(
@@ -906,9 +909,68 @@ class TestEvaluateDiagnostics:
                 ),
             ],
         )
-        results = evaluate_diagnostics([device])
+        results = evaluate_diagnostics(_config(), [device])
         assert len(results) == 1
         assert results[0].active is True
+
+
+class TestNotificationPrefixIsolation:
+    """Two configs with different prefixes produce disjoint IDs.
+
+    The orphan sweep relies on this invariant: no notification
+    from instance A should ever collide with one from instance B.
+    """
+
+    def _dev(self, device_id: str) -> DeviceInfo:
+        ie: dict[str, set[str]] = {"zwave_js": set()}
+        return DeviceInfo(
+            de=DeviceEntry(
+                id=device_id,
+                url="/config/devices/device/" + device_id,
+                name=device_id,
+                default_name=device_id,
+                integration_entities=ie,
+            ),
+            registry_entries=[
+                RegistryEntry(
+                    entity_id="sensor." + device_id,
+                    original_name="Last seen",
+                    platform="zwave_js",
+                    entity_category="diagnostic",
+                    disabled=True,
+                ),
+            ],
+        )
+
+    def test_device_ids_include_prefix(self) -> None:
+        cfg_a = _config(
+            notification_prefix="device_watchdog_automation_a__",
+        )
+        cfg_b = _config(
+            notification_prefix="device_watchdog_automation_b__",
+        )
+        dev = self._dev("shared_device")
+        res_a = _evaluate_device(cfg_a, dev, T0)
+        res_b = _evaluate_device(cfg_b, dev, T0)
+        assert res_a.notification_id != res_b.notification_id
+        assert res_a.notification_id.startswith(
+            "device_watchdog_automation_a__"
+        )
+        assert res_b.notification_id.startswith(
+            "device_watchdog_automation_b__"
+        )
+
+    def test_diag_ids_include_prefix(self) -> None:
+        cfg_a = _config(
+            notification_prefix="device_watchdog_automation_a__",
+        )
+        cfg_b = _config(
+            notification_prefix="device_watchdog_automation_b__",
+        )
+        dev = self._dev("shared_device")
+        ids_a = {n.notification_id for n in evaluate_diagnostics(cfg_a, [dev])}
+        ids_b = {n.notification_id for n in evaluate_diagnostics(cfg_b, [dev])}
+        assert ids_a.isdisjoint(ids_b)
 
 
 class TestCodeQuality(CodeQualityBase):

@@ -74,6 +74,7 @@ def _config(**overrides: object) -> Config:
         "exclude_entities": [],
         "exclude_entity_regex": "",
         "check_disabled_entities": True,
+        "notification_prefix": "reference_watchdog_test__",
     }
     defaults.update(overrides)
     return Config(**defaults)  # type: ignore[arg-type]
@@ -1470,12 +1471,12 @@ class TestBuildOwnerResult:
             block_path="config-block[0]",
             friendly_name="Clean",
         )
-        result = _build_owner_result(owner, [], _OwnerStats())
+        result = _build_owner_result(_config(), owner, [], _OwnerStats())
         assert result.has_issue is False
         assert result.notification_title == ""
         assert result.notification_message == ""
         assert result.notification_id.startswith(
-            "reference_watchdog_",
+            "reference_watchdog_test__owner_",
         )
 
     def test_with_findings_has_title_and_message(self) -> None:
@@ -1499,7 +1500,7 @@ class TestBuildOwnerResult:
             refs_structural=1,
             refs_broken=1,
         )
-        result = _build_owner_result(owner, findings, stats)
+        result = _build_owner_result(_config(), owner, findings, stats)
         assert result.has_issue is True
         assert result.notification_title == ("Reference watchdog: Broken Auto")
         assert "sensor.dead" in result.notification_message
@@ -1512,7 +1513,7 @@ class TestBuildOwnerResult:
             integration="group",
             friendly_name="Downstairs Lights",
         )
-        result = _build_owner_result(owner, [], _OwnerStats())
+        result = _build_owner_result(_config(), owner, [], _OwnerStats())
         # Colons, spaces, dots replaced with underscores.
         # The 8-char hex hash suffix that guards against
         # sanitize-collisions is still lowercase a-f0-9
@@ -1536,8 +1537,8 @@ class TestBuildOwnerResult:
             block_path="config-block[0]",
             friendly_name="Living-Room",
         )
-        ra = _build_owner_result(a, [], _OwnerStats())
-        rb = _build_owner_result(b, [], _OwnerStats())
+        ra = _build_owner_result(_config(), a, [], _OwnerStats())
+        rb = _build_owner_result(_config(), b, [], _OwnerStats())
         assert ra.notification_id != rb.notification_id
 
     def test_stats_propagated(self) -> None:
@@ -1552,7 +1553,7 @@ class TestBuildOwnerResult:
             refs_broken=1,
             refs_service_skipped=4,
         )
-        result = _build_owner_result(owner, [], stats)
+        result = _build_owner_result(_config(), owner, [], stats)
         assert result.refs_total == 10
         assert result.refs_structural == 5
         assert result.refs_jinja == 3
