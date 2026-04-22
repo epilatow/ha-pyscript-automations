@@ -1191,18 +1191,11 @@ def device_watchdog(
         max_notifications,
     )
 
-    active_ids = _get_active_notification_ids(
+    _sweep_and_process_notifications(
         hass,  # noqa: F821
-    )
-    _sweep_orphan_notifications(
-        config.notification_prefix,
-        active_ids,
-        ev.notifications,
-    )
-    _process_persistent_notifications(
         ev.notifications,
         instance_id,
-        active_ids,
+        config.notification_prefix,
     )
 
     elapsed = time.monotonic() - start_time
@@ -1911,18 +1904,11 @@ def entity_defaults_watchdog(
         max_notifications,
     )
 
-    active_ids = _get_active_notification_ids(
+    _sweep_and_process_notifications(
         hass,  # noqa: F821
-    )
-    _sweep_orphan_notifications(
-        config.notification_prefix,
-        active_ids,
-        ev.notifications,
-    )
-    _process_persistent_notifications(
         ev.notifications,
         instance_id,
-        active_ids,
+        config.notification_prefix,
     )
 
     elapsed = time.monotonic() - start_time
@@ -2190,18 +2176,11 @@ def reference_watchdog(
         max_notifications,
     )
 
-    active_ids = _get_active_notification_ids(
+    _sweep_and_process_notifications(
         hass,  # noqa: F821
-    )
-    _sweep_orphan_notifications(
-        config.notification_prefix,
-        active_ids,
-        ev.notifications,
-    )
-    _process_persistent_notifications(
         ev.notifications,
         instance_id,
-        active_ids,
+        config.notification_prefix,
     )
 
     # -- Stats --------------------------------------
