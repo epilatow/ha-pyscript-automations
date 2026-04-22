@@ -51,9 +51,12 @@ blueprint:
       name: Auto-Off Disabling Entities (optional)
       description: >
         When ANY of these entities is "on", auto-off is
-        suppressed. Use this for full manual control
-        (e.g., when a room is occupied and you don't
-        want lights turning off automatically).
+        suppressed: any pending timer is cleared, and a
+        fresh countdown starts when all return to "off".
+        Use for manual occupancy locks (e.g., an
+        "occupied" input_boolean) or motion keep-alive
+        (e.g., a motion sensor that resets the timer
+        while active).
       default: []
       selector:
         entity:

@@ -91,6 +91,33 @@ Result:
 - Night + bedroom not occupied: motion turns on the light
 - Night + bedroom occupied: motion is suppressed
 
+### Example: Motion Keep-Alive (no auto turn-on)
+
+A device you turn on manually, but you want auto-off to
+pause while a room is occupied and resume its countdown
+after motion clears. Configure the motion sensor as an
+auto-off disabling entity (not a trigger entity), so it
+resets the timer without also turning the device on:
+
+- **Controlled entities**: `switch.office_fan`
+- **Auto-off delay**: 10 minutes
+- **Auto-off disabling entities**: `binary_sensor.office_motion`
+- (No trigger entities)
+
+Result:
+- Manual on while motion is active: timer stays paused
+- Manual on while motion is inactive: timer starts
+  immediately
+- Motion becomes active mid-countdown: timer is cleared
+- Motion clears: fresh 10-minute countdown starts
+- Motion returns mid-countdown: timer is cleared again,
+  then restarts when motion next clears
+
+This pattern uses `auto_off_disabling_entities` as a
+keep-alive: while any listed entity is "on", auto-off is
+held off; the timer (re)starts when they all return to
+"off".
+
 ## Developer notes
 
 ### Entity attributes
