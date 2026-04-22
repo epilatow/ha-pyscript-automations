@@ -13,6 +13,13 @@ where available, and repair hints when the source can
 only be edited by hand. Notifications are cleared
 automatically when the broken references are fixed.
 
+Also detects *source orphans* -- entity-registry entries
+whose backing YAML block or UI-helper record has been
+removed or renamed, leaving the registry entry behind.
+Those are surfaced in a single summary notification with
+links to each orphan's integration-filtered entities
+page for deletion.
+
 ## Features
 
 - Scans automations, scripts, template helpers, config
@@ -32,6 +39,10 @@ automatically when the broken references are fixed.
   negative truth set to eliminate false positives
 - Optional detection of references to disabled-but-
   existing entities (toggleable from the blueprint)
+- Detection of **source orphans** -- registry entries
+  whose backing YAML or UI-helper record has been
+  removed -- with a single summary notification linking
+  each entry to its filtered entities page for deletion
 - Unified entity exclusion list that applies to both
   sides (source owner and target value)
 - Source integration exclusion for bulk-silencing of
@@ -64,14 +75,13 @@ pyscript:
 
 | Parameter | Description |
 |---|---|
-| Scan sources | Source types to scan. Leave empty to scan all. Dedicated types: `automations`, `scripts`, `template`, `customize`, `config_entries`, `lovelace`. The `generic_yaml` catch-all handles every other YAML file reachable via `!include` directives from `configuration.yaml`. |
 | Exclude paths | File-path globs to skip. Matched against the source's relative path (e.g. `plants.yaml`, `.storage/lovelace.old_dashboard`). Use this for legacy-YAML integrations not reachable by integration exclusion. |
 | Exclude integrations | Integrations to skip. Matches the `Integration:` line shown at the top of each notification -- anything rendered there can be silenced here. Built-in adapters (`automation`, `script`, `template`, `customize`, `lovelace`) are listed as quick-picks in the blueprint UI; config-entry integration domains (e.g. `group`, `homekit`, or whatever is installed in HA) can be added as custom values. Legacy YAML integrations that don't register entities (e.g. `plant`) have no `Integration:` line and **aren't filterable here** -- use `Exclude paths` for those. |
-| Exclude entities | Entities to exclude, applied symmetrically to source and target sides. |
-| Exclude entity regex | Multi-line regex, matched against entity and device reference values, applied symmetrically to source and target sides. |
+| Exclude entities | Entities to exclude, applied symmetrically to source and target sides. Also silences source-orphan findings. |
+| Exclude entity regex | Multi-line regex, matched against entity and device reference values, applied symmetrically to source and target sides. Also silences source-orphan findings. |
 | Check disabled entities | When enabled, references to entities that exist in the registry but are disabled are reported as "Disabled-but-existing references". |
 | Check interval (minutes) | Minutes between reference-integrity evaluations (default 60 -- reference scans do more file I/O than the other watchdogs). |
-| Max source notifications | Per-owner notification cap. 0 = unlimited. |
+| Max source notifications | Per-owner notification cap. 0 = unlimited. The source-orphan summary is always emitted separately and is not subject to this cap. |
 | Debug logging | Log a warning-level stat line on every evaluation. |
 
 See the blueprint UI for default values.
@@ -173,6 +183,59 @@ To silence plant findings:
   -- narrower, keeps scanning the file but suppresses
   specific broken sensor prefixes
 
+### Source orphans
+
+A *source orphan* is a registry entry whose backing
+YAML block (or UI-helper storage record) has been
+removed or renamed, leaving the registry entry behind.
+These entries are invisible to the broken-reference
+scan because they still resolve -- the dead entity is
+still in `entity_ids` -- but nothing currently creates
+them.
+
+The watchdog emits a single summary notification titled
+"Reference watchdog: source orphans (N)". Orphans are
+grouped by `platform` (e.g. `utility_meter`,
+`input_boolean`, `automation`); larger groups are shown
+first. Disabled entities are tagged *(disabled)* next
+to the link.
+
+Each orphan links to
+`/config/entities?domain=<platform>` -- HA's entities
+page filtered to that integration's rows. Find your
+orphan in the narrowed list, click it to open the
+settings dialog, and click Delete.
+
+HA's entities page doesn't support filtering to a
+single `entity_id` via URL params (`?search=` isn't
+wired up) and there's no direct entity-settings URL,
+so the integration filter is the closest one-click
+landing available today.
+
+The detector restricts to registry entries with
+`config_entry_id = null` -- entries managed via the HA
+config flow are never flagged. The `pyscript` platform
+is excluded unconditionally because pyscript-created
+entities live in runtime state and don't have a
+file-based definer.
+
+To silence specific findings:
+
+| Want to silence | Use |
+|---|---|
+| A single orphan you want to keep | `exclude_entities` |
+| A family of orphans matching a pattern | `exclude_entity_regex` |
+
+There's no per-platform silencing toggle -- the full
+set of known UI-helper storage files
+(`input_boolean`, `input_number`, `input_text`,
+`input_select`, `input_datetime`, `input_button`,
+`counter`, `timer`, `person`, `zone`, `schedule`,
+and the less-common `automation` / `script` /
+`scene` / `group` storage records) is loaded
+unconditionally on every run. Missing files are
+silently skipped.
+
 ### Notification panel ordering
 
 The order of notifications in the HA notification panel
@@ -259,6 +322,8 @@ to find it.
 | `refs_jinja` | References found via the Jinja AST extraction pass |
 | `refs_sniff` | References found via the string sniff pass |
 | `refs_service_skipped` | Sniff hits dropped by the service-name negative truth set |
+| `source_orphan_count` | Source orphans detected this run |
+| `source_orphan_candidates` | Registry entries eligible for orphan evaluation (`config_entry_id=null`, platform not in the runtime-excluded list). `source_orphan_count` is always a subset. |
 
 **Invariants:**
 
@@ -268,6 +333,115 @@ to find it.
 - `refs_total = refs_structural + refs_jinja + refs_sniff`
   (service-skipped sniff hits are not counted)
 - `paths_included + paths_excluded = paths considered`
+
+### Source-orphan detection
+
+The detector runs after the main reference scan and
+reuses the parsed YAML tree already produced during
+discovery from `configuration.yaml`. An entity is
+classified as a source orphan when:
+
+1. Its registry entry has `config_entry_id = null`.
+2. Its `platform` is not in the runtime-excluded set
+   (`pyscript`).
+3. Neither its object_id (portion after the dot) nor
+   its unique_id appears as a **lowercased string**
+   in the platform-appropriate **definer pool**.
+
+The definer pool is platform-scoped so that consumer-
+side mentions can't hide orphans:
+
+| Platform | Pool |
+|---|---|
+| `automation` | `automations.yaml` + `.storage/automation` |
+| `script` | `scripts.yaml` + `.storage/script` |
+| `template` | `template.yaml` + generic YAML |
+| Everything else | Generic YAML + matching `.storage/<helper>` file |
+
+Where "generic YAML" is every YAML file reachable from
+`configuration.yaml` via `!include` *except*
+`customize.yaml`, `automations.yaml`, `scripts.yaml`,
+and `template.yaml` (which have dedicated pools above).
+`customize.yaml` is never a definer -- it's an overlay,
+and treating it as a definer would mask orphans that
+are still being customized.
+
+The `.storage/<helper>` file set is a closed list of
+known UI-helper storage files. Adding a new HA-core
+helper that uses a `.storage/<name>` file means adding
+its filename to `_STORAGE_HELPER_DEFINER_FILES` in
+`pyscript/modules/reference_watchdog.py`. A missing
+entry produces systematic false positives for that
+platform; an extra entry that doesn't exist on a given
+host is a no-op.
+
+Each pool is populated by walking the **parsed** YAML
+or JSON tree of every contributing file and harvesting:
+
+- every mapping **key** (strings only, lowercased)
+- every **value** whose key is in `_DEFINER_ID_KEYS`
+  (`id`, `unique_id`, `object_id`)
+
+Walking the parsed tree -- instead of tokenizing raw
+text -- is deliberate. Comments are already stripped
+by the YAML parser, so a stale `# old id:` comment in
+an unrelated file cannot contribute to the pool.
+Free-text fields like `description:`, `alias:`, or
+`friendly_name:` are also ignored, because their keys
+are not in `_DEFINER_ID_KEYS`. That stops a lingering
+"old name" reference in an automation `description`
+from falsely marking the dead entity as defined.
+
+Membership is exact-string, not substring. The YAML
+key `garage_central_heater_energy_daily` is harvested
+as a single string; looking up the shorter object_id
+`central_heater_energy_daily` returns no hit, so the
+orphan (left over from a rename) is correctly flagged.
+
+Identifier values are also kept verbatim, so non-slug
+unique_ids (e.g. MAC-style `aa:bb:cc:dd:ee:ff` stored
+as `"id": "aa:bb:cc:dd:ee:ff"` in `.storage/person`)
+are matched directly without being split into tokens.
+
+This works reliably because every HA platform that
+stores definitions in YAML or `.storage` lays the
+identifier down as either a mapping key or an
+identifier-field value:
+
+- `utility_meter` YAML uses the top-level dict key as
+  the object_id (and as a prefix of the unique_id --
+  e.g. object_id `central_heater_energy_daily`,
+  unique_id `central_heater_energy_daily_single_tariff`).
+  The YAML key is harvested.
+- `input_*`, `counter`, `timer`, `person` UI helpers
+  store `"id": "<value>"` in their `.storage/<helper>`
+  file, and that value equals the registry unique_id.
+- `template` entities have their `unique_id` written
+  verbatim in YAML, and the `name:` slug equals the
+  object_id (and the YAML dict key structure includes
+  the object_id for legacy-style templates).
+- `automation` entries in `automations.yaml` have
+  `id: <value>` matching the registry unique_id.
+
+There is no toggle to disable source-orphan detection
+globally. Silence noisy entries via `exclude_entities`
+(exact match) or `exclude_entity_regex` (pattern); both
+inputs apply symmetrically to broken references and
+source orphans.
+
+**Known limitations:**
+
+- Object_ids derived by slugifying a scene/group
+  `name:` (not written verbatim in the YAML) are not
+  harvested. A `scene:` block without an explicit
+  `id:` will appear as a false positive. Fix by giving
+  the scene an explicit `id:` (recommended), or by
+  adding the entity to `exclude_entities`.
+- An integration that lays its definer identifier
+  down under a key other than `id`, `unique_id`, or
+  `object_id` will false-positive. None of the core HA
+  integrations do this today, but custom integrations
+  might.
 
 ### Debug logging
 
@@ -282,8 +456,11 @@ Example output for an automation named
 ```
 [RW: Reference Watchdog] owners=338 with_issues=43
   findings=85 refs=819 (struct=641 jinja=59 sniff=119
-  svc_skipped=13)
+  svc_skipped=13) orphans=9/184
 ```
+
+`orphans=9/184` means 9 of 184 orphan-eligible registry
+entries were flagged as source orphans.
 
 ### Known limitations
 

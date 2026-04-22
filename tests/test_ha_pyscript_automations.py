@@ -5047,7 +5047,6 @@ def _rw_call(env: _WatchdogEnv, **overrides: Any) -> None:
     defaults: dict[str, Any] = {
         "instance_id": "auto.rw_test",
         "trigger_platform_raw": "state",
-        "scan_sources_raw": [],
         "exclude_paths_raw": "",
         "exclude_integrations_raw": [],
         "exclude_entities_raw": [],

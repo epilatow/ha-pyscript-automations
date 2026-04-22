@@ -34,19 +34,24 @@ from reference_watchdog import (  # noqa: E402
     Ref,
     RegistryEntry,
     SourceInput,
+    SourceOrphan,
     TruthSet,
     _build_notification_body,
     _build_owner_result,
+    _build_source_orphans_notification,
     _collect_findings,
     _discover_yaml_sources,
     _enumerate_json_sources,
+    _enumerate_storage_helpers,
     _evaluate_sources,
     _extract_includes_from_text,
     _extract_refs_from_template,
+    _find_source_orphans,
     _is_entity_excluded,
     _is_integration_excluded,
     _is_path_excluded,
     _looks_like_entity_id,
+    _orphan_url,
     _owner_display_name,
     _OwnerStats,
     _read_json_file,
@@ -59,6 +64,7 @@ from reference_watchdog import (  # noqa: E402
     _scan_lovelace,
     _scan_scripts,
     _scan_template,
+    _source_orphans_notification_id,
     _walk_tree,
     run_evaluation,
 )
@@ -68,7 +74,6 @@ from reference_watchdog import (  # noqa: E402
 
 def _config(**overrides: object) -> Config:
     defaults: dict[str, object] = {
-        "scan_sources": [],
         "exclude_paths": [],
         "exclude_integrations": [],
         "exclude_entities": [],
@@ -1859,7 +1864,7 @@ class TestEnumerateJsonSources:
         (storage / "core.config_entries").write_text(
             '{"data": {"entries": []}}'
         )
-        result = _enumerate_json_sources(str(tmp_path), [])
+        result = _enumerate_json_sources(str(tmp_path))
         paths = [s.path for s in result]
         assert ".storage/core.config_entries" in paths
 
@@ -1874,32 +1879,14 @@ class TestEnumerateJsonSources:
             '{"data": {"items": [{"id": "my_dash",'
             ' "title": "My Dash", "url_path": "my-dash"}]}}'
         )
-        result = _enumerate_json_sources(str(tmp_path), [])
+        result = _enumerate_json_sources(str(tmp_path))
         lv = [s for s in result if s.source_type == "lovelace"]
         assert len(lv) == 1
         assert lv[0].extra["title"] == "My Dash"
         assert lv[0].extra["url_path"] == "/my-dash"
 
-    def test_respects_scan_sources_filter(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        storage = tmp_path / ".storage"
-        storage.mkdir()
-        (storage / "core.config_entries").write_text(
-            '{"data": {"entries": []}}'
-        )
-        (storage / "lovelace.dash").write_text('{"data": {"config": {}}}')
-        result = _enumerate_json_sources(
-            str(tmp_path),
-            ["config_entries"],
-        )
-        types = [s.source_type for s in result]
-        assert "config_entries" in types
-        assert "lovelace" not in types
-
     def test_no_storage_dir(self, tmp_path: Path) -> None:
-        result = _enumerate_json_sources(str(tmp_path), [])
+        result = _enumerate_json_sources(str(tmp_path))
         assert result == []
 
 
@@ -1943,7 +1930,6 @@ class TestRunEvaluation:
         ev = run_evaluation(
             str(tmp_path),
             _config(),
-            [],
             _ts(),
             [],
             0,
@@ -1959,70 +1945,564 @@ class TestRunEvaluation:
         )
         assert ev.broken_entity_count == 1
 
-    def test_skips_yaml_discovery_when_only_json_selected(
-        self,
-        tmp_path: Path,
-        monkeypatch: "pytest.MonkeyPatch",
-    ) -> None:
-        # When scan_sources contains only JSON-backed
-        # source types, the YAML discovery walk should
-        # not run.
-        self._write_config(tmp_path)
+
+class TestFindSourceOrphans:
+    def test_utility_meter_defined_in_generic_yaml(self) -> None:
+        # YAML-only registry entry (config_entry_id=None)
+        # whose object_id appears as a dict key in a
+        # generic YAML file is not an orphan.
+        reg = _reg_entry(
+            "sensor.central_heater_energy_daily",
+            platform="utility_meter",
+            unique_id="central_heater_energy_daily_single_tariff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [
+            (
+                "utility_meters.yaml",
+                {
+                    "central_heater_energy_daily": {
+                        "source": "sensor.central_heater_energy",
+                        "cycle": "daily",
+                    },
+                },
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert orphans == []
+
+    def test_prefix_match_does_not_mask_orphan(self) -> None:
+        # Regression: naive substring match wrongly
+        # considered sensor.central_heater_energy_daily
+        # "defined" because its object_id was a suffix of
+        # a longer YAML key (garage_central_heater_energy_daily).
+        # Exact-string matching fixes this.
+        reg = _reg_entry(
+            "sensor.central_heater_energy_daily",
+            platform="utility_meter",
+            unique_id="central_heater_energy_daily_single_tariff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [
+            (
+                "utility_meters.yaml",
+                {
+                    "garage_central_heater_energy_daily": {
+                        "unique_id": "garage_central_heater_energy_daily",
+                        "source": ("sensor.garage_central_heater_em0_energy"),
+                        "cycle": "daily",
+                    },
+                },
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert len(orphans) == 1
+        assert orphans[0].entity_id == ("sensor.central_heater_energy_daily")
+
+    def test_utility_meter_missing_is_orphan(self) -> None:
+        # Same registry entry but utility_meters.yaml has
+        # no matching key -- orphan.
+        reg = _reg_entry(
+            "sensor.hottub_energy_daily",
+            platform="utility_meter",
+            unique_id="hottub_energy_daily_single_tariff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [
+            (
+                "utility_meters.yaml",
+                {
+                    "central_heater_energy_daily": {
+                        "source": "sensor.central_heater_energy",
+                    },
+                },
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert len(orphans) == 1
+        assert orphans[0].entity_id == "sensor.hottub_energy_daily"
+        assert orphans[0].platform == "utility_meter"
+
+    def test_config_entry_managed_never_orphan(self) -> None:
+        # A registry entry with a config_entry_id is UI-
+        # managed via the config flow. It is never a
+        # source orphan regardless of YAML contents.
+        reg = _reg_entry(
+            "sensor.shelly_power",
+            platform="shelly",
+            unique_id="uid_xyz",
+            config_entry_id="abc",
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        orphans = _find_source_orphans(_config(), ts, [], [])
+        assert orphans == []
+
+    def test_runtime_platform_excluded(self) -> None:
+        # pyscript-created entities live in runtime state,
+        # never in YAML. They must not be flagged.
+        reg = _reg_entry(
+            "sensor.foo",
+            platform="pyscript",
+            unique_id="pyscript_foo",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        orphans = _find_source_orphans(_config(), ts, [], [])
+        assert orphans == []
+
+    def test_automation_pool_is_automations_yaml_only(self) -> None:
+        # An automation's unique_id must match in
+        # automations.yaml specifically. A stray mention in
+        # another file (e.g. a dashboard that happens to
+        # contain the id) is not enough to call it defined.
+        reg = _reg_entry(
+            "automation.foo",
+            platform="automation",
+            unique_id="1683070666795",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        # Stray mention in a generic YAML ("notes.yaml")
+        # with the id buried in a free-text value. Under
+        # structural harvest, ``note`` is not in
+        # _DEFINER_ID_KEYS, so the value is not pooled.
+        notes_sources: list[tuple[str, object]] = [
+            ("notes.yaml", {"note": "old id: 1683070666795"}),
+        ]
+        orphans = _find_source_orphans(_config(), ts, notes_sources, [])
+        assert len(orphans) == 1
+
+        # But when it IS in automations.yaml under ``id:``,
+        # harvest picks it up.
+        auto_sources: list[tuple[str, object]] = [
+            (
+                "automations.yaml",
+                [{"id": "1683070666795", "alias": "Foo"}],
+            ),
+        ]
+        orphans2 = _find_source_orphans(_config(), ts, auto_sources, [])
+        assert orphans2 == []
+
+    def test_template_pool_includes_generic(self) -> None:
+        # Some users put template blocks in a file other
+        # than template.yaml (e.g. inside configuration.yaml
+        # or a sub-included file). Generic YAML counts as
+        # a template definer.
+        reg = _reg_entry(
+            "sensor.humidifiers_energy",
+            platform="template",
+            unique_id="humidifiers_energy",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [
+            (
+                "configuration.yaml",
+                {
+                    "template": [
+                        {
+                            "sensor": [
+                                {
+                                    "name": "Humidifiers Energy",
+                                    "unique_id": "humidifiers_energy",
+                                    "state": "0",
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert orphans == []
+
+    def test_consumer_side_reference_does_not_mask_orphan(self) -> None:
+        # A utility_meter that is still referenced by an
+        # automation but no longer defined in any YAML
+        # must be flagged. automations.yaml must not leak
+        # into the utility_meter pool.
+        reg = _reg_entry(
+            "sensor.hottub_energy_daily",
+            platform="utility_meter",
+            unique_id="hottub_energy_daily_single_tariff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [
+            (
+                "automations.yaml",
+                [
+                    {
+                        "alias": "Notify",
+                        "triggers": [
+                            {
+                                "trigger": "state",
+                                "entity_id": ("sensor.hottub_energy_daily"),
+                            },
+                        ],
+                    },
+                ],
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert len(orphans) == 1
+        assert orphans[0].entity_id == "sensor.hottub_energy_daily"
+
+    def test_customize_yaml_is_not_a_definer(self) -> None:
+        # A dead entity still customized in customize.yaml
+        # remains an orphan -- customize is an overlay, not
+        # a definer.
+        reg = _reg_entry(
+            "input_boolean.dead",
+            platform="input_boolean",
+            unique_id="dead",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [
+            (
+                "customize.yaml",
+                {"input_boolean.dead": {"friendly_name": "Dead"}},
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert len(orphans) == 1
+
+    def test_storage_helper_defines_input_boolean(self) -> None:
+        # A UI-created input_boolean lives in
+        # .storage/input_boolean, not in any YAML file.
+        # Its registry entry is YAML-only
+        # (config_entry_id=None). Must be recognized as
+        # defined.
+        reg = _reg_entry(
+            "input_boolean.garage_occupied",
+            platform="input_boolean",
+            unique_id="working_in_the_garage",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        storage_sources: list[tuple[str, object]] = [
+            (
+                ".storage/input_boolean",
+                {
+                    "data": {
+                        "items": [
+                            {
+                                "id": "working_in_the_garage",
+                                "name": "Garage Occupied",
+                            },
+                        ],
+                    },
+                },
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, [], storage_sources)
+        assert orphans == []
+
+    def test_exclude_entities_suppresses_orphan(self) -> None:
+        # User-supplied exclusion suppresses the orphan.
+        reg = _reg_entry(
+            "sensor.legacy",
+            platform="utility_meter",
+            unique_id="legacy",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        orphans = _find_source_orphans(
+            _config(exclude_entities=["sensor.legacy"]),
+            ts,
+            [],
+            [],
+        )
+        assert orphans == []
+
+    def test_exclude_entity_regex_suppresses_orphan(self) -> None:
+        reg = _reg_entry(
+            "sensor.legacy_one",
+            platform="utility_meter",
+            unique_id="legacy_one",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        orphans = _find_source_orphans(
+            _config(exclude_entity_regex=r"^sensor\.legacy_"),
+            ts,
+            [],
+            [],
+        )
+        assert orphans == []
+
+    def test_disabled_flag_propagated(self) -> None:
+        # Orphan detection is independent of disabled
+        # state but the flag rides along for the UI.
+        reg = _reg_entry(
+            "input_boolean.unused",
+            platform="input_boolean",
+            unique_id="unused",
+            config_entry_id=None,
+            disabled=True,
+        )
+        ts = _ts(
+            registry={reg.entity_id: reg},
+            disabled_entity_ids={"input_boolean.unused"},
+        )
+        orphans = _find_source_orphans(_config(), ts, [], [])
+        assert len(orphans) == 1
+        assert orphans[0].disabled is True
+
+    def test_comment_does_not_mask_orphan(self) -> None:
+        # A YAML comment mentioning the orphan's id is
+        # stripped by the YAML parser before we harvest,
+        # so it cannot contribute to the definer pool.
+        # End-to-end test uses yaml.safe_load so the real
+        # strip happens.
+        import yaml
+
+        parsed = yaml.safe_load(
+            "# This file used to define hottub_energy_daily.\n"
+            "other_key: other_value\n"
+        )
+        reg = _reg_entry(
+            "sensor.hottub_energy_daily",
+            platform="utility_meter",
+            unique_id="hottub_energy_daily_single_tariff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [("notes.yaml", parsed)]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert len(orphans) == 1
+
+    def test_description_string_does_not_mask_orphan(self) -> None:
+        # A free-text ``description`` / ``alias`` string
+        # that happens to mention the orphan's id must not
+        # mark it as defined. Values are harvested only
+        # when their key is in _DEFINER_ID_KEYS.
+        reg = _reg_entry(
+            "sensor.hottub_energy_daily",
+            platform="utility_meter",
+            unique_id="hottub_energy_daily_single_tariff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        yaml_sources: list[tuple[str, object]] = [
+            (
+                "automations.yaml",
+                [
+                    {
+                        "id": "new_id",
+                        "alias": "replaces old hottub_energy_daily meter",
+                        "description": (
+                            "related: hottub_energy_daily_single_tariff"
+                        ),
+                    },
+                ],
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, yaml_sources, [])
+        assert len(orphans) == 1
+        assert orphans[0].entity_id == "sensor.hottub_energy_daily"
+
+    def test_non_slug_unique_id_matches_via_storage_id(self) -> None:
+        # Some integrations store colon- or dash-bearing
+        # unique_ids (e.g. MAC-like). Structural harvest
+        # captures the full string value, so exact match
+        # works even when the identifier contains non-
+        # ``[a-z0-9_]`` characters.
+        reg = _reg_entry(
+            "person.alice",
+            platform="person",
+            unique_id="aa:bb:cc:dd:ee:ff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
+        storage_sources: list[tuple[str, object]] = [
+            (
+                ".storage/person",
+                {
+                    "data": {
+                        "items": [
+                            {
+                                "id": "aa:bb:cc:dd:ee:ff",
+                                "name": "Alice",
+                            },
+                        ],
+                    },
+                },
+            ),
+        ]
+        orphans = _find_source_orphans(_config(), ts, [], storage_sources)
+        assert orphans == []
+
+
+class TestOrphanUrl:
+    def test_platform_becomes_domain_filter(self) -> None:
+        assert _orphan_url("utility_meter") == (
+            "/config/entities?domain=utility_meter"
+        )
+        assert _orphan_url("input_boolean") == (
+            "/config/entities?domain=input_boolean"
+        )
+
+    def test_empty_platform_falls_back_to_entities_page(self) -> None:
+        assert _orphan_url("") == "/config/entities"
+
+
+class TestBuildSourceOrphansNotification:
+    def test_empty_returns_inactive(self) -> None:
+        notif = _build_source_orphans_notification(_config(), [])
+        assert notif.active is False
+        assert notif.notification_id == _source_orphans_notification_id(
+            _config(),
+        )
+
+    def test_groups_by_platform_and_links(self) -> None:
+        orphans = [
+            SourceOrphan(
+                entity_id="sensor.hottub_energy_daily",
+                platform="utility_meter",
+                unique_id="hottub_energy_daily_single_tariff",
+                disabled=False,
+            ),
+            SourceOrphan(
+                entity_id="input_boolean.tec_test_light",
+                platform="input_boolean",
+                unique_id="tec_test_light",
+                disabled=False,
+            ),
+            SourceOrphan(
+                entity_id="input_boolean.tec_test_disable",
+                platform="input_boolean",
+                unique_id="tec_test_disable",
+                disabled=False,
+            ),
+        ]
+        notif = _build_source_orphans_notification(_config(), orphans)
+        assert notif.active is True
+        assert "source orphans (3)" in notif.title.lower()
+        # Larger group (input_boolean=2) ordered before
+        # smaller (utility_meter=1); within-group sorted
+        # by entity_id.
+        ib_idx = notif.message.find("**input_boolean**")
+        um_idx = notif.message.find("**utility_meter**")
+        assert ib_idx != -1 and um_idx != -1
+        assert ib_idx < um_idx
+        # Per-platform filter URL -- HA's entities page
+        # accepts ?domain=<integration> but not
+        # ?search=<entity_id>, so we land the user on the
+        # narrowed integration list.
+        assert "/config/entities?domain=input_boolean" in notif.message
+        assert "/config/entities?domain=utility_meter" in notif.message
+        # Entity_id itself still appears in the link text
+        # so the user can spot it in the filtered list.
+        assert "`input_boolean.tec_test_disable`" in notif.message
+        assert "`sensor.hottub_energy_daily`" in notif.message
+
+    def test_disabled_tag_in_body(self) -> None:
+        orphans = [
+            SourceOrphan(
+                entity_id="input_boolean.unused",
+                platform="input_boolean",
+                unique_id="unused",
+                disabled=True,
+            ),
+        ]
+        notif = _build_source_orphans_notification(_config(), orphans)
+        assert "*(disabled)*" in notif.message
+
+
+class TestEnumerateStorageHelpers:
+    def test_returns_known_helper_files(self, tmp_path: Path) -> None:
         storage = tmp_path / ".storage"
         storage.mkdir()
-        (storage / "core.config_entries").write_text(
-            '{"data": {"entries": []}}'
+        (storage / "input_boolean").write_text('{"data": {"items": []}}')
+        (storage / "person").write_text('{"data": {"items": []}}')
+        # Unknown filenames must be skipped -- only
+        # curated definer files contribute to the pool.
+        (storage / "core.entity_registry").write_text('{"data": {}}')
+        (storage / "core.restore_state").write_text('{"data": {}}')
+        result = _enumerate_storage_helpers(str(tmp_path))
+        rels = [r for r, _ in result]
+        assert ".storage/input_boolean" in rels
+        assert ".storage/person" in rels
+        assert ".storage/core.entity_registry" not in rels
+        assert ".storage/core.restore_state" not in rels
+
+    def test_returns_parsed_json(self, tmp_path: Path) -> None:
+        # Helper now returns parsed objects so downstream
+        # code can walk the structure rather than re-parse.
+        storage = tmp_path / ".storage"
+        storage.mkdir()
+        (storage / "input_boolean").write_text(
+            '{"data": {"items": [{"id": "foo"}]}}'
         )
+        result = _enumerate_storage_helpers(str(tmp_path))
+        assert len(result) == 1
+        rel, parsed = result[0]
+        assert rel == ".storage/input_boolean"
+        assert isinstance(parsed, dict)
+        assert parsed == {"data": {"items": [{"id": "foo"}]}}
 
-        calls: list[str] = []
-        import reference_watchdog as rw
+    def test_invalid_json_is_skipped(self, tmp_path: Path) -> None:
+        storage = tmp_path / ".storage"
+        storage.mkdir()
+        (storage / "input_boolean").write_text("not json at all")
+        assert _enumerate_storage_helpers(str(tmp_path)) == []
 
-        original = rw._discover_yaml_sources
+    def test_missing_files_are_ok(self, tmp_path: Path) -> None:
+        storage = tmp_path / ".storage"
+        storage.mkdir()
+        # No helpers present.
+        assert _enumerate_storage_helpers(str(tmp_path)) == []
 
-        def _spy(config_dir: str) -> list[tuple[str, str, object]]:
-            calls.append(config_dir)
-            return original(config_dir)
+    def test_no_storage_dir(self, tmp_path: Path) -> None:
+        assert _enumerate_storage_helpers(str(tmp_path)) == []
 
-        monkeypatch.setattr(rw, "_discover_yaml_sources", _spy)
 
-        run_evaluation(
-            str(tmp_path),
-            _config(scan_sources=["config_entries"]),
-            ["config_entries"],
-            _ts(),
-            [],
-            0,
-        )
-        assert calls == []
-
-    def test_runs_yaml_discovery_when_enabled_all(
+class TestRunEvaluationOrphans:
+    def test_orphan_feeds_summary_notification(
         self,
         tmp_path: Path,
-        monkeypatch: "pytest.MonkeyPatch",
     ) -> None:
-        # Empty scan_sources means "all" -- YAML
-        # discovery must still run.
-        self._write_config(tmp_path)
-        calls: list[str] = []
-        import reference_watchdog as rw
+        # Minimum config: configuration.yaml, empty
+        # automations.yaml, and a registry entry for a
+        # utility_meter that isn't declared anywhere.
+        (tmp_path / "configuration.yaml").write_text(
+            "automation: !include automations.yaml\n"
+        )
+        (tmp_path / "automations.yaml").write_text("")
+        storage = tmp_path / ".storage"
+        storage.mkdir()
 
-        original = rw._discover_yaml_sources
+        reg = _reg_entry(
+            "sensor.dead_meter_daily",
+            platform="utility_meter",
+            unique_id="dead_meter_daily_single_tariff",
+            config_entry_id=None,
+        )
+        ts = _ts(registry={reg.entity_id: reg})
 
-        def _spy(config_dir: str) -> list[tuple[str, str, object]]:
-            calls.append(config_dir)
-            return original(config_dir)
-
-        monkeypatch.setattr(rw, "_discover_yaml_sources", _spy)
-
-        run_evaluation(
+        ev = run_evaluation(
             str(tmp_path),
             _config(),
-            [],
-            _ts(),
+            ts,
             [],
             0,
         )
-        assert calls == [str(tmp_path)]
+        assert ev.source_orphan_count == 1
+        assert ev.source_orphan_candidates == 1
+        # Summary notification must be present and active.
+        summary = [
+            n
+            for n in ev.notifications
+            if n.notification_id.endswith("source_orphans")
+        ]
+        assert len(summary) == 1
+        assert summary[0].active is True
+        assert "sensor.dead_meter_daily" in summary[0].message
 
 
 class TestIntegrationUxInvariant:

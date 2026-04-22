@@ -2125,7 +2125,6 @@ def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
 def reference_watchdog(
     instance_id: str,
     trigger_platform_raw: str,
-    scan_sources_raw: object,
     exclude_paths_raw: str,
     exclude_integrations_raw: object,
     exclude_entities_raw: object,
@@ -2149,7 +2148,6 @@ def reference_watchdog(
     tag = f"[RW: {auto_name}]"
 
     # Parse inputs
-    scan_sources = _normalize_list(scan_sources_raw)
     exclude_integrations = _normalize_list(exclude_integrations_raw)
     exclude_entities = _normalize_list(exclude_entities_raw)
     debug_logging = _parse_bool(debug_logging_raw)
@@ -2206,7 +2204,6 @@ def reference_watchdog(
             return
 
     config = Config(
-        scan_sources=scan_sources,
         exclude_paths=exclude_paths_list,
         exclude_integrations=exclude_integrations,
         exclude_entities=exclude_entities,
@@ -2239,7 +2236,6 @@ def reference_watchdog(
         "reference_watchdog.run_evaluation",
         config_dir,
         config,
-        scan_sources,
         truth_set,
         exclude_paths_list,
         max_notifications,
@@ -2277,6 +2273,8 @@ def reference_watchdog(
             "refs_jinja": ev.refs_jinja,
             "refs_sniff": ev.refs_sniff,
             "refs_service_skipped": ev.refs_service_skipped,
+            "source_orphan_count": ev.source_orphan_count,
+            "source_orphan_candidates": ev.source_orphan_candidates,
         },
     )
 
@@ -2284,7 +2282,8 @@ def reference_watchdog(
     if debug_logging:
         log.warning(  # noqa: F821
             "%s owners=%d with_issues=%d findings=%d refs=%d"
-            " (struct=%d jinja=%d sniff=%d svc_skipped=%d)",
+            " (struct=%d jinja=%d sniff=%d svc_skipped=%d)"
+            " orphans=%d/%d",
             tag,
             ev.owners_total,
             ev.owners_with_issues,
@@ -2294,6 +2293,8 @@ def reference_watchdog(
             ev.refs_jinja,
             ev.refs_sniff,
             ev.refs_service_skipped,
+            ev.source_orphan_count,
+            ev.source_orphan_candidates,
         )
 
 

@@ -249,7 +249,6 @@ class Config:
     immutable argument.
     """
 
-    scan_sources: list[str]
     exclude_paths: list[str]
     exclude_integrations: list[str]
     exclude_entities: list[str]
@@ -1663,14 +1662,6 @@ _DEDICATED_SOURCE_TYPES: dict[str, str] = {
 }
 
 
-# Source types backed by the YAML discovery walk. Used
-# by ``run_evaluation`` to skip ``_discover_yaml_sources``
-# when the user selected only JSON-backed source types.
-_YAML_SOURCE_TYPES: frozenset[str] = frozenset(
-    list(_DEDICATED_SOURCE_TYPES.values()) + ["generic_yaml"],
-)
-
-
 _HA_YAML_TAGS = (
     "!include",
     "!include_dir_list",
@@ -1877,94 +1868,480 @@ def _discover_yaml_sources(
     return discovered
 
 
+# -- Source orphan detection --------------------------------------------
+#
+# A "source orphan" is an entity in the registry with
+# ``config_entry_id is None`` whose ``object_id`` and
+# ``unique_id`` are absent from the platform-appropriate
+# definer pool. Definer pools are built by walking the
+# parsed YAML / JSON tree of each contributing file and
+# harvesting:
+#
+# - every mapping key (strings only, lowercased)
+# - every value whose key is in ``_DEFINER_ID_KEYS``
+#   (``id``, ``unique_id``, ``object_id``)
+#
+# Walking the parsed tree -- not raw text -- skips
+# comments, ``description:`` / ``alias:`` strings, and
+# consumer-side refs like ``entity_id: sensor.foo`` that
+# tokenize-based extraction would otherwise bleed into
+# the pool.
+#
+# Pool routing is still per-platform so that consumer-
+# side mentions in e.g. automations.yaml can't mark a
+# utility_meter orphan as "defined".
+
+
+# UI-helper integrations that register entities with
+# ``config_entry_id=None`` and store their definitions in
+# ``.storage/<helper>`` JSON files rather than in
+# ``core.config_entries``. Every file in this set that
+# exists on the host is loaded into the definer pool.
+# Missing files are silently skipped.
+_STORAGE_HELPER_DEFINER_FILES: frozenset[str] = frozenset(
+    [
+        "input_boolean",
+        "input_button",
+        "input_number",
+        "input_text",
+        "input_select",
+        "input_datetime",
+        "counter",
+        "timer",
+        "person",
+        "zone",
+        "schedule",
+        # Rare but possible on hosts where the user toggled
+        # "edit in UI" for items the core integrations
+        # otherwise persist to YAML.
+        "automation",
+        "script",
+        "scene",
+        "group",
+    ]
+)
+
+
+# Platforms whose entities are created at runtime (not
+# from any config file) and are excluded from orphan
+# detection by default.
+_SOURCE_ORPHAN_RUNTIME_PLATFORMS: frozenset[str] = frozenset(["pyscript"])
+
+
+# Files that reference entities but do not define them.
+# Excluded from every platform's definer pool.
+_SOURCE_ORPHAN_CONSUMER_YAML: frozenset[str] = frozenset(["customize.yaml"])
+
+
+# Mapping keys whose string values carry a registry
+# identifier (object_id or unique_id). Values under these
+# keys are added verbatim (lowercased) to the pool, so
+# that non-slug identifiers such as ``aa:bb:cc:dd:ee:ff``
+# match as-is.
+_DEFINER_ID_KEYS: frozenset[str] = frozenset(["id", "unique_id", "object_id"])
+
+
+@dataclass
+class _OrphanPools:
+    """Per-platform sets of identifier strings harvested from definer trees.
+
+    Each pool is a frozenset of lowercased strings drawn
+    from the parsed YAML / JSON trees of the pool's
+    contributing files: every mapping key, plus every
+    value whose key is in ``_DEFINER_ID_KEYS``. An
+    object_id or unique_id is "defined" only when it
+    appears as an exact string in the set.
+    """
+
+    automations: frozenset[str]
+    scripts: frozenset[str]
+    template_plus_generic: frozenset[str]
+    generic: frozenset[str]
+
+
+def _harvest_identifiers(node: object, out: set[str]) -> None:
+    """Walk ``node``, adding keys + identifier-field values to ``out``.
+
+    Recurses through dict / list structures. Adds:
+
+    - lowercased string keys of every dict encountered
+    - lowercased string values whose key is in
+      ``_DEFINER_ID_KEYS``
+
+    Non-string keys and non-string identifier values are
+    ignored; recursion continues into the value
+    regardless.
+    """
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(k, str):
+                key_l = k.lower()
+                out.add(key_l)
+                if key_l in _DEFINER_ID_KEYS and isinstance(v, str):
+                    out.add(v.lower())
+            _harvest_identifiers(v, out)
+    elif isinstance(node, list):
+        for item in node:
+            _harvest_identifiers(item, out)
+
+
+def _enumerate_storage_helpers(
+    config_dir: str,
+) -> list[tuple[str, object]]:
+    """Return ``(rel_path, parsed_json)`` for each existing helper file.
+
+    Only filenames in ``_STORAGE_HELPER_DEFINER_FILES``
+    are considered. Files that don't exist or fail JSON
+    parsing are silently skipped.
+    """
+    import os
+
+    storage_dir = os.path.join(config_dir, ".storage")
+    out: list[tuple[str, object]] = []
+    if not os.path.isdir(storage_dir):
+        return out
+    try:
+        names = sorted(os.listdir(storage_dir))
+    except OSError:
+        return out
+    for name in names:
+        if name not in _STORAGE_HELPER_DEFINER_FILES:
+            continue
+        abs_path = os.path.join(storage_dir, name)
+        if not os.path.isfile(abs_path):
+            continue
+        parsed = _read_json_file(abs_path)
+        if parsed is None:
+            continue
+        out.append((f".storage/{name}", parsed))
+    return out
+
+
+def _build_orphan_pools(
+    yaml_sources: list[tuple[str, object]],
+    storage_sources: list[tuple[str, object]],
+) -> _OrphanPools:
+    """Bucket definer-pool identifiers by platform.
+
+    ``yaml_sources`` is ``(rel_path, parsed)`` for every
+    YAML file discovered from ``configuration.yaml``.
+    ``storage_sources`` is the parsed
+    ``.storage/<helper>`` JSON collected by
+    ``_enumerate_storage_helpers``.
+
+    Files in ``_SOURCE_ORPHAN_CONSUMER_YAML`` are dropped.
+    Dedicated-adapter filenames route to matching
+    per-platform buckets; every other YAML goes to
+    "generic". ``.storage/<helper>`` files route to the
+    platform matching the filename when that platform has
+    its own dedicated bucket, otherwise to "generic".
+
+    Each bucket is populated by walking contributing
+    trees via ``_harvest_identifiers``.
+    """
+    import os
+
+    auto_ids: set[str] = set()
+    script_ids: set[str] = set()
+    template_ids: set[str] = set()
+    generic_ids: set[str] = set()
+
+    for rel, parsed in yaml_sources:
+        if rel in _SOURCE_ORPHAN_CONSUMER_YAML:
+            continue
+        fname = os.path.basename(rel)
+        if fname == "automations.yaml":
+            _harvest_identifiers(parsed, auto_ids)
+        elif fname == "scripts.yaml":
+            _harvest_identifiers(parsed, script_ids)
+        elif fname == "template.yaml":
+            _harvest_identifiers(parsed, template_ids)
+        else:
+            _harvest_identifiers(parsed, generic_ids)
+
+    for rel, parsed in storage_sources:
+        fname = os.path.basename(rel)
+        if fname == "automation":
+            _harvest_identifiers(parsed, auto_ids)
+        elif fname == "script":
+            _harvest_identifiers(parsed, script_ids)
+        else:
+            _harvest_identifiers(parsed, generic_ids)
+
+    return _OrphanPools(
+        automations=frozenset(auto_ids),
+        scripts=frozenset(script_ids),
+        template_plus_generic=frozenset(
+            template_ids | generic_ids,
+        ),
+        generic=frozenset(generic_ids),
+    )
+
+
+def _pool_for_platform(
+    pools: _OrphanPools,
+    platform: str,
+) -> frozenset[str]:
+    """Return the identifier set to search for ``platform``."""
+    if platform == "automation":
+        return pools.automations
+    if platform == "script":
+        return pools.scripts
+    if platform == "template":
+        return pools.template_plus_generic
+    return pools.generic
+
+
+@dataclass(frozen=True)
+class SourceOrphan:
+    """One registry entry whose definer could not be found."""
+
+    entity_id: str
+    platform: str
+    unique_id: str
+    disabled: bool
+
+
+def _find_source_orphans(
+    config: Config,
+    truth_set: TruthSet,
+    yaml_sources: list[tuple[str, object]],
+    storage_sources: list[tuple[str, object]],
+) -> list[SourceOrphan]:
+    """Identify registry entries with no matching definer.
+
+    Restricts to entries with ``config_entry_id is None``
+    (UI config-flow entries have HA-managed lifecycles and
+    are not our concern). Skips platforms in
+    ``_SOURCE_ORPHAN_RUNTIME_PLATFORMS`` and applies
+    ``exclude_entities`` / ``exclude_entity_regex``
+    symmetrically.
+    """
+    pools = _build_orphan_pools(yaml_sources, storage_sources)
+
+    orphans: list[SourceOrphan] = []
+    for eid, entry in truth_set.registry.items():
+        if entry.config_entry_id is not None:
+            continue
+        if entry.platform in _SOURCE_ORPHAN_RUNTIME_PLATFORMS:
+            continue
+        if _is_entity_excluded(
+            eid,
+            config.exclude_entities,
+            config.exclude_entity_regex,
+        ):
+            continue
+        object_id = eid.split(".", 1)[1].lower()
+        pool = _pool_for_platform(pools, entry.platform)
+        if object_id in pool:
+            continue
+        uid = (entry.unique_id or "").lower()
+        if uid and uid in pool:
+            continue
+        orphans.append(
+            SourceOrphan(
+                entity_id=eid,
+                platform=entry.platform,
+                unique_id=entry.unique_id or "",
+                disabled=entry.disabled,
+            ),
+        )
+    return orphans
+
+
+def _source_orphans_notification_id(config: Config) -> str:
+    """Stable notification ID for the source-orphan summary."""
+    return f"{config.notification_prefix}source_orphans"
+
+
+def _orphan_url(platform: str) -> str:
+    """Entities-page URL filtered to the orphan's integration.
+
+    HA's entities page supports two URL filters:
+    ``?config_entry=<entry_id>`` (doesn't apply here --
+    orphans have no config entry by definition) and
+    ``?domain=<integration>`` (filters to entities owned
+    by the named integration). Other proposed filters
+    like ``?search=`` and ``?entity_id=`` are not wired
+    up: see
+    https://github.com/orgs/home-assistant/discussions/1538.
+
+    Using ``?domain=<platform>`` takes the user to the
+    entities page showing just that integration's rows.
+    They visually find the orphan and click it to open
+    the per-entity settings dialog, which has a Delete
+    button for registry entries no longer claimed by
+    any integration.
+
+    Direct editor URLs like ``/config/automation/edit/<id>``
+    work fine for live automations but not for orphans --
+    the automation was removed from the YAML, so the
+    editor renders a blank-or-missing form and won't help
+    the user delete the registry entry.
+    """
+    if not platform:
+        return "/config/entities"
+    return f"/config/entities?domain={platform}"
+
+
+def _build_source_orphans_notification(
+    config: Config,
+    orphans: list[SourceOrphan],
+) -> PersistentNotification:
+    """One summary notification listing every orphan.
+
+    Grouped by platform, each entity ID rendered as a
+    clickable link to the entities page filtered by the
+    orphan's platform integration (see ``_orphan_url``).
+
+    When ``orphans`` is empty, an inactive notification
+    is returned so a previously-active summary gets
+    dismissed once the user cleans up.
+    """
+    nid = _source_orphans_notification_id(config)
+    if not orphans:
+        return PersistentNotification(
+            active=False,
+            notification_id=nid,
+            title="",
+            message="",
+        )
+
+    by_platform: dict[str, list[SourceOrphan]] = {}
+    for o in orphans:
+        by_platform.setdefault(o.platform or "", []).append(o)
+    # Sort platforms by descending count then name, and
+    # each group's entries by entity_id -- deterministic
+    # output so the notification doesn't churn between
+    # runs.
+    plat_order = [
+        plat
+        for _, _, plat in sorted(
+            [
+                ((-len(by_platform[p]), p), i, p)
+                for i, p in enumerate(by_platform.keys())
+            ]
+        )
+    ]
+
+    lines: list[str] = []
+    lines.append(
+        f"{len(orphans)} registry entries have no current"
+        " definer in your configuration. Click an entity"
+        " to open the filtered entities page, then open"
+        " the entry and delete it."
+    )
+    lines.append("")
+    for platform in plat_order:
+        entries = [
+            o
+            for _, _, o in sorted(
+                [
+                    (o.entity_id, i, o)
+                    for i, o in enumerate(by_platform[platform])
+                ]
+            )
+        ]
+        plat_label = platform or "(no platform)"
+        url = _orphan_url(platform)
+        lines.append(f"**{md_escape(plat_label)}** ({len(entries)}):")
+        for o in entries:
+            tag = " *(disabled)*" if o.disabled else ""
+            lines.append(f"- [`{o.entity_id}`]({url}){tag}")
+        lines.append("")
+
+    return PersistentNotification(
+        active=True,
+        notification_id=nid,
+        title=f"Reference watchdog: source orphans ({len(orphans)})",
+        message="\n".join(lines).rstrip() + "\n",
+    )
+
+
 # -- Source enumeration and evaluation ----------------------------------
 
 
 def _enumerate_json_sources(
     config_dir: str,
-    scan_sources: list[str],
 ) -> list[SourceInput]:
     """Enumerate JSON storage sources (config entries, lovelace)."""
     import os
 
     sources: list[SourceInput] = []
-    enabled_all = len(scan_sources) == 0
 
     # .storage/core.config_entries
-    if enabled_all or "config_entries" in scan_sources:
-        ce_path = os.path.join(
-            config_dir,
-            ".storage",
-            "core.config_entries",
-        )
-        if os.path.isfile(ce_path):
-            parsed = _read_json_file(ce_path)
-            if parsed is not None:
-                sources.append(
-                    SourceInput(
-                        source_type="config_entries",
-                        path=".storage/core.config_entries",
-                        parsed=parsed,
-                    ),
-                )
-
-    # .storage/lovelace.<dashboard_id>
-    if enabled_all or "lovelace" in scan_sources:
-        storage_dir = os.path.join(config_dir, ".storage")
-        dashboards_index: dict[str, dict[str, str]] = {}
-        idx_path = os.path.join(
-            storage_dir,
-            "lovelace_dashboards",
-        )
-        if os.path.isfile(idx_path):
-            idx_parsed = _read_json_file(idx_path)
-            if isinstance(idx_parsed, dict):
-                idx_data = idx_parsed.get("data", {})
-                if isinstance(idx_data, dict):
-                    idx_items = idx_data.get("items", [])
-                    if isinstance(idx_items, list):
-                        for item in idx_items:
-                            if not isinstance(item, dict):
-                                continue
-                            dash_id = item.get("id", "")
-                            if dash_id:
-                                url_path = item.get("url_path") or dash_id
-                                dashboards_index[dash_id] = {
-                                    "title": str(
-                                        item.get("title") or dash_id,
-                                    ),
-                                    "url_path": f"/{url_path}",
-                                }
-
-        try:
-            storage_files = sorted(os.listdir(storage_dir))
-        except OSError:
-            storage_files = []
-        for fname in storage_files:
-            if not fname.startswith("lovelace."):
-                continue
-            dash_id = fname[len("lovelace.") :]
-            lv_path = os.path.join(storage_dir, fname)
-            if not os.path.isfile(lv_path):
-                continue
-            parsed = _read_json_file(lv_path)
-            if parsed is None:
-                continue
-            extra = dashboards_index.get(
-                dash_id,
-                {
-                    "title": dash_id,
-                    "url_path": f"/{dash_id}",
-                },
-            )
+    ce_path = os.path.join(
+        config_dir,
+        ".storage",
+        "core.config_entries",
+    )
+    if os.path.isfile(ce_path):
+        parsed = _read_json_file(ce_path)
+        if parsed is not None:
             sources.append(
                 SourceInput(
-                    source_type="lovelace",
-                    path=f".storage/{fname}",
+                    source_type="config_entries",
+                    path=".storage/core.config_entries",
                     parsed=parsed,
-                    extra=extra,
                 ),
             )
+
+    # .storage/lovelace.<dashboard_id>
+    storage_dir = os.path.join(config_dir, ".storage")
+    dashboards_index: dict[str, dict[str, str]] = {}
+    idx_path = os.path.join(
+        storage_dir,
+        "lovelace_dashboards",
+    )
+    if os.path.isfile(idx_path):
+        idx_parsed = _read_json_file(idx_path)
+        if isinstance(idx_parsed, dict):
+            idx_data = idx_parsed.get("data", {})
+            if isinstance(idx_data, dict):
+                idx_items = idx_data.get("items", [])
+                if isinstance(idx_items, list):
+                    for item in idx_items:
+                        if not isinstance(item, dict):
+                            continue
+                        dash_id = item.get("id", "")
+                        if dash_id:
+                            url_path = item.get("url_path") or dash_id
+                            dashboards_index[dash_id] = {
+                                "title": str(
+                                    item.get("title") or dash_id,
+                                ),
+                                "url_path": f"/{url_path}",
+                            }
+
+    try:
+        storage_files = sorted(os.listdir(storage_dir))
+    except OSError:
+        storage_files = []
+    for fname in storage_files:
+        if not fname.startswith("lovelace."):
+            continue
+        dash_id = fname[len("lovelace.") :]
+        lv_path = os.path.join(storage_dir, fname)
+        if not os.path.isfile(lv_path):
+            continue
+        parsed = _read_json_file(lv_path)
+        if parsed is None:
+            continue
+        extra = dashboards_index.get(
+            dash_id,
+            {
+                "title": dash_id,
+                "url_path": f"/{dash_id}",
+            },
+        )
+        sources.append(
+            SourceInput(
+                source_type="lovelace",
+                path=f".storage/{fname}",
+                parsed=parsed,
+                extra=extra,
+            ),
+        )
 
     return sources
 
@@ -1996,12 +2373,13 @@ class EvaluationResult:
     refs_jinja: int
     refs_sniff: int
     refs_service_skipped: int
+    source_orphan_count: int
+    source_orphan_candidates: int
 
 
 def run_evaluation(
     config_dir: str,
     config: Config,
-    scan_sources: list[str],
     truth_set: TruthSet,
     exclude_paths_list: list[str],
     max_notifications: int,
@@ -2022,27 +2400,10 @@ def run_evaluation(
     """
     from helpers import prepare_notifications
 
-    enabled_all = len(scan_sources) == 0
-    # Skip the YAML discovery walk entirely when the user
-    # selected only JSON-backed source types. Reference
-    # scans do meaningful file I/O (recursive include
-    # following from configuration.yaml), so avoiding it
-    # when unused is a real cost saving on storage-only
-    # runs.
-    scan_any_yaml = enabled_all or any(
-        [t in _YAML_SOURCE_TYPES for t in scan_sources]
-    )
-    yaml_sources: list[tuple[str, str, object]] = []
-    if scan_any_yaml:
-        yaml_sources = _discover_yaml_sources(config_dir)
-    json_sources = _enumerate_json_sources(
-        config_dir,
-        scan_sources,
-    )
+    yaml_sources = _discover_yaml_sources(config_dir)
+    json_sources = _enumerate_json_sources(config_dir)
     all_sources: list[SourceInput] = []
     for rel_path, source_type, parsed in yaml_sources:
-        if not enabled_all and source_type not in scan_sources:
-            continue
         all_sources.append(
             SourceInput(
                 source_type=source_type,
@@ -2064,6 +2425,29 @@ def run_evaluation(
     # Evaluate
     results = _evaluate_sources(config, included, truth_set)
 
+    # Source-orphan detection reuses the parsed YAML trees
+    # already loaded for discovery and adds parsed
+    # ``.storage/<helper>`` JSON. Pool identifiers are
+    # harvested structurally (mapping keys + values under
+    # ``_DEFINER_ID_KEYS``), so comments and free-text
+    # fields like ``description:`` don't bleed in.
+    yaml_parsed = [(rel, parsed) for rel, _src, parsed in yaml_sources]
+    storage_parsed = _enumerate_storage_helpers(config_dir)
+    orphans = _find_source_orphans(
+        config,
+        truth_set,
+        yaml_parsed,
+        storage_parsed,
+    )
+    source_orphan_candidates = sum(
+        [
+            1
+            for e in truth_set.registry.values()
+            if e.config_entry_id is None
+            and e.platform not in _SOURCE_ORPHAN_RUNTIME_PLATFORMS
+        ]
+    )
+
     # Build notifications
     notifications = prepare_notifications(
         results,
@@ -2071,6 +2455,14 @@ def run_evaluation(
         f"{config.notification_prefix}cap",
         "Reference watchdog: notification cap reached",
         "owners with broken references",
+    )
+    # The orphan summary sits outside the per-owner cap --
+    # it's a single notification regardless of orphan
+    # count. The builder emits an inactive placeholder when
+    # there are no orphans so any previously-active summary
+    # gets dismissed.
+    notifications.append(
+        _build_source_orphans_notification(config, orphans),
     )
 
     # Compute stats (list comprehensions, not generators --
@@ -2135,4 +2527,6 @@ def run_evaluation(
         refs_jinja=refs_jinja,
         refs_sniff=refs_sniff,
         refs_service_skipped=refs_service_skipped,
+        source_orphan_count=len(orphans),
+        source_orphan_candidates=source_orphan_candidates,
     )

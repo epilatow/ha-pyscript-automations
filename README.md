@@ -35,7 +35,10 @@ runtime dependencies, making it fully testable with pytest.
   notifications with clickable links into the HA config UI
   where available, YAML-only helper marking, and a
   negative service-name truth set to eliminate false
-  positives.
+  positives. Also detects source orphans -- registry
+  entries whose backing YAML block or UI-helper record
+  has been removed -- and lists them in a single summary
+  notification for cleanup.
 
 - [Z-Wave Route Manager](docs/zwave_route_manager.md) -
   Reconciles Z-Wave priority routes against a declarative

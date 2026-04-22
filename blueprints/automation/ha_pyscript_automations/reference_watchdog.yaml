@@ -5,43 +5,14 @@ blueprint:
     .storage JSON) for broken entity and device references.
     Creates a persistent notification per owner (automation,
     script, helper, dashboard, etc.) that contains a dead
-    reference. Clears notifications automatically when the
-    broken references are fixed.
+    reference. Also detects source orphans -- registry
+    entries whose backing YAML block or UI-helper record has
+    been removed -- in a single summary notification. All
+    notifications clear automatically once fixed.
   domain: automation
   author: epilatow
 
   input:
-    scan_sources:
-      name: Scan sources
-      description: >
-        Which source types to scan. Leave empty to scan
-        all. Each dedicated type has its own owner
-        attribution (automations, scripts, template,
-        customize, config_entries, lovelace). The
-        "generic_yaml" catch-all handles every other YAML
-        file reachable via !include directives from
-        configuration.yaml with structural owner
-        derivation.
-      default: []
-      selector:
-        select:
-          multiple: true
-          options:
-            - label: Automations (automations.yaml)
-              value: automations
-            - label: Scripts (scripts.yaml)
-              value: scripts
-            - label: Templates (template.yaml)
-              value: template
-            - label: Customize (customize.yaml)
-              value: customize
-            - label: Config entries (.storage/core.config_entries)
-              value: config_entries
-            - label: Lovelace dashboards (.storage/lovelace.*)
-              value: lovelace
-            - label: Generic YAML (catch-all)
-              value: generic_yaml
-
     exclude_paths:
       name: Exclude paths
       description: >
@@ -172,7 +143,6 @@ actions:
     data:
       instance_id: "{{ this.entity_id }}"
       trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"
-      scan_sources_raw: !input scan_sources
       exclude_paths_raw: !input exclude_paths
       exclude_integrations_raw: !input exclude_integrations
       exclude_entities_raw: !input exclude_entities
