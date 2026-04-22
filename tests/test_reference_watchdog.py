@@ -1071,7 +1071,9 @@ class TestNotificationBody:
             friendly_name="My Motion Lights",
         )
         body = _build_notification_body(owner, [])
-        assert "Owner: config-block[2] - My Motion Lights" in body
+        # Square brackets in the YAML path are escaped so
+        # they don't form a bogus markdown link.
+        assert "Owner: config-block\\[2\\] - My Motion Lights" in body
 
     def test_integration_line_present_when_set(self) -> None:
         owner = Owner(
@@ -1165,6 +1167,17 @@ class TestNotificationBody:
         body = _build_notification_body(owner, findings)
         assert "Owner: [Upstairs Lights](/config/entities/" in body
 
+    def test_friendly_name_with_brackets_is_escaped(self) -> None:
+        owner = Owner(
+            source_file=".storage/core.config_entries",
+            integration="group",
+            friendly_name="Lights [zone 1]",
+            url_path="/config/entities/?config_entry=abc",
+        )
+        body = _build_notification_body(owner, [])
+        assert "Owner: [Lights \\[zone 1\\]](" in body
+        assert "Owner: [Lights [zone 1]](" not in body
+
     def test_no_url_path_renders_plain_text(self) -> None:
         owner = Owner(
             source_file="plants.yaml",
@@ -1181,7 +1194,7 @@ class TestNotificationBody:
             ),
         ]
         body = _build_notification_body(owner, findings)
-        assert "Owner: config-block[0] - plant_01" in body
+        assert "Owner: config-block\\[0\\] - plant_01" in body
         assert "](/)" not in body
 
 

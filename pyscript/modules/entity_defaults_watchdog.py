@@ -16,6 +16,7 @@ from helpers import (
     DeviceEntry,
     PersistentNotification,
     matches_pattern,
+    md_escape,
 )
 
 # Check identifiers surfaced as blueprint options. Adding
@@ -453,7 +454,7 @@ def _build_notification_message(
     """
     lines: list[str] = []
     lines.append(
-        f"Device: [{device.de.name}]({device.de.url})",
+        f"Device: [{md_escape(device.de.name)}]({device.de.url})",
     )
     integrations = sorted(
         device.de.integration_entities.keys(),
@@ -663,24 +664,6 @@ def _evaluate_device(
     )
 
 
-def _md_escape(s: str) -> str:
-    """Escape CommonMark ``\\``, ``[``, ``]``.
-
-    Applied to friendly names wherever they appear in a
-    deviceless bullet — both as link text in ``[name](url)``
-    and as plain text next to a trailing ``[platform](url)``
-    link, since an unescaped ``[`` in the plain portion can
-    still pair with a later ``](`` to form a bogus link.
-    """
-    return s.translate(
-        {
-            ord("\\"): "\\\\",
-            ord("["): "\\[",
-            ord("]"): "\\]",
-        },
-    )
-
-
 def _deviceless_line_suffix(
     entity_id: str,
     friendly_name: str,
@@ -717,7 +700,7 @@ def _deviceless_line_suffix(
     See docs/entity_defaults_watchdog.md for rationale.
     """
     dom, obj_id = entity_id.split(".", 1)
-    name = _md_escape(friendly_name)
+    name = md_escape(friendly_name)
     if dom == "automation" and unique_id:
         return f"[{name}](/config/automation/edit/{unique_id})"
     if dom == "script":

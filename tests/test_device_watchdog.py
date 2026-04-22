@@ -583,6 +583,22 @@ class TestBuildNotificationMessage:
                 _config(),
             )
 
+    def test_device_name_with_brackets_is_escaped(self) -> None:
+        # A literal "[" in a device name would otherwise
+        # form a bogus markdown link with a later "](" in
+        # the same body line.
+        device = _device(device_name="Sensor [foo]")
+        msg = _build_notification_message(
+            device,
+            [_entity(state="unavailable")],
+            False,
+            None,
+            None,
+            _config(),
+        )
+        assert "[Sensor \\[foo\\]]" in msg
+        assert "[Sensor [foo]]" not in msg
+
 
 class TestEvaluateDevices:
     def test_multiple_devices(self) -> None:

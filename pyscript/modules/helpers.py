@@ -119,6 +119,53 @@ def format_timestamp(template: str, dt: datetime) -> str:
     return result
 
 
+def md_escape(s: str) -> str:
+    """Escape CommonMark ``\\``, ``[``, ``]`` for safe interpolation.
+
+    Apply to any HA-controlled string interpolated into a
+    persistent notification ``message`` body — both inside
+    ``[text](url)`` link text *and* in plain-text portions,
+    since an unescaped ``[`` in plain text can still pair
+    with a later ``](`` to form a bogus link.
+
+    Done as a single ``str.translate`` pass so the
+    backslashes inserted for ``[``/``]`` are not themselves
+    re-escaped by the ``\\`` mapping.
+
+    Escaping is NOT needed for:
+
+    - Notification ``title`` strings — HA renders titles
+      as plain text (frontend ``persistent-notification-item``
+      uses a Lit ``<span>`` with auto-escaping, only ``message``
+      goes through ``<ha-markdown>``).
+    - Integration domains (e.g. ``mqtt``, ``zwave_js``,
+      ``unifiprotect``) — constrained by Python import rules
+      to ``[A-Za-z_][A-Za-z0-9_]*``, no markdown specials
+      possible.
+    - URLs — the ``(...)`` target portion of a markdown link
+      is not displayed, only the ``[...]`` text portion is.
+    - Numeric IDs (node ids, device counts, byte sizes).
+    - Values rendered inside a backtick code span
+      (`` `value` ``) — code spans suppress markdown
+      interpretation, so ``[``/``]`` inside backticks render
+      literally.
+
+    Escaping IS needed for human-typed strings such as
+    ``device.name`` (HA device-registry name_by_user/name),
+    entity ``friendly_name``, owner display labels that
+    contain a friendly_name or YAML block path, and any
+    free-form text returned from external APIs (e.g.
+    error messages from zwave-js-ui).
+    """
+    return s.translate(
+        {
+            ord("\\"): "\\\\",
+            ord("["): "\\[",
+            ord("]"): "\\]",
+        },
+    )
+
+
 def format_notification(
     text: str,
     prefix: str,

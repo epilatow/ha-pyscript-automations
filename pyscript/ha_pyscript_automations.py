@@ -26,6 +26,7 @@ from helpers import (  # noqa: F821
     DeviceEntry,
     EntityRegistryInfo,
     PersistentNotification,
+    md_escape,
     on_interval,
 )
 
@@ -216,24 +217,6 @@ def _sweep_orphan_notifications(
             )
 
 
-def _md_escape(s: str) -> str:
-    """Escape CommonMark link-text special chars.
-
-    Applied to the display portion of ``[text](url)`` so
-    brackets or backslashes in user-supplied names don't
-    break the link. Done as a single ``str.translate`` pass
-    so the backslashes we insert for ``[``/``]`` are not
-    themselves re-escaped by the ``\\`` mapping.
-    """
-    return s.translate(
-        {
-            ord("\\"): "\\\\",
-            ord("["): "\\[",
-            ord("]"): "\\]",
-        },
-    )
-
-
 def _process_persistent_notifications(
     notifications: "list[PersistentNotification]",
     instance_id: str,
@@ -261,7 +244,7 @@ def _process_persistent_notifications(
     link_prefix = ""
     if auto_id:
         link_prefix = (
-            f"Automation: [{_md_escape(auto_name)}]"
+            f"Automation: [{md_escape(auto_name)}]"
             f"(/config/automation/edit/{auto_id})\n"
         )
 

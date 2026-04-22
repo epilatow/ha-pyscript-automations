@@ -124,7 +124,7 @@ from dataclasses import dataclass, field
 
 import jinja2
 import jinja2.nodes
-from helpers import PersistentNotification, matches_pattern
+from helpers import PersistentNotification, matches_pattern, md_escape
 
 _JINJA_ENV = jinja2.Environment(autoescape=False)
 
@@ -1442,7 +1442,7 @@ def _build_notification_body(
     actively misleading.
     """
     lines: list[str] = []
-    header_label = _owner_header_label(owner)
+    header_label = md_escape(_owner_header_label(owner))
     if owner.url_path:
         header = f"Owner: [{header_label}]({owner.url_path})"
     else:

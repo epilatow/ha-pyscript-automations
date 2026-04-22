@@ -552,6 +552,21 @@ class TestBuildNotificationMessage:
         msg = _build_notification_message(device, drifted)
         assert "next check" in msg
 
+    def test_device_name_with_brackets_is_escaped(self) -> None:
+        device = _device(device_name="Sensor [foo]")
+        drifted = [
+            DriftDetail(
+                entity_id="sensor.x",
+                id_drifted=True,
+                name_drifted=False,
+                current_name="x",
+                expected_name=None,
+            ),
+        ]
+        msg = _build_notification_message(device, drifted)
+        assert "[Sensor \\[foo\\]]" in msg
+        assert "[Sensor [foo]]" not in msg
+
 
 class TestEvaluateDevice:
     def test_no_drift(self) -> None:

@@ -15,6 +15,7 @@ from helpers import (
     DeviceEntry,
     PersistentNotification,
     matches_pattern,
+    md_escape,
 )
 
 # Check identifiers surfaced as blueprint options. Adding
@@ -301,7 +302,7 @@ def _build_notification_message(
     """Build the notification body for an unhealthy device."""
     lines: list[str] = []
     lines.append(
-        f"Device: [{device.de.name}]({device.de.url})",
+        f"Device: [{md_escape(device.de.name)}]({device.de.url})",
     )
     integrations = sorted(
         device.de.integration_entities.keys(),
