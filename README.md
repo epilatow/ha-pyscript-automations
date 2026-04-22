@@ -37,6 +37,17 @@ runtime dependencies, making it fully testable with pytest.
   negative service-name truth set to eliminate false
   positives.
 
+- [Z-Wave Route Manager](docs/zwave_route_manager.md) -
+  Reconciles Z-Wave priority routes against a declarative
+  YAML config file. Reconciles on HA startup, on manual
+  trigger, when the YAML config is edited, and periodically
+  (default every 5 minutes) to catch out-of-band route
+  changes. Failed reconciles retry automatically on the next
+  minute-granularity tick. Auto-resolves route speed to the
+  slowest hop's `maxDataRate`. Optional clear-unmanaged mode
+  makes the config file the single source of truth. Requires
+  the `core_zwave_js` addon.
+
 ## Scripts
 
 Standalone diagnostic and inspection tools that ship alongside
@@ -50,7 +61,6 @@ the automations. Live in `scripts/` and run from the HA host.
   columns pull from HA's recorder; current state comes from
   zwave-js-ui. Self-bootstraps a venv on first run; see `--help`
   for the full column list and aliases.
-
 
 ## Prerequisites
 

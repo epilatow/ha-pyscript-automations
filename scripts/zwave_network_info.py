@@ -401,7 +401,29 @@ def reexec_in_venv() -> None:
 # --- Fetchers ---------------------------------------------------
 
 
+# Max concurrent per-node route refresh RPCs. zwave-js-ui
+# serializes most controller calls anyway; dozens of parallel
+# requests can stall the controller on a large mesh. 8 keeps
+# the connection pipelined without queuing a thundering herd.
+_ROUTE_REFRESH_CONCURRENCY = 8
+
+
 async def fetch_zwave_nodes() -> dict[int, dict[str, Any]]:
+    """Bulk node fetch with route fields refreshed per-node.
+
+    The bulk ``getNodes`` snapshot's ``applicationRoute`` and
+    ``prioritySUCReturnRoute`` fields can flap to ``None``
+    while the controller still holds the route -- observed in
+    practice, plausibly a cache-invalidation race in
+    zwave-js-ui. The web UI sidesteps this by hitting per-node
+    ``getPriorityRoute`` / ``getPrioritySUCReturnRoute`` for
+    its routing display, so we do the same here.
+
+    Refreshes run concurrently (see
+    ``_ROUTE_REFRESH_CONCURRENCY``) on a single socket.io
+    connection. The controller (node 1) has no inbound route
+    to itself and is skipped entirely.
+    """
     import socketio  # noqa: PLC0415 - needs venv
 
     sio = socketio.AsyncClient()
@@ -412,12 +434,54 @@ async def fetch_zwave_nodes() -> dict[int, dict[str, Any]]:
             {"api": "getNodes", "args": []},
             timeout=10.0,
         )
+        result = resp.get("result") if isinstance(resp, dict) else None
+        if not isinstance(result, list):
+            raise RuntimeError(
+                f"getNodes returned unexpected shape: {resp!r}",
+            )
+        nodes = {
+            n["id"]: n for n in result if isinstance(n, dict) and "id" in n
+        }
+        sem = asyncio.Semaphore(_ROUTE_REFRESH_CONCURRENCY)
+
+        async def _refresh(nid: int) -> None:
+            async with sem:
+                ar_resp, psr_resp = await asyncio.gather(
+                    sio.call(
+                        "ZWAVE_API",
+                        {"api": "getPriorityRoute", "args": [nid]},
+                        timeout=5.0,
+                    ),
+                    sio.call(
+                        "ZWAVE_API",
+                        {
+                            "api": "getPrioritySUCReturnRoute",
+                            "args": [nid],
+                        },
+                        timeout=5.0,
+                    ),
+                )
+            ar = (
+                ar_resp.get("result")
+                if isinstance(ar_resp, dict) and ar_resp.get("success")
+                else None
+            )
+            psr = (
+                psr_resp.get("result")
+                if isinstance(psr_resp, dict) and psr_resp.get("success")
+                else None
+            )
+            nodes[nid]["applicationRoute"] = ar
+            nodes[nid]["prioritySUCReturnRoute"] = psr
+
+        # Skip the controller -- it has no inbound route to
+        # itself, so the per-node refresh would be wasted RPCs.
+        await asyncio.gather(
+            *(_refresh(nid) for nid in nodes if nid != 1),
+        )
     finally:
         await sio.disconnect()
-    result = resp.get("result") if isinstance(resp, dict) else None
-    if not isinstance(result, list):
-        raise RuntimeError(f"getNodes returned unexpected shape: {resp!r}")
-    return {n["id"]: n for n in result if isinstance(n, dict) and "id" in n}
+    return nodes
 
 
 async def fetch_zwave_neighbors(

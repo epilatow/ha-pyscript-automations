@@ -1,0 +1,169 @@
+blueprint:
+  name: Z-Wave Route Manager
+  description: >
+    Reconciles Z-Wave priority routes (controller<->node) against
+    a declarative YAML config file. Reconciles on HA startup, on
+    manual trigger, when the YAML config is edited, and
+    periodically (default every 5 minutes) to catch out-of-band
+    route changes. Failed reconciles retry automatically on the
+    next minute-granularity tick. Requires the core_zwave_js
+    addon (which bundles zwave-js-ui). See
+    docs/zwave_route_manager.md for the file format.
+  domain: automation
+  author: epilatow
+
+  input:
+    config_file_path:
+      name: Config file path
+      description: >
+        Path to the YAML file defining priority routes,
+        relative to the /config directory. Absolute paths
+        are also accepted.
+      default: zwave_route_manager.yaml
+      selector:
+        text: {}
+
+    zwave_js_ui_host:
+      name: Z-Wave JS UI host
+      description: >
+        Hostname of the Z-Wave JS UI backend. The default
+        works for Home Assistant's bundled "Z-Wave JS"
+        addon (core_zwave_js).
+      default: core-zwave-js
+      selector:
+        text: {}
+
+    zwave_js_ui_port:
+      name: Z-Wave JS UI port
+      description: >
+        TCP port of the Z-Wave JS UI backend. The default
+        matches the bundled addon.
+      default: 8091
+      selector:
+        number:
+          min: 1
+          max: 65535
+          mode: box
+
+    zwave_js_ui_token:
+      name: Z-Wave JS UI auth token
+      description: >
+        Optional JWT token. Leave empty if Z-Wave JS UI
+        has authentication disabled (the default for the
+        bundled addon when no user is configured).
+      default: ""
+      selector:
+        text:
+          type: password
+
+    clear_unmanaged_routes:
+      name: Clear routes not in config
+      description: >
+        WARNING: When enabled, application routes and SUC return
+        routes on any Z-Wave node NOT listed in the config
+        file are REMOVED on every reconcile. This makes
+        the config file the single source of truth.
+        Disable if you want manually-set routes (via the
+        Z-Wave JS UI's Network Graph panel) to persist
+        outside config management.
+      default: true
+      selector:
+        boolean: {}
+
+    reconcile_interval_minutes:
+      name: Reconcile interval (minutes)
+      description: >
+        How often to check for out-of-band route drift
+        (e.g. someone editing a route via the zwave-js-ui
+        web UI). Lower values catch drift sooner.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 10080
+          mode: box
+          unit_of_measurement: minutes
+
+    pending_timeout_hours:
+      name: Pending timeout (hours)
+      description: >
+        How long to wait for a route command to be
+        reflected on a sleeping node before raising a
+        persistent notification. Most battery nodes wake
+        within 12-24 hours. FLiRS nodes (most locks) wake
+        within seconds.
+      default: 24
+      selector:
+        number:
+          min: 1
+          max: 168
+          mode: box
+          unit_of_measurement: hours
+
+    default_route_speed:
+      name: Default route speed
+      description: >
+        Used when neither the repeater entry nor the
+        client entry specifies a speed. "auto" picks the
+        slowest max rate supported across all hops in the
+        route (source, repeater, controller).
+      default: auto
+      selector:
+        select:
+          options:
+            - auto
+            - 100k
+            - 40k
+            - "9600"
+
+    max_notifications:
+      name: Max notifications
+      description: >
+        Cap on per-run issue notifications (apply errors
+        and pending timeouts). 0 = unlimited.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+
+    debug_logging:
+      name: Debug logging
+      description: >
+        Emit a log.warning line per reconcile summarising
+        routes configured, applied, pending, and errored.
+        Check Settings > System > Logs to view output.
+      default: false
+      selector:
+        boolean: {}
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+    id: periodic
+  - trigger: homeassistant
+    event: start
+    id: ha_start
+
+actions:
+  - action: pyscript.zwave_route_manager
+    data:
+      instance_id: "{{ this.entity_id }}"
+      trigger_id: "{{ trigger.id | default('manual', true) }}"
+      config_file_path: !input config_file_path
+      zwave_js_ui_host_raw: !input zwave_js_ui_host
+      zwave_js_ui_port_raw: !input zwave_js_ui_port
+      zwave_js_ui_token_raw: !input zwave_js_ui_token
+      clear_unmanaged_routes_raw: !input clear_unmanaged_routes
+      reconcile_interval_minutes_raw: !input reconcile_interval_minutes
+      pending_timeout_hours_raw: !input pending_timeout_hours
+      default_route_speed_raw: !input default_route_speed
+      max_notifications_raw: !input max_notifications
+      debug_logging_raw: !input debug_logging
+
+# Time-pattern fires every minute; an internal gate in the
+# service wrapper decides whether the tick warrants a full
+# reconcile. If one reconcile overlaps the next tick, the
+# newer one is dropped (mode: single).
+mode: single

@@ -1208,6 +1208,23 @@ class TestSweepOrphanNotifications:
         fn(prefix, {f"{prefix}device_dev1"}, notifications)
         assert notifications == [n]
 
+    def test_keep_pattern_skips_matching_ids(self) -> None:
+        # Used by the route manager to leave per-attempt
+        # timeout notifications alone -- they're event-stream
+        # notifications the user dismisses manually.
+        env = _ServiceEnv()
+        fn = env._ns["_sweep_orphan_notifications"]
+        prefix = "z-wave_route_manager_auto_a__"
+        active = {
+            f"{prefix}timeout_30_priority_app_2026-04-22T01_23_45",
+            f"{prefix}apply_42",
+        }
+        notifications: list[Any] = []
+        fn(prefix, active, notifications, keep_pattern="__timeout_")
+        # The timeout notification is exempt; apply is swept.
+        dismissed_ids = {n.notification_id for n in notifications}
+        assert dismissed_ids == {f"{prefix}apply_42"}
+
 
 class TestStscEntityValidation:
     def test_missing_entity_creates_notification(
@@ -4448,6 +4465,458 @@ class TestEdwDevicelessIntegrationFilterPropagation:
             exclude_integrations_raw=["rachio"],
         )
         assert env.deviceless_target_integrations == {"zwave_js"}
+
+
+class _FakeConfigError:
+    """Minimal stand-in for zwave_route_manager.ConfigError.
+
+    The notification helpers only read ``.location``,
+    ``.entity_id``, ``.reason``, and ``.device_id`` -- a tiny
+    shim avoids importing the logic module into this test
+    file (already-covered by the logic-module tests).
+    """
+
+    def __init__(
+        self,
+        location: str,
+        entity_id: str | None,
+        reason: str,
+        device_id: str | None = None,
+    ) -> None:
+        self.location = location
+        self.entity_id = entity_id
+        self.reason = reason
+        self.device_id = device_id
+
+
+class TestZrmNotifications:
+    """ZRM config-error bullet formatting via the unified builder.
+
+    ZRM flattens ConfigError objects to pre-formatted bullet
+    strings (``_zrm_error_bullets``) and passes them to the
+    generic ``_build_config_error_notification`` helper. Tests
+    check both the per-bullet format (entity-first, optional
+    device-page link) and the assembled notification.
+    """
+
+    def _build_zrm_config_notif(
+        self,
+        env: _ServiceEnv,
+        errors: list[_FakeConfigError],
+        instance_id: str = "automation.zrm_test",
+    ) -> Any:
+        bullets = env._ns["_zrm_error_bullets"](errors)
+        return env._ns["_build_config_error_notification"](
+            bullets,
+            instance_id,
+            "Z-Wave Route Manager",
+        )
+
+    def test_title_includes_instance_auto_name(self) -> None:
+        env = _ServiceEnv()
+        notif = self._build_zrm_config_notif(
+            env,
+            [_FakeConfigError("routes[0]", None, "something")],
+            instance_id="automation.zrm_test",
+        )
+        # Automation name falls back to instance_id when no
+        # friendly_name is available in mock state.
+        assert notif.title == "automation.zrm_test: Invalid Configuration"
+
+    def test_inactive_when_no_errors(self) -> None:
+        env = _ServiceEnv()
+        notif = self._build_zrm_config_notif(env, [])
+        assert notif.active is False
+        assert notif.message == ""
+
+    def test_bullet_no_entity_falls_back_to_location(self) -> None:
+        env = _ServiceEnv()
+        notif = self._build_zrm_config_notif(
+            env,
+            [_FakeConfigError("(file)", None, "read failed")],
+        )
+        assert "- `(file)`: read failed" in notif.message
+
+    def test_bullet_entity_first_with_device_link(self) -> None:
+        env = _ServiceEnv()
+        notif = self._build_zrm_config_notif(
+            env,
+            [
+                _FakeConfigError(
+                    location="routes[0].clients[2]",
+                    entity_id="binary_sensor.window_front_left",
+                    reason=(
+                        "Device does not support routing: "
+                        "configured to use Z-Wave Long Range (vs Mesh)"
+                    ),
+                    device_id="abc123",
+                ),
+            ],
+        )
+        assert (
+            "- [`binary_sensor.window_front_left`]"
+            "(/config/devices/device/abc123) "
+            "(`routes[0].clients[2]`): "
+            "Device does not support routing: "
+            "configured to use Z-Wave Long Range (vs Mesh)"
+        ) in notif.message
+
+    def test_bullet_entity_without_device_id_unlinked(self) -> None:
+        # "Entity not found" errors have entity_id but no
+        # DeviceResolution, so no device_id. Render the
+        # entity_id as plain backticked text -- the entity
+        # isn't in HA so a device-page link wouldn't resolve.
+        env = _ServiceEnv()
+        notif = self._build_zrm_config_notif(
+            env,
+            [
+                _FakeConfigError(
+                    location="routes[1].clients[0]",
+                    entity_id="lock.missing",
+                    reason="entity not found",
+                ),
+            ],
+        )
+        bullet = "- `lock.missing` (`routes[1].clients[0]`): entity not found"
+        assert bullet in notif.message
+        # Make sure we didn't accidentally emit an empty-href link.
+        assert "/config/devices/device/" not in notif.message
+
+    def test_multiple_errors_all_listed(self) -> None:
+        env = _ServiceEnv()
+        errors = [
+            _FakeConfigError(
+                f"routes[0].clients[{i}]",
+                f"binary_sensor.lr{i}",
+                "Device does not support routing: configured to use"
+                " Z-Wave Long Range (vs Mesh)",
+                device_id=f"dev{i}",
+            )
+            for i in range(3)
+        ]
+        notif = self._build_zrm_config_notif(env, errors)
+        # Generic builder prelude.
+        assert "Configuration errors:" in notif.message
+        for i in range(3):
+            assert f"binary_sensor.lr{i}" in notif.message
+            assert f"/config/devices/device/dev{i}" in notif.message
+
+    def test_api_notification_title_plain(self) -> None:
+        env = _ServiceEnv()
+        build = env._ns["_zrm_api_notification"]
+        notif = build("zrm_", "connection refused")
+        assert notif.title == "Z-Wave Route Manager: API unavailable"
+
+    def test_apply_notification_title_plain(self) -> None:
+        env = _ServiceEnv()
+        build = env._ns["_zrm_apply_notification"]
+
+        class _Kind:
+            value = "set_application_route"
+
+        class _Action:
+            kind = _Kind()
+            node_id = 42
+            client_entity_id = "lock.x"
+            repeaters = [50]
+
+        class _Result:
+            message = "timeout"
+
+        notif = build("zrm_", _Action(), _Result())
+        assert notif.title == ("Z-Wave Route Manager: apply failed for node 42")
+
+    def test_timeout_notification_id_per_attempt(self) -> None:
+        # Each timeout event must produce a unique
+        # notification ID keyed to the attempt that just
+        # timed out, so retries don't collide and so the
+        # orphan sweep (with keep_pattern="__timeout_") can
+        # leave them alone.
+        import importlib
+        from datetime import UTC, datetime
+
+        zrm = importlib.import_module("zwave_route_manager")
+        env = _ServiceEnv()
+        build = env._ns["_zrm_timeout_notification"]
+        old_ts = datetime(2026, 4, 22, 1, 23, 45, tzinfo=UTC)
+        notif = build(
+            "zwm_",
+            42,
+            zrm.RouteType.PRIORITY_APP,
+            old_ts,
+            3,
+            24,
+        )
+        assert "timeout_42_priority_app" in notif.notification_id
+        assert "2026-04-22T01_23_45" in notif.notification_id
+        # User-facing message names the route type, the retry
+        # count, and the way to stop further retries.
+        assert "priority_app" in notif.message
+        assert "timeout #3" in notif.message
+        assert "Remove the device from the YAML config" in notif.message
+
+    def test_api_error_with_brackets_is_escaped(self) -> None:
+        env = _ServiceEnv()
+        build = env._ns["_zrm_api_notification"]
+        notif = build("zrm_", "bad response: [foo]")
+        assert "bad response: \\[foo\\]" in notif.message
+        assert "bad response: [foo]" not in notif.message
+
+    def test_apply_server_response_with_brackets_is_escaped(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        build = env._ns["_zrm_apply_notification"]
+
+        class _Kind:
+            value = "set_application_route"
+
+        class _Action:
+            kind = _Kind()
+            node_id = 42
+            client_entity_id = "lock.x"
+            repeaters: list[int] = []
+
+        class _Result:
+            message = "ack [partial]"
+
+        notif = build("zrm_", _Action(), _Result())
+        assert "Server response: ack \\[partial\\]" in notif.message
+
+
+class TestZrmPathStorage:
+    """Round-trip tests for the per-route storage helpers.
+
+    These cover ``_zrm_paths_to_storage`` /
+    ``_zrm_paths_from_storage`` plus the per-path serializers
+    they delegate to. The route-manager service relies on
+    these for both the ``pending`` and ``applied`` state-entity
+    attributes (same shape, same helpers).
+    """
+
+    def _setup(self) -> tuple[Any, Any, Any]:
+        env = _ServiceEnv()
+        import importlib
+        import sys
+
+        sys.path.insert(
+            0,
+            str(REPO_ROOT / "pyscript" / "modules"),
+        )
+        logic = importlib.import_module("zwave_route_manager")
+        bridge = importlib.import_module("zwave_js_ui_bridge")
+        return env, logic, bridge
+
+    def test_round_trip_preserves_fields(self) -> None:
+        env, logic, bridge = self._setup()
+        to_storage = env._ns["_zrm_paths_to_storage"]
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        requested = datetime(2026, 4, 21, 12, 0, 0)
+        confirmed = datetime(2026, 4, 21, 12, 5, 0)
+        paths = {
+            18: [
+                logic.RouteRequest(
+                    type=logic.RouteType.PRIORITY_APP,
+                    repeater_node_ids=[50],
+                    speed=bridge.RouteSpeed.RATE_100K,
+                    requested_at=requested,
+                    confirmed_at=confirmed,
+                ),
+                logic.RouteRequest(
+                    type=logic.RouteType.PRIORITY_SUC,
+                    repeater_node_ids=[50, 47],
+                    speed=bridge.RouteSpeed.RATE_40K,
+                    requested_at=requested,
+                    confirmed_at=None,
+                ),
+            ],
+        }
+        node_to_entity = {18: "lock.front_door", 50: "sensor.ext"}
+        serialized = to_storage(paths, node_to_entity)
+        assert serialized["18"]["entity_id"] == "lock.front_door"
+        assert serialized["18"]["paths"][0]["repeaters"] == [
+            {"id": 50, "entity_id": "sensor.ext"},
+        ]
+        round_tripped = from_storage(serialized)
+        assert set(round_tripped.keys()) == {18}
+        out_paths = round_tripped[18]
+        assert out_paths[0].type is logic.RouteType.PRIORITY_APP
+        assert out_paths[0].repeater_node_ids == [50]
+        assert out_paths[0].speed == bridge.RouteSpeed.RATE_100K
+        assert out_paths[0].requested_at == requested
+        assert out_paths[0].confirmed_at == confirmed
+        assert out_paths[1].type is logic.RouteType.PRIORITY_SUC
+        assert out_paths[1].repeater_node_ids == [50, 47]
+        assert out_paths[1].confirmed_at is None
+
+    def test_timeout_count_round_trips(self) -> None:
+        env, logic, bridge = self._setup()
+        to_storage = env._ns["_zrm_paths_to_storage"]
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        requested = datetime(2026, 4, 21, 12, 0, 0)
+        paths = {
+            18: [
+                logic.RouteRequest(
+                    type=logic.RouteType.PRIORITY_APP,
+                    repeater_node_ids=[50],
+                    speed=bridge.RouteSpeed.RATE_100K,
+                    requested_at=requested,
+                    confirmed_at=None,
+                    timeout_count=5,
+                ),
+            ],
+        }
+        out = from_storage(to_storage(paths, {}))[18][0]
+        assert out.timeout_count == 5
+        # And legacy storage without the field defaults to 0.
+        legacy = {
+            "18": {
+                "entity_id": "",
+                "paths": [
+                    {
+                        "type": "priority_app",
+                        "repeaters": [],
+                        "speed": "100k",
+                        "requested_at": "",
+                        "confirmed_at": "",
+                    },
+                ],
+            },
+        }
+        out_legacy = from_storage(legacy)[18][0]
+        assert out_legacy.timeout_count == 0
+
+    def test_missing_timestamps_round_trip_as_none(self) -> None:
+        env, logic, bridge = self._setup()
+        to_storage = env._ns["_zrm_paths_to_storage"]
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        # Observed-already-applied: requested_at is None, only
+        # confirmed_at is set.
+        confirmed = datetime(2026, 4, 21, 12, 0, 0)
+        paths = {
+            18: [
+                logic.RouteRequest(
+                    type=logic.RouteType.PRIORITY_APP,
+                    repeater_node_ids=[50],
+                    speed=bridge.RouteSpeed.RATE_100K,
+                    requested_at=None,
+                    confirmed_at=confirmed,
+                ),
+            ],
+        }
+        round_tripped = from_storage(to_storage(paths, {}))
+        out = round_tripped[18][0]
+        assert out.requested_at is None
+        assert out.confirmed_at == confirmed
+
+    def test_empty_input_yields_empty_output(self) -> None:
+        env, _logic, _bridge = self._setup()
+        to_storage = env._ns["_zrm_paths_to_storage"]
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        assert to_storage({}, {}) == {}
+        assert from_storage({}) == {}
+        assert from_storage(None) == {}
+        assert from_storage("garbage") == {}
+
+    def test_unknown_route_type_dropped(self) -> None:
+        env, _logic, _bridge = self._setup()
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        # Future-shape entry referencing a type we don't know:
+        # silently dropped rather than raising.
+        stored = {
+            "18": {
+                "entity_id": "lock.x",
+                "paths": [
+                    {
+                        "type": "future_route_type",
+                        "repeaters": [{"id": 50, "entity_id": ""}],
+                        "speed": "100k",
+                        "requested_at": "",
+                        "confirmed_at": "",
+                    },
+                ],
+            },
+        }
+        # All the entries are dropped -> node entry omitted.
+        assert from_storage(stored) == {}
+
+    def test_repeater_legacy_int_shape_accepted(self) -> None:
+        env, _logic, bridge = self._setup()
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        # Hand-edited or older state with bare-int repeaters.
+        # We accept this so a downgrade or a manual edit doesn't
+        # discard otherwise-valid paths.
+        stored = {
+            "18": {
+                "entity_id": "",
+                "paths": [
+                    {
+                        "type": "priority_app",
+                        "repeaters": [50, 47],
+                        "speed": "100k",
+                        "requested_at": "",
+                        "confirmed_at": "",
+                    },
+                ],
+            },
+        }
+        out = from_storage(stored)
+        assert out[18][0].repeater_node_ids == [50, 47]
+        assert out[18][0].speed == bridge.RouteSpeed.RATE_100K
+
+    def test_clear_entry_round_trips_with_none_speed(self) -> None:
+        # Pending clears carry ``speed=None`` in memory and
+        # render as ``"-"`` in the state entity. Round-trip
+        # verifies both directions of the storage helpers
+        # agree on the invariant.
+        env, logic, _bridge = self._setup()
+        to_storage = env._ns["_zrm_paths_to_storage"]
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        requested = datetime(2026, 4, 21, 12, 0, 0)
+        paths = {
+            18: [
+                logic.RouteRequest(
+                    type=logic.RouteType.PRIORITY_APP,
+                    repeater_node_ids=[],
+                    speed=None,
+                    requested_at=requested,
+                    confirmed_at=None,
+                ),
+            ],
+        }
+        serialized = to_storage(paths, {})
+        assert serialized["18"]["paths"][0]["speed"] == "-"
+        assert serialized["18"]["paths"][0]["repeaters"] == []
+        round_tripped = from_storage(serialized)
+        out = round_tripped[18][0]
+        assert out.speed is None
+        assert out.repeater_node_ids == []
+        assert out.requested_at == requested
+
+    def test_legacy_clear_with_real_speed_accepts_as_none(self) -> None:
+        # Pre-fix stored state used RouteSpeed.RATE_9600 as a
+        # placeholder for clears. Make sure we tolerate that
+        # shape -- empty repeaters + any legacy speed string
+        # parses back to ``speed=None``.
+        env, _logic, _bridge = self._setup()
+        from_storage = env._ns["_zrm_paths_from_storage"]
+        stored = {
+            "18": {
+                "entity_id": "",
+                "paths": [
+                    {
+                        "type": "priority_app",
+                        "repeaters": [],
+                        "speed": "9600",
+                        "requested_at": "2026-04-21T12:00:00",
+                        "confirmed_at": "",
+                    },
+                ],
+            },
+        }
+        out = from_storage(stored)
+        assert out[18][0].repeater_node_ids == []
+        assert out[18][0].speed is None
 
 
 class TestCodeQuality(CodeQualityBase):
