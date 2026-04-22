@@ -80,7 +80,7 @@ run re-creates all active notifications (to update
 content if health changed), which updates their
 timestamps. Since all creates happen within milliseconds,
 the panel's display order is effectively random. The
-same devices are shown — only the panel ordering varies.
+same devices are shown -- only the panel ordering varies.
 
 ## Developer notes
 

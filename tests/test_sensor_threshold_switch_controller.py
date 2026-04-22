@@ -669,7 +669,7 @@ class TestStartupRecovery:
         state = State()  # fresh state, no auto_off_started_at
         t = T0
 
-        # Timer fires while switch is on — should start
+        # Timer fires while switch is on -- should start
         # auto-off even though no switch event occurred.
         result = controller.evaluate(state, timer_inputs("on", current_time=t))
         assert result.action == Action.NONE

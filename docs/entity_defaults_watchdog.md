@@ -16,11 +16,11 @@ automatically when drift is resolved.
 - Detect device name-override drift (stale name overrides
   left behind when an integration's naming conventions
   change)
-- Detect deviceless entity ID drift — automations,
+- Detect deviceless entity ID drift -- automations,
   scripts, helpers, template sensors, scenes, groups, and
   other user-named entities whose IDs no longer match
   their current names
-- Detect stale HA collision suffixes (`_2`, `_3`, …) left
+- Detect stale HA collision suffixes (`_2`, `_3`, ...) left
   over from naming conflicts whose original peers were
   removed
 - Detect redundant name prefixes (overrides that include
@@ -127,10 +127,10 @@ defaults:
   entity ID's object part.  Also walks the state list
   for entities in those domains that don't have a
   registry entry (YAML-defined without `unique_id:`) as
-  a safety net — those are caught only when the user has
+  a safety net -- those are caught only when the user has
   set an explicit `name:` whose slug differs from the
   entity ID.  HA's collision-suffix convention (`_2`,
-  `_3`, …) is accepted when at least one peer with the
+  `_3`, ...) is accepted when at least one peer with the
   un-suffixed (or lower-`_N`) object ID exists;
   otherwise the suffix is classified as stale and
   reported in a dedicated section with a "rename to"
@@ -201,32 +201,32 @@ drifted entity, with a pointer to the most useful edit
 surface:
 
 ```
-- `automation.driveway_lights_on_at_sunset` → expected `automation.auto_on_sunset_lights_sunset_to_8pm`
+- `automation.driveway_lights_on_at_sunset` -> expected `automation.auto_on_sunset_lights_sunset_to_8pm`
   [Auto-On: Sunset Lights: Sunset to 8pm](/config/automation/edit/1669687974816)
-- `sensor.template_sensor` → expected `sensor.grid_import_power`
-  Grid Import Power · integration [template](/config/integrations/integration/template)
-- `sensor.old_yaml_thing` → expected `sensor.grid_import_power`
-  Grid Import Power · add `unique_id:` to make this entity manageable
+- `sensor.template_sensor` -> expected `sensor.grid_import_power`
+  Grid Import Power  -  integration [template](/config/integrations/integration/template)
+- `sensor.old_yaml_thing` -> expected `sensor.grid_import_power`
+  Grid Import Power  -  add `unique_id:` to make this entity manageable
 ```
 
 For automations and scripts the friendly name itself is
 the link to that entity's editor.  Registry-backed
 entries from other integrations show the friendly name in
 plain text followed by the owning integration's name as a
-link to its config page — scan the integration column to
+link to its config page -- scan the integration column to
 see when several flagged entities share a single source
-(e.g. five rows all tagged `· integration rachio`) and
+(e.g. five rows all tagged ` -  integration rachio`) and
 can be suppressed together via `exclude_integrations`.
 State-only entities (YAML blocks without `unique_id:`)
 have no owning integration, so they show a nudge to add
 one instead.
 
 **Stale collision suffixes** -- entities whose ID ends
-in `_N` (N ≥ 2) but no un-suffixed or lower-`_N` peer
+in `_N` (N >= 2) but no un-suffixed or lower-`_N` peer
 exists:
 
 ```
-- `automation.front_porch_light_2` → rename to `automation.front_porch_light`
+- `automation.front_porch_light_2` -> rename to `automation.front_porch_light`
   [Front Porch Light](/config/automation/edit/1234567890)
 ```
 
@@ -241,7 +241,7 @@ adding `unique_id:` on every block has two benefits:
 - The entity is persisted in the registry, so renames,
   customizations, and cross-restart stability just work.
 - The watchdog can compare names to entity IDs and flag
-  drift — without a registry entry, it has no authoritative
+  drift -- without a registry entry, it has no authoritative
   name to compare against.
 
 ### Notification panel ordering
@@ -252,7 +252,7 @@ run re-creates all active notifications (to update
 content if drift changed), which updates their
 timestamps. Since all creates happen within milliseconds,
 the panel's display order is effectively random. The
-same devices are shown — only the panel ordering varies.
+same devices are shown -- only the panel ordering varies.
 
 ### Exclusion configuration
 

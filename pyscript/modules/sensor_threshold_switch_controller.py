@@ -165,7 +165,7 @@ def _round_up_to_minute(dt: datetime) -> datetime:
     )
 
 
-# ── Notification messages ──
+# -- Notification messages --
 # Edit these templates to change user-facing text.
 # {name} = switch friendly name.  Other placeholders
 # are scenario-specific (documented inline).
@@ -198,7 +198,7 @@ _MSG_OVERRIDE_DISABLED = "Sensor override disabled for {name}"
 _MSG_AUTO_OFF_REASON = "Auto-off after {mins} minute(s)"
 
 
-# ── Module-level logic functions (pyscript-compatible) ──
+# -- Module-level logic functions (pyscript-compatible) --
 
 
 def _ctrl_evaluate(
@@ -471,7 +471,7 @@ def _ctrl_handle_timer(
     return Result()
 
 
-# ── Controller class (delegates to module-level fns) ──
+# -- Controller class (delegates to module-level fns) --
 
 
 class Controller:

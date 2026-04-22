@@ -37,7 +37,7 @@ tree:
      (``states.sensor.foo`` yields ``sensor.foo``).
 
    Non-constant expressions (``states('sensor.' ~ n)``)
-   are intentionally skipped — we only validate refs we
+   are intentionally skipped -- we only validate refs we
    can prove statically.
 
 3. **String sniff.** For string leaves that are neither
@@ -75,7 +75,7 @@ input would surface as a broken-entity false positive.
 Owner attribution
 -----------------
 
-Findings are grouped by **owner** — the entity or
+Findings are grouped by **owner** -- the entity or
 structural unit that holds the broken reference. Owner
 attribution rules per source adapter are documented in
 the comment block above the ``scan_*`` functions.
@@ -96,12 +96,12 @@ body so users know where to look.
 Known limitations
 -----------------
 
-See ``docs/reference_watchdog.md`` § "Known limitations"
+See ``docs/reference_watchdog.md`` section "Known limitations"
 for the full list. The headline cases:
 
 - Runtime-computed entity IDs embedded as string
   literals inside YAML scalars (e.g. multi-line list
-  strings consumed via ``in`` checks) aren't caught —
+  strings consumed via ``in`` checks) aren't caught --
   they're neither Jinja-templated nor whole-string
   entity IDs. We intentionally do not run a regex
   fallback because it's the source of most false
@@ -111,7 +111,7 @@ for the full list. The headline cases:
   adapters don't wire them through yet.
 - Unregistered YAML entities (e.g. the legacy ``plant``
   integration, which doesn't register entities) can't be
-  reached by ``exclude_integrations`` — use
+  reached by ``exclude_integrations`` -- use
   ``exclude_paths`` for those cases.
 """
 
@@ -128,7 +128,7 @@ from helpers import PersistentNotification, matches_pattern, md_escape
 
 _JINJA_ENV = jinja2.Environment(autoescape=False)
 
-# ── Constants ───────────────────────────────────────────────────────────
+# -- Constants -----------------------------------------------------------
 
 
 # Seed set of HA entity domains, used to recognize strings that look
@@ -237,7 +237,7 @@ _DEVICE_KEYS: frozenset[str] = frozenset(["device", "device_id", "devices"])
 _SERVICE_KEYS: frozenset[str] = frozenset(["service", "action"])
 
 
-# ── Dataclasses ─────────────────────────────────────────────────────────
+# -- Dataclasses ---------------------------------------------------------
 
 
 @dataclass
@@ -269,7 +269,7 @@ class RegistryEntry:
 
     Used inside ``TruthSet.registry`` so the logic module
     can reverse-lookup full registry metadata for an
-    entity_id — specifically ``config_entry_id`` (drives
+    entity_id -- specifically ``config_entry_id`` (drives
     the ``yaml_only`` owner flag) and ``platform`` (used
     by ``exclude_integrations`` filtering of registered
     owners).
@@ -326,7 +326,7 @@ class TruthSet:
     # Pre-computed set of ``config_entry_id`` values that own at
     # least one entity in the registry. Drives the
     # ``config_entries/?config_entry=<id>`` URL suppression in
-    # ``_scan_config_entries`` without an O(N_entries × N_registry)
+    # ``_scan_config_entries`` without an O(N_entries x N_registry)
     # scan per config entry.
     config_entries_with_entities: frozenset[str] = field(
         default_factory=frozenset,
@@ -339,7 +339,7 @@ class SourceInput:
 
     Created in the service wrapper after reading and
     parsing each source file. Contains **no HA runtime
-    data** — only the parsed content of one file, its
+    data** -- only the parsed content of one file, its
     logical type (dispatch key for adapters), and any
     source-specific metadata the adapter needs.
     """
@@ -404,7 +404,7 @@ class Owner:
 
     ``friendly_name`` is a human name when available
     (automation alias, entity name, customize entity_id,
-    dict key, …). May be ``None`` for purely structural
+    dict key, ...). May be ``None`` for purely structural
     owners like ``config-block[0].trigger[0]``.
     """
 
@@ -448,7 +448,7 @@ def _owner_header_label(owner: Owner) -> str:
     the block path and friendly name both visible when
     both are present. The title (``_owner_display_name``)
     prefers the friendly name alone for concision; the
-    header trades concision for locatability — it tells
+    header trades concision for locatability -- it tells
     the user both *where* in the file and *what* it is.
     """
     if owner.block_path and owner.friendly_name:
@@ -461,7 +461,7 @@ class Finding:
     """A validated reference plus its outcome.
 
     ``disabled=True`` means the target entity exists in
-    the registry but is disabled — whether this counts
+    the registry but is disabled -- whether this counts
     as a "finding" depends on ``Config.check_disabled_entities``.
     """
 
@@ -507,7 +507,7 @@ class OwnerResult:
         )
 
 
-# ── Detection primitives ────────────────────────────────────────────────
+# -- Detection primitives ------------------------------------------------
 
 
 def _looks_like_entity_id(s: str, known_domains: AbstractSet[str]) -> bool:
@@ -624,8 +624,8 @@ def _walk_tree(
 ) -> list[Ref]:
     """Walk a parsed YAML/JSON tree returning reference candidates.
 
-    The three detection mechanisms — structural walk,
-    Jinja AST extraction, and string sniff — all fire
+    The three detection mechanisms -- structural walk,
+    Jinja AST extraction, and string sniff -- all fire
     from this function. See the module docstring for the
     strategy summary.
 
@@ -691,7 +691,7 @@ def _walk_tree(
             )
     elif isinstance(node, str):
         # Jinja AST pass runs on every string leaf
-        # regardless of sniff_strings — a template inside
+        # regardless of sniff_strings -- a template inside
         # a _ENTITY_KEYS subtree is still a valid detection
         # candidate distinct from the raw value.
         for eid in _extract_refs_from_template(node, known_domains):
@@ -715,7 +715,7 @@ def _walk_tree(
     return out
 
 
-# ── Exclusion helpers ───────────────────────────────────────────────────
+# -- Exclusion helpers ---------------------------------------------------
 
 
 def _is_path_excluded(path: str, patterns: list[str]) -> bool:
@@ -738,7 +738,7 @@ def _is_integration_excluded(
 ) -> bool:
     """True if an integration handle is in the exclude list.
 
-    Returns False for ``None`` — owners with no
+    Returns False for ``None`` -- owners with no
     associated integration (generic YAML files, file-
     level owners) cannot be integration-excluded.
     """
@@ -765,7 +765,7 @@ def _is_entity_excluded(
     return False
 
 
-# ── Per-source adapters ─────────────────────────────────────────────────
+# -- Per-source adapters -------------------------------------------------
 
 # Owner attribution rules
 # -----------------------
@@ -806,7 +806,7 @@ def _is_entity_excluded(
 # - **customize.yaml** (_scan_customize): top-level dict
 #   where each key is an entity_id being customized.
 #   Owner per key. Name = the entity_id. The adapter
-#   does NOT walk values for refs — the keys themselves
+#   does NOT walk values for refs -- the keys themselves
 #   are the refs, validated by the ``kind == "customize"``
 #   branch in ``_collect_findings``. Integration =
 #   ``homeassistant``.
@@ -828,12 +828,12 @@ def _is_entity_excluded(
 #
 # - **generic_yaml** (_scan_generic_yaml): catch-all for
 #   YAML files without dedicated adapters. Uses
-#   structural owner derivation: dict top-level → owner
-#   per key; list top-level → owner per item (named
+#   structural owner derivation: dict top-level -> owner
+#   per key; list top-level -> owner per item (named
 #   from ``item.name`` / ``item.alias`` / ``item.id``
-#   if present, else index); scalar/other → file-level
+#   if present, else index); scalar/other -> file-level
 #   owner. Integration = None (not filterable by
-#   integration — use ``exclude_paths`` instead).
+#   integration -- use ``exclude_paths`` instead).
 #
 # Every adapter sets ``yaml_only`` by looking up the
 # owner entity in ``TruthSet.registry`` and checking
@@ -867,7 +867,7 @@ def _owner_from_registry(
     has an ``entity_id`` that resolves to a registry
     entry with ``config_entry_id is None``, flag it as
     YAML-only. If the entity isn't in the registry at
-    all, also flag as YAML-only — it's either a legacy
+    all, also flag as YAML-only -- it's either a legacy
     YAML integration (plants) or a built-in, both of
     which need manual file edits.
     """
@@ -875,7 +875,7 @@ def _owner_from_registry(
         return
     entry = truth_set.registry.get(owner.entity_id)
     if entry is None:
-        # Not in registry → assume YAML-only.
+        # Not in registry -> assume YAML-only.
         owner.yaml_only = True
     elif entry.config_entry_id is None:
         owner.yaml_only = True
@@ -927,7 +927,7 @@ def _scan_scripts(
         owner_eid: str | None = f"script.{sid}"
         if owner_eid not in truth_set.entity_ids:
             owner_eid = None
-        # Alias if set, slug otherwise — both survive a
+        # Alias if set, slug otherwise -- both survive a
         # text search through scripts.yaml.
         friendly = sid
         if isinstance(body, dict):
@@ -966,8 +966,8 @@ _TEMPLATE_PLATFORM_DOMAINS: tuple[str, ...] = (
 
 
 # Non-entity sub-keys inside a template config block.
-# ``trigger`` and ``action`` are lists → owner per item.
-# ``variables`` is a dict → one owner for the whole dict
+# ``trigger`` and ``action`` are lists -> owner per item.
+# ``variables`` is a dict -> one owner for the whole dict
 # because per-variable owners would explode for little
 # gain and variables share evaluation context anyway.
 _TEMPLATE_LIST_SUBKEYS: tuple[str, ...] = ("trigger", "action")
@@ -982,18 +982,18 @@ def _scan_template(
 
     Block paths land on each addressable unit:
 
-    - ``config-block[N].<platform>[M]`` — entity item M
-      inside platform (sensor/binary_sensor/…) of block N.
+    - ``config-block[N].<platform>[M]`` -- entity item M
+      inside platform (sensor/binary_sensor/...) of block N.
     - ``config-block[N].trigger[M]`` /
-      ``config-block[N].action[M]`` — list-items of the
+      ``config-block[N].action[M]`` -- list-items of the
       trigger/action lists (if present).
-    - ``config-block[N].variables`` — a single owner for
+    - ``config-block[N].variables`` -- a single owner for
       the per-block variables dict.
 
     Each entity-platform item also receives a resolved
     ``entity_id`` (when ``unique_id`` is in the registry)
     and a human ``friendly_name`` from ``item.name``.
-    Block-level non-entity owners have no friendly name —
+    Block-level non-entity owners have no friendly name --
     their display label falls back to
     ``integration + " - " + block_path``.
     """
@@ -1006,13 +1006,13 @@ def _scan_template(
         if not isinstance(block, dict):
             continue
 
-        # Entity platforms — owner per entity item.
+        # Entity platforms -- owner per entity item.
         for domain in _TEMPLATE_PLATFORM_DOMAINS:
             items = block.get(domain)
             if items is None:
                 continue
             # HA accepts sensor: as either a dict (single
-            # entity) or a list of dicts. Coerce dict →
+            # entity) or a list of dicts. Coerce dict ->
             # single-element list so we iterate uniformly.
             if isinstance(items, dict):
                 items = [items]
@@ -1043,7 +1043,7 @@ def _scan_template(
                 _owner_from_registry(owner, truth_set)
                 owners.append((owner, item))
 
-        # List-backed block-level keys — owner per item.
+        # List-backed block-level keys -- owner per item.
         for subkey in _TEMPLATE_LIST_SUBKEYS:
             raw = block.get(subkey)
             if raw is None:
@@ -1060,7 +1060,7 @@ def _scan_template(
                 )
                 owners.append((sub_owner, item))
 
-        # Dict-backed block-level keys — one owner per key.
+        # Dict-backed block-level keys -- one owner per key.
         for subkey in _TEMPLATE_DICT_SUBKEYS:
             raw = block.get(subkey)
             if raw is None:
@@ -1083,7 +1083,7 @@ def _scan_customize(
     """Owner per entity customization in customize.yaml.
 
     customize.yaml's top-level keys *are* the entity IDs
-    being customized — each key is validated as a
+    being customized -- each key is validated as a
     reference. The attrs dict (friendly_name, icon,
     device_class, ...) is not a ref source, so the
     ``integration == "customize"`` branch in
@@ -1153,7 +1153,7 @@ def _scan_config_entries(
         )
         _owner_from_registry(owner, truth_set)
 
-        # Walk both data and options — different
+        # Walk both data and options -- different
         # integrations store refs in different places.
         subtree: dict[str, object] = {
             "data": entry.get("data") or {},
@@ -1218,7 +1218,7 @@ def _scan_generic_yaml(
 
     Integration is ``None``, so the notification omits
     the ``Integration:`` line and ``exclude_integrations``
-    cannot filter these — users reach for
+    cannot filter these -- users reach for
     ``exclude_paths`` instead.
     """
     owners: list[tuple[Owner, object]] = []
@@ -1252,7 +1252,7 @@ def _scan_generic_yaml(
             owners.append((owner, item))
         return owners
 
-    # Scalar, None, or otherwise — whole-file owner with
+    # Scalar, None, or otherwise -- whole-file owner with
     # no structural block to address.
     owner = Owner(
         source_file=source.path,
@@ -1261,7 +1261,7 @@ def _scan_generic_yaml(
     return owners
 
 
-# ── Finding collection and notification building ───────────────────────
+# -- Finding collection and notification building -----------------------
 
 
 @dataclass
@@ -1305,7 +1305,7 @@ def _collect_findings(
     ref position doesn't double-count. The same broken
     entity at two different context paths (e.g. a
     trigger and a condition) intentionally produces
-    separate findings — each shows *where* the broken
+    separate findings -- each shows *where* the broken
     reference appears. Applies the
     service-name negative truth set (drops sniff hits
     that are registered HA services). Applies the
@@ -1318,7 +1318,7 @@ def _collect_findings(
 
     # customize.yaml is special: the subtree is a one-
     # key dict whose key is the entity ID being
-    # customized. We don't walk it for refs — the key
+    # customized. We don't walk it for refs -- the key
     # IS the ref.
     if owner.integration == "customize" and isinstance(tree, dict):
         for eid_key, _attrs in tree.items():
@@ -1420,21 +1420,21 @@ def _build_notification_body(
         File: `<path>`
 
         Broken references (N):
-        - `<value>` — <context>
+        - `<value>` -- <context>
         ...
 
         Disabled-but-existing references (M):
-        - `<value>` *(disabled)* — <context>
+        - `<value>` *(disabled)* -- <context>
         ...
 
     ``Integration:`` is always omitted when
     ``owner.integration is None`` so the notification
     body reflects what ``exclude_integrations`` can
-    filter — users should never see an integration
+    filter -- users should never see an integration
     name they can't paste into the blueprint input.
 
     The ``(YAML-only, edit <file>)`` note is suppressed
-    whenever the owner has a ``url_path`` — in that case
+    whenever the owner has a ``url_path`` -- in that case
     the clickable ``Owner:`` link takes the user to HA's
     UI editor (for example automations/scripts defined
     in ``automations.yaml``/``scripts.yaml`` with an
@@ -1452,7 +1452,7 @@ def _build_notification_body(
     # ``yaml_only`` means the entity isn't backed by a
     # config entry, but HA's UI may still edit the owner
     # (e.g. entries in automations.yaml / scripts.yaml
-    # with an ``id``/key — those get a UI edit URL). When
+    # with an ``id``/key -- those get a UI edit URL). When
     # an edit URL is present the Owner: link already
     # takes the user to the UI editor, so suppress the
     # "edit the YAML file" nag. The File: line below
@@ -1506,7 +1506,7 @@ def _build_notification_body(
             kind_tag = "device" if f.ref.kind == "device" else ""
             suffix = f" [{kind_tag}]" if kind_tag else ""
             lines.append(
-                f"- `{f.ref.value}`{suffix}  — `{f.ref.context}`",
+                f"- `{f.ref.value}`{suffix}  -- `{f.ref.context}`",
             )
 
     if disabled:
@@ -1516,7 +1516,7 @@ def _build_notification_body(
         )
         for f in disabled:
             lines.append(
-                f"- `{f.ref.value}` *(disabled)*  — `{f.ref.context}`",
+                f"- `{f.ref.value}` *(disabled)*  -- `{f.ref.context}`",
             )
 
     return "\n".join(lines)
@@ -1568,7 +1568,7 @@ def _build_owner_result(
     )
 
 
-# Source type → adapter dispatch. _scan_generic_yaml is the
+# Source type -> adapter dispatch. _scan_generic_yaml is the
 # catch-all for anything not in this map.
 _AdapterFn = Callable[
     [SourceInput, TruthSet],
@@ -1598,7 +1598,7 @@ def _evaluate_sources(
     to ``_scan_generic_yaml`` if no dedicated adapter
     registered for its type), collects owners, walks
     their subtrees, applies exclusions, and returns
-    one ``OwnerResult`` per owner — including owners
+    one ``OwnerResult`` per owner -- including owners
     with zero findings (the service wrapper uses these
     for the ``owners_total`` / ``owners_with_refs`` /
     ``owners_without_refs`` stats).
@@ -1621,7 +1621,7 @@ def _evaluate_sources(
 
             # Source-side integration exclusion. Generic
             # YAML owners have integration=None and are
-            # never integration-excluded — users reach
+            # never integration-excluded -- users reach
             # for exclude_paths for those.
             if _is_integration_excluded(
                 owner.integration,
@@ -1646,7 +1646,7 @@ def _evaluate_sources(
     return results
 
 
-# ── YAML source discovery ──────────────────────────────────────────────
+# -- YAML source discovery ----------------------------------------------
 #
 # These functions handle YAML file parsing and include-
 # following for source discovery. They are called via
@@ -1654,7 +1654,7 @@ def _evaluate_sources(
 # but must still follow PyScript AST constraints since
 # the module is loaded by PyScript's evaluator.
 
-# Relative path → source_type dispatch key.
+# Relative path -> source_type dispatch key.
 _DEDICATED_SOURCE_TYPES: dict[str, str] = {
     "automations.yaml": "automations",
     "scripts.yaml": "scripts",
@@ -1877,7 +1877,7 @@ def _discover_yaml_sources(
     return discovered
 
 
-# ── Source enumeration and evaluation ──────────────────────────────────
+# -- Source enumeration and evaluation ----------------------------------
 
 
 def _enumerate_json_sources(
@@ -1975,7 +1975,7 @@ class EvaluationResult:
 
     Contains everything the service wrapper needs to
     process notifications, save state, and emit debug
-    logging — without requiring further computation
+    logging -- without requiring further computation
     on the main thread.
     """
 
@@ -2073,7 +2073,7 @@ def run_evaluation(
         "owners with broken references",
     )
 
-    # Compute stats (list comprehensions, not generators —
+    # Compute stats (list comprehensions, not generators --
     # PyScript bans generators in all pyscript/ files).
     owners_total = len(results)
     owners_with_refs = sum(

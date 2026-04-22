@@ -60,19 +60,19 @@ blueprint:
       name: Exclude integrations
       description: >
         Integrations to skip. Matches the `Integration:`
-        line shown at the top of each notification —
+        line shown at the top of each notification --
         anything that renders an integration there can
         be silenced here. Built-in adapters are listed
         as quick-picks below (automation, script,
         template, customize, lovelace). To filter a
         config-entry integration (the `domain` field of
-        a `.storage/core.config_entries` entry — e.g.
+        a `.storage/core.config_entries` entry -- e.g.
         `group`, `homekit`, or whatever HA integrations
         you have installed), type its name as a custom
         value. Legacy YAML integrations that don't
         register entities (e.g. the `plant` integration)
         have no `Integration:` line and aren't filterable
-        here — use "Exclude paths" to skip those files
+        here -- use "Exclude paths" to skip those files
         directly.
       default: []
       selector:

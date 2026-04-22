@@ -40,7 +40,7 @@ from entity_defaults_watchdog import (  # noqa: E402
 )
 from helpers import DeviceEntry  # noqa: E402
 
-# ── Helpers ─────────────────────────────────────────
+# -- Helpers -----------------------------------------
 
 
 def _config(**overrides: object) -> Config:
@@ -96,7 +96,7 @@ def _device(
     )
 
 
-# ── Tests ───────────────────────────────────────────
+# -- Tests -------------------------------------------
 
 
 class TestCheckEnabled:
@@ -916,7 +916,7 @@ class TestEvaluateDeviceless:
             in result.notification_message
         )
         assert "`automation.old`" in result.notification_message
-        assert "→ expected `automation.new_name`" in (
+        assert "-> expected `automation.new_name`" in (
             result.notification_message
         )
         # Old quoted-name-plus-Edit-link format is gone
@@ -956,7 +956,7 @@ class TestEvaluateDeviceless:
         # Friendly name plain, integration name links to
         # the integration's config page
         assert (
-            "Grid Import Power · integration"
+            "Grid Import Power  -  integration"
             " [template](/config/integrations/integration/template)"
             in result.notification_message
         )
@@ -979,7 +979,7 @@ class TestEvaluateDeviceless:
         peers = {"sensor": {"loft_thermostat_hvac_action"}}
         result = _evaluate_deviceless(cfg, entities, peers)
         assert (
-            "Loft HVAC Action · integration template · YAML-configuration"
+            "Loft HVAC Action  -  integration template  -  YAML-configuration"
             in result.notification_message
         )
         # And definitely no link to the integration page.
@@ -1004,8 +1004,8 @@ class TestEvaluateDeviceless:
         peers = {"sensor": {"template_sensor"}}
         result = _evaluate_deviceless(cfg, entities, peers)
         expected = (
-            "Grid \\[Import\\] Power · integration template"
-            " · YAML-configuration"
+            "Grid \\[Import\\] Power  -  integration template"
+            "  -  YAML-configuration"
         )
         assert expected in result.notification_message
 
@@ -1023,9 +1023,9 @@ class TestEvaluateDeviceless:
         peers = {"sensor": {"template_sensor"}}
         result = _evaluate_deviceless(cfg, entities, peers)
         # No quotes, no integration link, no exclusion
-        # nudge — just the name and the unique_id: hint.
+        # nudge -- just the name and the unique_id: hint.
         expected = (
-            "Grid Import Power · add `unique_id:`"
+            "Grid Import Power  -  add `unique_id:`"
             " to make this entity manageable"
         )
         assert expected in result.notification_message
@@ -1068,7 +1068,7 @@ class TestEvaluateDeviceless:
         # even in the non-link branch so they can't pair
         # with the trailing `[template](url)` link text.
         assert (
-            "Grid \\[Import\\] Power · integration"
+            "Grid \\[Import\\] Power  -  integration"
             " [template](/config/integrations/integration/template)"
             in result.notification_message
         )
@@ -1087,7 +1087,7 @@ class TestEvaluateDeviceless:
         peers = {"sensor": {"template_sensor"}}
         result = _evaluate_deviceless(cfg, entities, peers)
         assert (
-            "Grid \\[Import\\] Power · add `unique_id:`"
+            "Grid \\[Import\\] Power  -  add `unique_id:`"
             " to make this entity manageable" in result.notification_message
         )
 
@@ -1107,7 +1107,7 @@ class TestEvaluateDeviceless:
         assert len(result.drifted) == 1
         assert result.drifted[0].stale_suffix is True
         assert "Stale collision suffixes" in (result.notification_message)
-        assert "→ rename to `automation.foo`" in (result.notification_message)
+        assert "-> rename to `automation.foo`" in (result.notification_message)
 
     def test_valid_collision_suffix_not_flagged(self) -> None:
         cfg = _config()
@@ -1189,7 +1189,7 @@ class TestCodeQuality(CodeQualityBase):
     ]
 
 
-# ── Entry point ─────────────────────────────────────
+# -- Entry point -------------------------------------
 
 if __name__ == "__main__":
     from conftest import run_tests

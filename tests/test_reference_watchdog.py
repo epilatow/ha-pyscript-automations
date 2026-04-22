@@ -63,7 +63,7 @@ from reference_watchdog import (  # noqa: E402
     run_evaluation,
 )
 
-# ── Helpers ─────────────────────────────────────────────
+# -- Helpers ---------------------------------------------
 
 
 def _config(**overrides: object) -> Config:
@@ -156,7 +156,7 @@ def _source(
     )
 
 
-# ── Detection primitives ───────────────────────────────
+# -- Detection primitives -------------------------------
 
 
 class TestLooksLikeEntityId:
@@ -281,7 +281,7 @@ class TestWalkTree:
 
     def test_sniff_finds_blueprint_input(self) -> None:
         # A key name that isn't in _ENTITY_KEYS but holds a
-        # bare entity-id value — the sniff should find it.
+        # bare entity-id value -- the sniff should find it.
         tree: dict[str, object] = {
             "controlled_entities": ["light.foo", "light.bar"],
         }
@@ -345,7 +345,7 @@ class TestWalkTree:
         assert refs == []
 
 
-# ── Exclusion helpers ──────────────────────────────────
+# -- Exclusion helpers ----------------------------------
 
 
 class TestExclusionHelpers:
@@ -398,7 +398,7 @@ class TestExclusionHelpers:
         )
 
 
-# ── Per-source adapters ────────────────────────────────
+# -- Per-source adapters --------------------------------
 
 
 class TestScanAutomations:
@@ -451,7 +451,7 @@ class TestScanAutomations:
         assert owner.url_path is None
 
     def test_missing_alias_leaves_friendly_name_none(self) -> None:
-        # Unnamed automation — display label falls back to
+        # Unnamed automation -- display label falls back to
         # "automation - config-block[0]" via
         # _owner_display_name.
         parsed = [{"id": "xyz"}]
@@ -831,7 +831,7 @@ class TestScanGenericYaml:
 
     def test_list_top_level_falls_back_to_none_friendly(self) -> None:
         # List items with no name/alias/id leave
-        # friendly_name None — display label falls back
+        # friendly_name None -- display label falls back
         # to "$file - $block_path".
         parsed = [{"platform": "smtp"}, {"platform": "telegram"}]
         source = _source(
@@ -861,7 +861,7 @@ class TestScanGenericYaml:
         assert owner.integration is None
 
 
-# ── Collection + validation ────────────────────────────
+# -- Collection + validation ----------------------------
 
 
 class TestCollectFindings:
@@ -925,7 +925,7 @@ class TestCollectFindings:
 
     def test_service_name_filter_skips_sniff_hit(self) -> None:
         # light.turn_on looks like an entity id via sniff,
-        # but is in service_names — should be dropped.
+        # but is in service_names -- should be dropped.
         tree: dict[str, object] = {
             "custom_input": "light.turn_on",
         }
@@ -944,7 +944,7 @@ class TestCollectFindings:
             "entity_id": "sensor.legacy_thing",
         }
         owner = Owner(source_file="x.yaml", friendly_name="t")
-        ts = _ts()  # sensor.legacy_thing not in truth set → broken
+        ts = _ts()  # sensor.legacy_thing not in truth set -> broken
         findings, _ = _collect_findings(
             _config(exclude_entity_regex=r"^sensor\.legacy_"),
             owner,
@@ -985,12 +985,12 @@ class TestCollectFindings:
         assert stats.refs_valid == 1
 
 
-# ── Notification body formatting ───────────────────────
+# -- Notification body formatting -----------------------
 
 
 class TestNotificationBody:
     def test_yaml_only_note_included(self) -> None:
-        # No url_path → the owner is not UI-editable, so
+        # No url_path -> the owner is not UI-editable, so
         # the "edit the YAML file" note appears.
         owner = Owner(
             source_file="utility_meters.yaml",
@@ -1017,7 +1017,7 @@ class TestNotificationBody:
     def test_yaml_only_note_suppressed_when_url_path_set(self) -> None:
         # yaml_only can be True for automations/scripts
         # because their registry entries have no config
-        # entry — but if HA's UI can edit them (url_path
+        # entry -- but if HA's UI can edit them (url_path
         # set) the note is misleading and is suppressed.
         owner = Owner(
             source_file="automations.yaml",
@@ -1089,7 +1089,7 @@ class TestNotificationBody:
     def test_integration_line_omitted_when_none(self) -> None:
         # Generic YAML owners have integration=None.
         # Their notification must not advertise an
-        # Integration: line — exclude_integrations can't
+        # Integration: line -- exclude_integrations can't
         # filter these.
         owner = Owner(
             source_file="plants.yaml",
@@ -1198,7 +1198,7 @@ class TestNotificationBody:
         assert "](/)" not in body
 
 
-# ── End-to-end ─────────────────────────────────────────
+# -- End-to-end -----------------------------------------
 
 
 class TestEvaluateSources:
@@ -1304,7 +1304,7 @@ class TestEvaluateSources:
 
     def test_yaml_only_owner_via_registry(self) -> None:
         # Automation in automations.yaml with an `id` is
-        # UI-editable — _scan_automations emits a url_path,
+        # UI-editable -- _scan_automations emits a url_path,
         # so the YAML-only note is suppressed in the
         # notification body even though the registry has
         # config_entry_id=None (which still flips the
@@ -1345,7 +1345,7 @@ class TestEvaluateSources:
         assert "YAML-only" not in results[0].notification_message
 
     def test_results_returned_unsorted(self) -> None:
-        # _evaluate_sources no longer sorts — that
+        # _evaluate_sources no longer sorts -- that
         # responsibility lives in helpers.prepare_notifications
         # which sorts by (notification_title, notification_id)
         # before applying the notification cap. Sort-order
@@ -1410,7 +1410,7 @@ class TestOwnerResultNotification:
         assert notif.active is False
 
 
-# ── Sanitize notification ID ──────────────────────────
+# -- Sanitize notification ID --------------------------
 
 
 class TestSanitizeNotificationId:
@@ -1436,7 +1436,7 @@ class TestSanitizeNotificationId:
         assert _sanitize_notification_id("test_123") == "test_123"
 
 
-# ── Broken device findings ────────────────────────────
+# -- Broken device findings ----------------------------
 
 
 class TestCollectFindingsDevice:
@@ -1473,7 +1473,7 @@ class TestCollectFindingsDevice:
         assert stats.refs_valid == 1
 
 
-# ── _build_owner_result ───────────────────────────────
+# -- _build_owner_result -------------------------------
 
 
 class TestBuildOwnerResult:
@@ -1577,7 +1577,7 @@ class TestBuildOwnerResult:
         assert result.refs_service_skipped == 4
 
 
-# ── I/O and source discovery ──────────────────────────
+# -- I/O and source discovery --------------------------
 
 
 class TestReadYamlFile:
@@ -1742,7 +1742,7 @@ class TestExtractIncludesFromText:
     ) -> None:
         # `!include` appearing inside a quoted string
         # value is a documentation artifact, not a
-        # directive — don't queue the target for scanning.
+        # directive -- don't queue the target for scanning.
         text = (
             'description: "see !include other.yaml for details"\n'
             "script: !include scripts.yaml\n"
@@ -2000,7 +2000,7 @@ class TestRunEvaluation:
         tmp_path: Path,
         monkeypatch: "pytest.MonkeyPatch",
     ) -> None:
-        # Empty scan_sources means "all" — YAML
+        # Empty scan_sources means "all" -- YAML
         # discovery must still run.
         self._write_config(tmp_path)
         calls: list[str] = []
@@ -2030,7 +2030,7 @@ class TestIntegrationUxInvariant:
 
     Every owner whose notification body shows an
     ``Integration:`` line must have ``owner.integration``
-    set to the same value — and that value must be what
+    set to the same value -- and that value must be what
     the user would paste into the blueprint's
     ``exclude_integrations`` input to suppress the owner.
     """

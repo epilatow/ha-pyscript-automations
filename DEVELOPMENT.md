@@ -4,16 +4,16 @@
 
 All automations follow a three-layer architecture:
 
-1. **Blueprint** (`blueprints/.../name.yaml`) — defines HA
+1. **Blueprint** (`blueprints/.../name.yaml`) -- defines HA
    triggers and user-configurable inputs. Calls a pyscript
    service. Contains no logic.
 2. **Service wrapper** (`pyscript/ha_pyscript_automations.py`)
-   — runs under PyScript's AST evaluator. Has access to
+   -- runs under PyScript's AST evaluator. Has access to
    PyScript-injected globals (`state`, `hass`,
    `homeassistant`, `service`, `log`, etc.). Parses inputs,
    loads/saves state, calls the logic module, and executes
    the returned action. No business logic.
-3. **Logic module** (`pyscript/modules/name.py`) — runs
+3. **Logic module** (`pyscript/modules/name.py`) -- runs
    under PyScript's AST evaluator (not standard Python
    import). Testable with pytest. Does not use PyScript-
    injected globals (cannot call `state.get()`,
@@ -116,7 +116,7 @@ metadata block.
 ### Defaults
 
 Parameter defaults are defined only in the blueprint YAML.
-Service wrapper functions do not duplicate defaults — the
+Service wrapper functions do not duplicate defaults -- the
 blueprint is the single source of truth.
 
 ### Input validation
@@ -137,10 +137,10 @@ selection. Also validate domains at runtime via
 
 All code has type annotations and mypy strict enforcement:
 
-- **Logic modules** (`pyscript/modules/*.py`) — fully
+- **Logic modules** (`pyscript/modules/*.py`) -- fully
   typed, checked by mypy strict.
 - **Service wrapper** (`pyscript/ha_pyscript_automations.py`)
-  — fully typed, with `TYPE_CHECKING` stubs for
+  -- fully typed, with `TYPE_CHECKING` stubs for
   PyScript-injected globals (`state`, `homeassistant`,
   `service`, `log`, `persistent_notification`, `hass`).
 - **mypy configuration** lives in `pyproject.toml`. The
@@ -192,16 +192,16 @@ User-facing documentation for each automation lives in
 the same top-level section order so users find the same
 information in the same place across automations:
 
-1. **Summary** — one paragraph describing what the
+1. **Summary** -- one paragraph describing what the
    automation does.
-2. **Features** — bulleted list of capabilities.
-3. **Requirements** — prerequisite HA / PyScript config.
-4. **Usage** — install + enable steps.
-5. **Configuration** — blueprint input table.
-6. **Usage notes** — examples, exclusion cheatsheets,
+2. **Features** -- bulleted list of capabilities.
+3. **Requirements** -- prerequisite HA / PyScript config.
+4. **Usage** -- install + enable steps.
+5. **Configuration** -- blueprint input table.
+6. **Usage notes** -- examples, exclusion cheatsheets,
    behavior gotchas, and any user-facing detail that
    doesn't fit under Configuration.
-7. **Developer notes** — state attributes, debug log
+7. **Developer notes** -- state attributes, debug log
    format, detection-mechanism internals, known
    limitations, and follow-ups.
 
@@ -223,9 +223,9 @@ renumbering.
 
 ## PyScript AST Constraints
 
-All pyscript files — both the service wrapper
+All pyscript files -- both the service wrapper
 (`ha_pyscript_automations.py`) and logic modules
-(`pyscript/modules/*.py`) — run under PyScript's
+(`pyscript/modules/*.py`) -- run under PyScript's
 custom AST evaluator, which has restrictions. Even
 though some logic modules are called via
 `@pyscript_executor` (native Python in a worker
@@ -282,9 +282,9 @@ Lint, format, and type checks are included in each test
 file's `TestCodeQuality` class and run automatically as
 part of the test suite:
 
-- `test_ruff_lint` — ruff linting
-- `test_ruff_format` — ruff formatting
-- `test_mypy_strict` — mypy strict type checking
+- `test_ruff_lint` -- ruff linting
+- `test_ruff_format` -- ruff formatting
+- `test_mypy_strict` -- mypy strict type checking
 
 ### PyScript compatibility
 
@@ -293,7 +293,7 @@ evaluator incompatibilities before deployment:
 
 - **Static scan**
   (`TestPyScriptCompatibility` in
-  `test_ha_pyscript_automations.py`) — walks the AST
+  `test_ha_pyscript_automations.py`) -- walks the AST
   of every `pyscript/**/*.py` file and flags known-bad
   patterns (generators, lambda, yield, bare `open()`,
   `sorted(key=func)`, etc.). Fast and gives precise
@@ -302,7 +302,7 @@ evaluator incompatibilities before deployment:
   below) to verify the evaluator actually rejects it.
 
 - **Real evaluator**
-  (`test_pyscript_eval_compat.py`) — instantiates
+  (`test_pyscript_eval_compat.py`) -- instantiates
   PyScript's actual `AstEval` interpreter and executes
   every top-level statement of every pyscript file.
   Catches issues the static scan can't express (e.g.

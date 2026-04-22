@@ -66,11 +66,11 @@ pyscript:
 |---|---|
 | Scan sources | Source types to scan. Leave empty to scan all. Dedicated types: `automations`, `scripts`, `template`, `customize`, `config_entries`, `lovelace`. The `generic_yaml` catch-all handles every other YAML file reachable via `!include` directives from `configuration.yaml`. |
 | Exclude paths | File-path globs to skip. Matched against the source's relative path (e.g. `plants.yaml`, `.storage/lovelace.old_dashboard`). Use this for legacy-YAML integrations not reachable by integration exclusion. |
-| Exclude integrations | Integrations to skip. Matches the `Integration:` line shown at the top of each notification — anything rendered there can be silenced here. Built-in adapters (`automation`, `script`, `template`, `customize`, `lovelace`) are listed as quick-picks in the blueprint UI; config-entry integration domains (e.g. `group`, `homekit`, or whatever is installed in HA) can be added as custom values. Legacy YAML integrations that don't register entities (e.g. `plant`) have no `Integration:` line and **aren't filterable here** — use `Exclude paths` for those. |
+| Exclude integrations | Integrations to skip. Matches the `Integration:` line shown at the top of each notification -- anything rendered there can be silenced here. Built-in adapters (`automation`, `script`, `template`, `customize`, `lovelace`) are listed as quick-picks in the blueprint UI; config-entry integration domains (e.g. `group`, `homekit`, or whatever is installed in HA) can be added as custom values. Legacy YAML integrations that don't register entities (e.g. `plant`) have no `Integration:` line and **aren't filterable here** -- use `Exclude paths` for those. |
 | Exclude entities | Entities to exclude, applied symmetrically to source and target sides. |
 | Exclude entity regex | Multi-line regex, matched against entity and device reference values, applied symmetrically to source and target sides. |
 | Check disabled entities | When enabled, references to entities that exist in the registry but are disabled are reported as "Disabled-but-existing references". |
-| Check interval (minutes) | Minutes between reference-integrity evaluations (default 60 — reference scans do more file I/O than the other watchdogs). |
+| Check interval (minutes) | Minutes between reference-integrity evaluations (default 60 -- reference scans do more file I/O than the other watchdogs). |
 | Max source notifications | Per-owner notification cap. 0 = unlimited. |
 | Debug logging | Log a warning-level stat line on every evaluation. |
 
@@ -89,11 +89,11 @@ Three exclusion axes, each for a specific purpose:
 | A specific entity ID you don't want flagged | `exclude_entities` |
 | A family of entity IDs matching a pattern | `exclude_entity_regex` |
 
-**Rule of thumb:** by file → paths. By config entry domain → integrations. By entity → entities.
+**Rule of thumb:** by file -> paths. By config entry domain -> integrations. By entity -> entities.
 
 ### Owner attribution
 
-Every finding is attributed to an **owner** — the
+Every finding is attributed to an **owner** -- the
 automation, script, config block, template entity,
 dashboard, or generic YAML entry that holds the broken
 reference. Notifications are one per owner with a header
@@ -124,10 +124,10 @@ Block-path format:
   `config-block[0].trigger[0]`)
 - Sub-key dict inside a template config block (only
   `variables:` today): `config-block[N].variables`
-- JSON-backed sources (`.storage/*`): no block path —
+- JSON-backed sources (`.storage/*`): no block path --
   these aren't hand-edited
 
-Owner type → URL target:
+Owner type -> URL target:
 
 | Owner | URL |
 |---|---|
@@ -135,12 +135,12 @@ Owner type → URL target:
 | Script | `/config/script/edit/<id>` |
 | Config entry | `/config/entities/?config_entry=<entry_id>` |
 | Dashboard | `/<url_path>` from the dashboards index |
-| Template entities & blocks, customize entries, generic YAML, plants, utility meters | **no URL** — edit the file directly |
+| Template entities & blocks, customize entries, generic YAML, plants, utility meters | **no URL** -- edit the file directly |
 
 ### YAML-only helpers
 
 Some helpers are visible in HA's **Settings > Helpers**
-page but can only be edited via YAML — typically when
+page but can only be edited via YAML -- typically when
 they're defined in a YAML block like `utility_meter:
 !include utility_meters.yaml` rather than through the
 HA UI's config flow. The watchdog detects these by
@@ -162,15 +162,15 @@ integration or restart HA.
 
 ### Plants and other legacy YAML integrations
 
-Some legacy YAML integrations — notably `plant` — don't
+Some legacy YAML integrations -- notably `plant` -- don't
 register their entities in the entity registry at all,
 so `exclude_integrations: plant` has no effect on them.
 To silence plant findings:
 
-- Preferred: `exclude_paths: plants.yaml` — kills the
+- Preferred: `exclude_paths: plants.yaml` -- kills the
   whole scanner for that file
 - Alternative: `exclude_entity_regex: '^sensor\.plant_sensor_'`
-  — narrower, keeps scanning the file but suppresses
+  -- narrower, keeps scanning the file but suppresses
   specific broken sensor prefixes
 
 ### Notification panel ordering
@@ -181,7 +181,7 @@ active notifications (to update content if findings
 changed), which updates their timestamps. Since all
 creates happen within milliseconds, the panel's display
 order is effectively random. The same owners are shown
-— only the panel ordering varies.
+-- only the panel ordering varies.
 
 ## Developer notes
 
@@ -218,7 +218,7 @@ quickly sanity-checking the stat attributes.
 ### Service-name negative truth set
 
 HA service names and entity IDs share the same
-`domain.name` shape — `light.turn_on` is a service,
+`domain.name` shape -- `light.turn_on` is a service,
 `light.kitchen` is an entity. The string sniff can't
 distinguish them by syntax alone.
 
@@ -248,7 +248,7 @@ to find it.
 | `paths_excluded` | Source files skipped by `exclude_paths` |
 | `owners_total` | Total owners discovered across scanned sources (including owners with zero refs) |
 | `owners_with_refs` | Owners where at least one reference was detected |
-| `owners_without_refs` | Owners scanned but no references detected — surfaces detection gaps |
+| `owners_without_refs` | Owners scanned but no references detected -- surfaces detection gaps |
 | `owners_with_issues` | Owners with at least one broken-or-disabled finding |
 | `total_findings` | Broken-or-disabled findings across all owners |
 | `broken_entity_count` | Findings where the target entity is missing from the registry + states |
@@ -263,7 +263,7 @@ to find it.
 **Invariants:**
 
 - `owners_total = owners_with_refs + owners_without_refs`
-- `owners_with_issues ⊆ owners_with_refs`
+- `owners_with_issues is a subset of owners_with_refs`
 - `total_findings = broken_entity_count + broken_device_count + disabled_entity_count`
 - `refs_total = refs_structural + refs_jinja + refs_sniff`
   (service-skipped sniff hits are not counted)
@@ -298,11 +298,11 @@ design change:
   Neither the sniff nor the Jinja AST pass matches
   substrings inside non-template strings. Catching
   them would require a regex fallback that introduces
-  false positives in comments and descriptions — we
+  false positives in comments and descriptions -- we
   intentionally draw the line at "constant strings we
   can prove statically."
 - **`!include` content substitution** is not performed
-  — `!include`/`!include_dir_*`/`!secret`/`!env_var`
+  -- `!include`/`!include_dir_*`/`!secret`/`!env_var`
   tags are replaced by opaque placeholder strings in
   the parsed tree. However, `!include` and
   `!include_dir_*` targets are followed recursively to

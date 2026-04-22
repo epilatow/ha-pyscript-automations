@@ -39,7 +39,7 @@ INSTALLED_FILES = sorted(
 )
 
 
-# ── Helpers ─────────────────────────────────────────
+# -- Helpers -----------------------------------------
 
 
 def _make_ha_env(tmp_path: Path) -> tuple[Path, Path]:
@@ -99,7 +99,7 @@ def _expected_target(
     return f"{prefix}{repo_name}/{file_rel}"
 
 
-# ── Fixtures ────────────────────────────────────────
+# -- Fixtures ----------------------------------------
 
 
 @pytest.fixture
@@ -108,7 +108,7 @@ def ha_env(tmp_path: Path) -> tuple[Path, Path]:
     return _make_ha_env(tmp_path)
 
 
-# ── Tests ───────────────────────────────────────────
+# -- Tests -------------------------------------------
 
 
 class TestFreshInstall:
@@ -354,7 +354,7 @@ class TestErrorConfigDirMissing:
 
 
 class TestMultipleErrors:
-    """Multiple files have issues — all are reported."""
+    """Multiple files have issues -- all are reported."""
 
     def test_error_count(
         self,
@@ -438,7 +438,7 @@ class TestInstallScriptQuality:
         assert r.returncode == 0, r.stderr
 
 
-# ── Entry point ─────────────────────────────────────
+# -- Entry point -------------------------------------
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v", *sys.argv[1:]]))

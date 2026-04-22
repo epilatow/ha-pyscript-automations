@@ -44,7 +44,7 @@ from helpers import (  # noqa: E402
 T0 = datetime(2024, 1, 15, 12, 0, 0)
 
 
-# ── Helpers ─────────────────────────────────────────
+# -- Helpers -----------------------------------------
 
 
 def _config(**overrides: object) -> Config:
@@ -91,7 +91,7 @@ def _device(
     )
 
 
-# ── Tests ───────────────────────────────────────────
+# -- Tests -------------------------------------------
 
 
 class TestFilterEntities:
@@ -999,7 +999,7 @@ class TestCodeQuality(CodeQualityBase):
     ]
 
 
-# ── Entry point ─────────────────────────────────────
+# -- Entry point -------------------------------------
 
 if __name__ == "__main__":
     from conftest import run_tests

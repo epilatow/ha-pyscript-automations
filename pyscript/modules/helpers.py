@@ -123,7 +123,7 @@ def md_escape(s: str) -> str:
     """Escape CommonMark ``\\``, ``[``, ``]`` for safe interpolation.
 
     Apply to any HA-controlled string interpolated into a
-    persistent notification ``message`` body — both inside
+    persistent notification ``message`` body -- both inside
     ``[text](url)`` link text *and* in plain-text portions,
     since an unescaped ``[`` in plain text can still pair
     with a later ``](`` to form a bogus link.
@@ -134,19 +134,19 @@ def md_escape(s: str) -> str:
 
     Escaping is NOT needed for:
 
-    - Notification ``title`` strings — HA renders titles
+    - Notification ``title`` strings -- HA renders titles
       as plain text (frontend ``persistent-notification-item``
       uses a Lit ``<span>`` with auto-escaping, only ``message``
       goes through ``<ha-markdown>``).
     - Integration domains (e.g. ``mqtt``, ``zwave_js``,
-      ``unifiprotect``) — constrained by Python import rules
+      ``unifiprotect``) -- constrained by Python import rules
       to ``[A-Za-z_][A-Za-z0-9_]*``, no markdown specials
       possible.
-    - URLs — the ``(...)`` target portion of a markdown link
+    - URLs -- the ``(...)`` target portion of a markdown link
       is not displayed, only the ``[...]`` text portion is.
     - Numeric IDs (node ids, device counts, byte sizes).
     - Values rendered inside a backtick code span
-      (`` `value` ``) — code spans suppress markdown
+      (`` `value` ``) -- code spans suppress markdown
       interpretation, so ``[``/``]`` inside backticks render
       literally.
 
@@ -279,7 +279,7 @@ def prepare_notifications(
        logic module; now the helper does it once.
        Deterministic ordering is required so the
        shown/suppressed split below is reproducible
-       across runs — users should see the same
+       across runs -- users should see the same
        "first N" subset when the cap is exceeded,
        regardless of whichever internal-dict ordering
        the logic module happened to iterate in.
@@ -295,8 +295,8 @@ def prepare_notifications(
        the cap is exceeded, so any lingering
        notifications from a prior run where the same
        result was in the issue partition get dismissed.
-    4. **Always emit the cap-summary slot** — active
-       when the cap is reached, inactive otherwise —
+    4. **Always emit the cap-summary slot** -- active
+       when the cap is reached, inactive otherwise --
        so a previously-active summary gets dismissed
        when the cap no longer applies.
 

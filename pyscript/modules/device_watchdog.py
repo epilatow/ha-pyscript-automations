@@ -267,7 +267,7 @@ def _check_staleness(
     A device is stale if no entity has been reported within
     the threshold window. Entities without a last_reported
     timestamp are skipped. If no entity has a usable
-    timestamp, staleness is indeterminate — return False.
+    timestamp, staleness is indeterminate -- return False.
     """
     if not entities:
         return False, None, None

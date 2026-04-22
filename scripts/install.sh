@@ -50,7 +50,7 @@ echo "  Repo: $REPO_REL"
 # Ensure repo files are readable by all containers
 chmod -R a+rX "$REPO_DIR"
 
-# ── Discover files to install ───────────────────────
+# -- Discover files to install -----------------------
 # Auto-discover all .py files under pyscript/ and all
 # .yaml files under blueprints/. Paths are relative to
 # both the repo and HA config directory (repo layout
@@ -63,7 +63,7 @@ while IFS= read -r -d '' f; do
     FILES+=("${f#"$REPO_DIR/"}")
 done < <(find "$REPO_DIR/blueprints" -name '*.yaml' -print0)
 
-# ── Helpers ─────────────────────────────────────────
+# -- Helpers -----------------------------------------
 
 # Compute relative symlink target for a file.
 # The path is relative to both the repo and HA config.
@@ -91,7 +91,7 @@ relative_target() {
     echo "${prefix}${REPO_REL}/${file_rel}"
 }
 
-# ── Install loop ────────────────────────────────────
+# -- Install loop ------------------------------------
 
 errors=0
 

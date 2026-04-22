@@ -146,7 +146,7 @@ class TestShouldRun:
         """Changing interval re-derives jitter, no state.
 
         A given (id, time) pair can flip between firing
-        and not firing when the interval changes — this
+        and not firing when the interval changes -- this
         is the expected side of the "no stored state"
         tradeoff and documents it explicitly.
         """
@@ -156,7 +156,7 @@ class TestShouldRun:
             on_interval(interval, t, id_) for interval in (2, 3, 4, 5, 6, 7)
         ]
         # At least one fires and at least one doesn't
-        # across the sweep — proves the offset varies
+        # across the sweep -- proves the offset varies
         # with the interval rather than being cached.
         assert any(window)
         assert not all(window)
@@ -474,7 +474,7 @@ class TestPrepareNotifications:
         assert _find_by_id(notifs, "id_zebra").active is False
 
     def test_title_tiebreaks_on_notification_id(self) -> None:
-        # Two results with identical titles — the
+        # Two results with identical titles -- the
         # secondary sort key (notification_id) decides
         # which is kept when the cap is exceeded.
         results = [
@@ -502,7 +502,7 @@ class TestPrepareNotifications:
 
     def test_sort_does_not_mutate_caller_sequence(self) -> None:
         # Ensure the helper doesn't sort its input
-        # argument in place — downstream code sometimes
+        # argument in place -- downstream code sometimes
         # iterates results again after the helper runs.
         results = [
             _FakeResult(

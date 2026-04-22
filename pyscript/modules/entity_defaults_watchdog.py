@@ -40,7 +40,7 @@ CHECK_ALL: frozenset[str] = frozenset(
 # drift when the user renames the name).  Integration-
 # entity domains (media_player, camera, climate, etc.)
 # are excluded because their entity_ids are derived from
-# device + integration names — the device_entity_id
+# device + integration names -- the device_entity_id
 # check already covers those.
 DEVICELESS_DOMAINS: frozenset[str] = frozenset(
     {
@@ -127,16 +127,16 @@ class DevicelessEntityInfo:
     # for state-only entities, ``attributes.friendly_name``.
     # Empty string when no name is set.
     effective_name: str
-    # Registry ``entry.platform`` — the integration that
+    # Registry ``entry.platform`` -- the integration that
     # supplied the entity.  None for state-only entities.
     platform: str | None
-    # Registry ``entry.unique_id`` — used to build the
+    # Registry ``entry.unique_id`` -- used to build the
     # automation edit link.  None for state-only entities.
     unique_id: str | None
     # True if this entity has a registry entry.  False for
     # state-only entities (YAML-defined without unique_id).
     from_registry: bool
-    # Registry ``entry.config_entry_id`` — set when the
+    # Registry ``entry.config_entry_id`` -- set when the
     # entity was registered via a UI-created config entry,
     # ``None`` when it came through a YAML platform setup
     # (e.g. legacy ``sensor:`` YAML, ``template:`` YAML).
@@ -165,7 +165,7 @@ class DevicelessResult:
     """Aggregated deviceless drift result.
 
     Unlike DeviceResult (one per device), this is a single
-    aggregate covering every drifted deviceless entity —
+    aggregate covering every drifted deviceless entity --
     deviceless entities have no natural grouping, so we
     emit one bucket notification instead of one per entity.
     """
@@ -245,7 +245,7 @@ def _compute_recommended_override(
     if has_entity_name:
         return None
     # Multi-integration devices have non-deterministic
-    # default_name — skip recommendation to avoid
+    # default_name -- skip recommendation to avoid
     # incorrect suggestions.
     if multi_integration:
         return None
@@ -287,20 +287,20 @@ def _matches_with_collision_suffix(
 
     Returns ``(matches, stale_suffix)``:
 
-    - ``obj_id == expected`` → ``(True, False)``.
+    - ``obj_id == expected`` -> ``(True, False)``.
     - ``obj_id`` equals ``<expected>_N`` for integer
       ``N >= 2`` AND ``expected`` is in ``peers``
-      → ``(True, False)`` — a valid HA collision suffix.
+      -> ``(True, False)`` -- a valid HA collision suffix.
     - ``obj_id`` equals ``<expected>_N`` for ``N >= 2``,
       ``expected`` is not in ``peers``, but a higher
       ``<expected>_M`` (``M > N``) is in ``peers``
-      → ``(True, False)`` — not flagged; the highest
+      -> ``(True, False)`` -- not flagged; the highest
       entry in the chain is flagged instead so renaming
       it to ``expected`` resolves the whole chain.
     - ``obj_id`` equals ``<expected>_N`` for ``N >= 2``,
       no base peer, and no higher chain peer
-      → ``(False, True)`` — a stale suffix.
-    - Otherwise → ``(False, False)`` — plain drift.
+      -> ``(False, True)`` -- a stale suffix.
+    - Otherwise -> ``(False, False)`` -- plain drift.
     """
     if not expected:
         return (False, False)
@@ -313,7 +313,7 @@ def _matches_with_collision_suffix(
         return (False, False)
     # Reject leading-zero forms ("01", "0") so "_0"
     # and "_01" aren't mistaken for HA suffixes; HA
-    # uses "_2", "_3", … starting at 2.
+    # uses "_2", "_3", ... starting at 2.
     if rest.startswith("0"):
         return (False, False)
     n = int(rest)
@@ -449,7 +449,7 @@ def _build_notification_message(
     - Non-default entity IDs (ID drift only, no name drift)
 
     Entities with both name+ID drift appear only in the
-    name section — the ID will be addressed after the name
+    name section -- the ID will be addressed after the name
     is fixed.
     """
     lines: list[str] = []
@@ -681,17 +681,17 @@ def _deviceless_line_suffix(
       itself the link to that entity's editor.
     - registry-backed, UI-configured (``config_entry_id``
       set): plain friendly name followed by
-      ``· integration [<platform>](…)`` so the user can
+      `` -  integration [<platform>](...)`` so the user can
       click through to the integration's config page.
     - registry-backed, YAML-configured (``config_entry_id``
       is ``None``): same but the integration name is plain
-      text with a ``· YAML-configuration`` note. The
+      text with a `` -  YAML-configuration`` note. The
       integration page doesn't show YAML-defined entities,
-      so a link there would mislead — the user should edit
+      so a link there would mislead -- the user should edit
       the YAML instead.
     - otherwise (state-only YAML without ``unique_id:``):
       plain friendly name followed by a nudge to add a
-      ``unique_id:`` — no per-entity exclusion suggestion.
+      ``unique_id:`` -- no per-entity exclusion suggestion.
 
     The friendly name is markdown-escaped in every branch
     so brackets or backslashes in the name can't break the
@@ -708,9 +708,9 @@ def _deviceless_line_suffix(
     if from_registry and platform:
         if config_entry_id:
             url = f"/config/integrations/integration/{platform}"
-            return f"{name} · integration [{platform}]({url})"
-        return f"{name} · integration {platform} · YAML-configuration"
-    return f"{name} · add `unique_id:` to make this entity manageable"
+            return f"{name}  -  integration [{platform}]({url})"
+        return f"{name}  -  integration {platform}  -  YAML-configuration"
+    return f"{name}  -  add `unique_id:` to make this entity manageable"
 
 
 def _build_deviceless_notification_message(
@@ -719,8 +719,8 @@ def _build_deviceless_notification_message(
 ) -> str:
     """Build the deviceless-bucket notification body.
 
-    Two sections — generic drift and stale collision
-    suffixes — each shown only when non-empty. Bullets
+    Two sections -- generic drift and stale collision
+    suffixes -- each shown only when non-empty. Bullets
     carry current/expected entity_id, friendly name, and
     a per-domain pointer (edit link or integration page).
     """
@@ -743,7 +743,7 @@ def _build_deviceless_notification_message(
                 d.config_entry_id,
             )
             lines.append(
-                f"- `{d.entity_id}` → expected `{dom}.{d.expected_object_id}`",
+                f"- `{d.entity_id}` -> expected `{dom}.{d.expected_object_id}`",
             )
             lines.append(f"  {suffix}")
         sections.append("\n".join(lines))
@@ -766,7 +766,8 @@ def _build_deviceless_notification_message(
                 d.config_entry_id,
             )
             lines.append(
-                f"- `{d.entity_id}` → rename to `{dom}.{d.expected_object_id}`",
+                f"- `{d.entity_id}` -> rename to"
+                f" `{dom}.{d.expected_object_id}`",
             )
             lines.append(f"  {suffix}")
         sections.append("\n".join(lines))

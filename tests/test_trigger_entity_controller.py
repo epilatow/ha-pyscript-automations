@@ -86,7 +86,7 @@ def _inputs(
     )
 
 
-# ── parse_period ──
+# -- parse_period --
 
 
 class TestParsePeriod:
@@ -111,7 +111,7 @@ class TestParsePeriod:
         assert parse_period("") == Period.ALWAYS
 
 
-# ── parse_notification_events ──
+# -- parse_notification_events --
 
 
 class TestParseNotificationEvents:
@@ -139,7 +139,7 @@ class TestParseNotificationEvents:
         assert result == [NotificationEvent.TRIGGERED_ON]
 
 
-# ── determine_event_type ──
+# -- determine_event_type --
 
 
 class TestDetermineEventType:
@@ -254,7 +254,7 @@ class TestDetermineEventType:
         assert result == EventType.DISABLING_CHANGED
 
 
-# ── is_trigger_suppressed ──
+# -- is_trigger_suppressed --
 
 
 class TestIsTriggerSuppressed:
@@ -315,7 +315,7 @@ class TestIsTriggerSuppressed:
         assert is_trigger_suppressed(cfg, False, True)
 
 
-# ── _format_notification (via evaluate) ──
+# -- _format_notification (via evaluate) --
 
 
 class TestFormatNotification:
@@ -416,7 +416,7 @@ class TestFormatNotification:
         assert result.notification.endswith(" at 08:30")
 
 
-# ── TRIGGER_ON ──
+# -- TRIGGER_ON --
 
 
 class TestTriggerOn:
@@ -507,7 +507,7 @@ class TestTriggerOn:
         assert result.action == ActionType.NONE
 
 
-# ── TRIGGER_OFF ──
+# -- TRIGGER_OFF --
 
 
 class TestTriggerOff:
@@ -560,7 +560,7 @@ class TestTriggerOff:
         assert result.auto_off_at is None
 
 
-# ── CONTROLLED_ON ──
+# -- CONTROLLED_ON --
 
 
 class TestControlledOn:
@@ -599,7 +599,7 @@ class TestControlledOn:
         assert result.auto_off_at is None
 
 
-# ── CONTROLLED_OFF ──
+# -- CONTROLLED_OFF --
 
 
 class TestControlledOff:
@@ -721,7 +721,7 @@ class TestControlledOff:
         assert "Hallway Light" in result.notification
 
 
-# ── TIMER ──
+# -- TIMER --
 
 
 class TestTimer:
@@ -836,7 +836,7 @@ class TestTimer:
         assert result.auto_off_at is None
 
 
-# ── AUTO-OFF DISABLING ──
+# -- AUTO-OFF DISABLING --
 
 
 class TestAutoOffDisabling:
@@ -1011,7 +1011,7 @@ class TestAutoOffDisabling:
         assert result.auto_off_at == deadline
 
 
-# ── End-to-end scenarios ──
+# -- End-to-end scenarios --
 
 
 class TestEndToEndScenarios:

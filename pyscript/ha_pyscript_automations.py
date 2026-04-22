@@ -106,7 +106,7 @@ if TYPE_CHECKING:
     from entity_defaults_watchdog import DevicelessEntityInfo
     from reference_watchdog import TruthSet
 
-# ── Shared helpers ──────────────────────────────────
+# -- Shared helpers ----------------------------------
 
 
 def _state_key(instance_id: str) -> str:
@@ -189,7 +189,7 @@ def _sweep_orphan_notifications(
 
     Orphans arise when the thing a notification tracks
     (device, node, reference owner) is deleted between
-    runs — the current run no longer emits an ID for it,
+    runs -- the current run no longer emits an ID for it,
     so without this sweep the stale notification would
     linger forever.
 
@@ -682,7 +682,7 @@ def _manage_config_error_persistent_notification(
     )
 
 
-# ── Sensor Threshold Switch Controller ──────────────
+# -- Sensor Threshold Switch Controller --------------
 
 
 def _stsc_debug_dict(
@@ -840,7 +840,7 @@ def sensor_threshold_switch_controller(
         )
 
 
-# ── Worker thread executor ──────────────────────────
+# -- Worker thread executor --------------------------
 
 
 @pyscript_executor  # type: ignore[name-defined,untyped-decorator]  # noqa: F821
@@ -896,7 +896,7 @@ def _run_in_executor(
     return func(*args)
 
 
-# ── Device Watchdog ─────────────────────────────────
+# -- Device Watchdog ---------------------------------
 
 
 # Parameter defaults are defined in the blueprint YAML,
@@ -1162,7 +1162,7 @@ def device_watchdog(
         )
 
 
-# ── Trigger Entity Controller ────────────────────
+# -- Trigger Entity Controller --------------------
 
 
 # Parameter defaults are defined in the blueprint YAML,
@@ -1427,7 +1427,7 @@ def trigger_entity_controller(
         )
 
 
-# ── Entity Defaults Watchdog ──────────────────────
+# -- Entity Defaults Watchdog ----------------------
 
 
 def _get_entity_info(
@@ -1506,7 +1506,7 @@ def _discover_deviceless_entities(
     ``device_id is None`` and domain is in ``domains``.
     Supplementary source: state-list entities in the same
     domains not present in the registry at all (YAML-
-    defined entities without ``unique_id:``) — caught via
+    defined entities without ``unique_id:``) -- caught via
     their state's ``friendly_name`` attribute.
 
     ``target_integrations`` optionally restricts the
@@ -1574,7 +1574,7 @@ def _discover_deviceless_entities(
             ),
         )
 
-    # State-only safety net — YAML entities without
+    # State-only safety net -- YAML entities without
     # unique_id don't appear in the registry but do have
     # state. We compare attributes.friendly_name; when it
     # equals HA's default (title-cased obj_id) slugify
@@ -1879,7 +1879,7 @@ def entity_defaults_watchdog(
         )
 
 
-# ── Reference Watchdog ────────────────────────────
+# -- Reference Watchdog ----------------------------
 
 
 def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
@@ -1952,7 +1952,7 @@ def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
         entity_ids.add(eid)
         domains.add(eid.split(".", 1)[0])
 
-    # Service registry — negative truth set that filters
+    # Service registry -- negative truth set that filters
     # sniff matches that look like entity IDs but are
     # actually registered services.
     try:
@@ -2112,7 +2112,7 @@ def reference_watchdog(
         active_ids,
     )
 
-    # ── Stats ──────────────────────────────────────
+    # -- Stats --------------------------------------
 
     elapsed = time.monotonic() - start_time
     key = _state_key(instance_id)

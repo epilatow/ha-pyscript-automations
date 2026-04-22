@@ -109,7 +109,7 @@ def _clone_is_fresh(path: Path) -> bool:
     ``.clone_complete`` is touched at the very end of
     ``_ensure_pyscript_clone``; its presence proves
     both the source clone and the follow-up tag fetch
-    succeeded.  Its mtime drives the weekly refresh —
+    succeeded.  Its mtime drives the weekly refresh --
     once a week we treat the cache as stale, wipe it,
     and re-clone so the tag set and source both pick
     up any new upstream releases.
@@ -183,7 +183,7 @@ def _ensure_pyscript_clone() -> Path:
             " git configuration and retry."
         )
     # Written last so its presence proves every step
-    # above completed — ``_clone_is_fresh`` treats a
+    # above completed -- ``_clone_is_fresh`` treats a
     # missing marker as a stale cache even if the
     # source files look intact.
     _CLONE_COMPLETE_MARKER.touch()
@@ -195,7 +195,7 @@ def _latest_upstream_tag(path: Path) -> str:
 
     Scans ``git tag -l`` output from the cache, skips
     anything that doesn't match ``vX.Y.Z`` (so we
-    ignore ``1.8.0rc1`` and friends — HACS only ships
+    ignore ``1.8.0rc1`` and friends -- HACS only ships
     stable releases), and returns the highest semver
     tuple with any leading ``v`` stripped so it can
     be compared directly against ``PYSCRIPT_VERSION``.
@@ -402,7 +402,7 @@ class TestHarnessSanity:
     rejects what real pyscript rejects and accepts what
     real pyscript accepts.  A pyscript upgrade or a
     change to our mocking can silently move that line
-    in either direction — these checks anchor both.
+    in either direction -- these checks anchor both.
 
     Negative checks: one per ``test_no_*`` ban in
     ``TestPyScriptCompatibility``, feeding the banned
@@ -410,7 +410,7 @@ class TestHarnessSanity:
     it raises.  If one stops raising, the cause is
     either (a) our mocking has started masking a real
     failure, or (b) pyscript upstream now accepts that
-    construct and the static ban can be removed — both
+    construct and the static ban can be removed -- both
     require investigation, and the paired test is what
     surfaces the signal.
 
@@ -427,7 +427,7 @@ class TestHarnessSanity:
     tripping any of the negative checks.
     """
 
-    # ── Negative: pyscript must reject these ──
+    # -- Negative: pyscript must reject these --
 
     def test_generator_expression_raises(self) -> None:
         # PyScript never implemented ast_generatorexp,
@@ -513,7 +513,7 @@ class TestHarnessSanity:
     def test_yield_raises(self) -> None:
         # PyScript never implemented ast_yield.  The
         # dispatch miss raises NotImplementedError as
-        # soon as the generator is iterated — using
+        # soon as the generator is iterated -- using
         # ``next(gen)`` forces that immediately.
         source = "def g():\n    yield 1\ngen = g()\nnext(gen)\n"
         with pytest.raises(NotImplementedError):
@@ -562,10 +562,10 @@ class TestHarnessSanity:
         with pytest.raises(NameError):
             _eval_source("negative_print", source)
 
-    # ── Positive: pyscript must accept these ──
+    # -- Positive: pyscript must accept these --
 
     def test_stdlib_import_and_use_work(self) -> None:
-        # Exercises the ``_noop_module_import`` →
+        # Exercises the ``_noop_module_import`` ->
         # ``importlib.import_module`` fallback both
         # for ``import X`` and ``from X import Y``,
         # then actually *uses* the imported names.
@@ -600,7 +600,7 @@ class TestPyScriptPin:
     """Ensure the pinned pyscript version matches upstream.
 
     Production runs whatever version HA pulls via
-    HACS — normally the latest release.  If this pin
+    HACS -- normally the latest release.  If this pin
     drifts behind upstream, tests succeed against an
     older evaluator while production executes a
     newer one, so compatibility bugs in new

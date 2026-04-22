@@ -68,7 +68,7 @@ def _boundary_time(
 
     Interval gating is now instance-jittered, so tests that
     need an on-boundary tick can't just use a round wall-clock
-    time — they have to find the minute within ``[base,
+    time -- they have to find the minute within ``[base,
     base + interval)`` that matches this instance's offset.
     """
     for k in range(interval_minutes):
@@ -82,7 +82,7 @@ def _boundary_time(
     raise AssertionError(msg)
 
 
-# ── Mock infrastructure ──────────────────────────────
+# -- Mock infrastructure ------------------------------
 
 
 class _MockState:
@@ -135,7 +135,7 @@ class _MockServiceObj:
     As a decorator (``@service``), returns the function
     unchanged.  ``call()`` records invocations for
     assertion. Tests can set ``call_exception`` to make
-    the next ``call()`` raise — used to verify that
+    the next ``call()`` raise -- used to verify that
     notification dispatch failures don't propagate.
     """
 
@@ -310,7 +310,7 @@ def _default_kwargs(**overrides: Any) -> dict[str, Any]:
     return defaults
 
 
-# ── Tests ─────────────────────────────────────────────
+# -- Tests ---------------------------------------------
 
 
 class TestStateKey:
@@ -1550,7 +1550,7 @@ class TestStscStateSavedWhenNotifyRaises:
         assert data["baseline"] is None
 
 
-# ── Device Watchdog mock infrastructure ──────────────
+# -- Device Watchdog mock infrastructure --------------
 
 
 class _MockPersistentNotification:
@@ -2541,7 +2541,7 @@ class TestDeviceWatchdogDebugLogging:
         assert "device_issues=1" in formatted
 
 
-# ── Trigger Entity Controller ─────────────────────
+# -- Trigger Entity Controller ---------------------
 
 
 class _TecEnv:
@@ -3049,7 +3049,7 @@ class TestTecDebug:
         assert len(env.mock_log.warning_calls) == 0
 
 
-# ── Entity Defaults Watchdog mock infrastructure ───
+# -- Entity Defaults Watchdog mock infrastructure ---
 
 
 class _EdwEnv:
@@ -3741,7 +3741,7 @@ class TestEdwIntegrationFiltering:
                 },
             },
         )
-        # Only include zwave_js — matter entity
+        # Only include zwave_js -- matter entity
         # drift should be suppressed
         env.call(
             include_integrations_raw=["zwave_js"],
@@ -4129,7 +4129,7 @@ def discover_env() -> Iterator[_DiscoverDevicelessEnv]:
     restore ``sys.modules`` on teardown.
 
     Using a fixture (not a ``try/finally`` in every test)
-    guarantees restoration even if a test forgets — the
+    guarantees restoration even if a test forgets -- the
     previous pattern put that responsibility on each test.
     """
     saved = {k: sys.modules.get(k) for k in _ER_MODULE_NAMES}
@@ -4463,9 +4463,9 @@ class TestCodeQuality(CodeQualityBase):
 class TestPyScriptCompatibility:
     """Guard against PyScript AST evaluator limitations.
 
-    PyScript evaluates ALL pyscript files — both service
+    PyScript evaluates ALL pyscript files -- both service
     wrappers (pyscript/*.py) and logic modules
-    (pyscript/modules/*.py) — with a custom AST
+    (pyscript/modules/*.py) -- with a custom AST
     interpreter, not standard Python. Even though some
     logic modules run via ``@pyscript_executor`` (native
     Python in a worker thread), they may also be imported
@@ -4488,7 +4488,7 @@ class TestPyScriptCompatibility:
     These tests scan all pyscript files to prevent
     regressions.
 
-    IMPORTANT — paired evaluator sanity tests:
+    IMPORTANT -- paired evaluator sanity tests:
     When adding a new ``test_no_*`` guard here, add a
     matching negative test to
     ``TestHarnessSanity`` in
@@ -4499,7 +4499,7 @@ class TestPyScriptCompatibility:
     if a future pyscript release starts accepting a
     construct we ban, the harness test fails and
     signals that the static ban can be removed.
-    ``@staticmethod`` was one such case — banned
+    ``@staticmethod`` was one such case -- banned
     defensively but actually accepted by pyscript
     1.7.0; the ban was removed once the harness
     pairing confirmed it.
@@ -4712,7 +4712,7 @@ class TestPyScriptCompatibility:
         under ``if TYPE_CHECKING:`` raises ``NameError``.
 
         Function signature annotations (parameters, return
-        types) are fine — they're evaluated lazily or
+        types) are fine -- they're evaluated lazily or
         written as string literals.
         """
         for path in self._pyscript_files():
@@ -4754,7 +4754,7 @@ class TestPyScriptCompatibility:
                 ):
                     continue
                 # Collect names imported at runtime
-                # within this function — those are
+                # within this function -- those are
                 # safe even if they share a name with
                 # a TYPE_CHECKING import.
                 runtime_names: set[str] = set()
