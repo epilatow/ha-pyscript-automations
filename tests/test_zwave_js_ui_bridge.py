@@ -577,6 +577,207 @@ class TestZwaveJsUiClientTypedApis:
 
         _run(_do())
 
+    def test_get_nodes_with_fresh_routes_skips_lr_nodes(self) -> None:
+        # Z-Wave LR is direct-star: no mesh, no priority routes,
+        # no SUC return routes. The per-node refresh must skip LR
+        # nodes entirely -- asking for those routes is meaningless
+        # and, on some controller firmware, ``getPriorityRoute``
+        # for an LR node wedges the controller.
+        async def _do() -> None:
+            client, mock_sio = _make_client_with_mock_sio()
+            priority_route_calls: list[int] = []
+            suc_return_route_calls: list[int] = []
+
+            def _respond(
+                _event: str,
+                body: dict[str, Any],
+                timeout: float,
+            ) -> dict[str, Any]:
+                _ = timeout
+                api = body["api"]
+                args = body["args"]
+                if api == API_GET_NODES:
+                    return {
+                        "success": True,
+                        "message": "",
+                        "api": API_GET_NODES,
+                        "result": [
+                            {
+                                "id": 18,
+                                "maxDataRate": 100000,
+                                "isRouting": True,
+                                "isListening": True,
+                                "isFrequentListening": False,
+                                "failed": False,
+                                "protocol": 0,  # mesh
+                                "applicationRoute": None,
+                                "prioritySUCReturnRoute": None,
+                            },
+                            {
+                                "id": 273,
+                                "maxDataRate": 100000,
+                                "isRouting": False,
+                                "isListening": False,
+                                "isFrequentListening": False,
+                                "failed": False,
+                                "protocol": 1,  # long range
+                                "applicationRoute": None,
+                                "prioritySUCReturnRoute": None,
+                            },
+                        ],
+                    }
+                if api == "getPriorityRoute":
+                    priority_route_calls.append(args[0])
+                    return {
+                        "success": True,
+                        "message": "",
+                        "api": "getPriorityRoute",
+                        "result": None,
+                    }
+                if api == "getPrioritySUCReturnRoute":
+                    suc_return_route_calls.append(args[0])
+                    return {
+                        "success": True,
+                        "message": "",
+                        "api": "getPrioritySUCReturnRoute",
+                        "result": None,
+                    }
+                msg = f"unexpected api: {api} {args}"
+                raise AssertionError(msg)
+
+            mock_sio.call.side_effect = _respond
+            _, nodes = await client.get_nodes_with_fresh_routes()
+            assert [n.node_id for n in nodes] == [18, 273]
+            # Per-node refresh ran for the mesh node only.
+            assert priority_route_calls == [18]
+            assert suc_return_route_calls == [18]
+
+        _run(_do())
+
+    def test_get_nodes_with_fresh_routes_propagates_timeout(self) -> None:
+        # A data-time timeout from the per-node refresh must
+        # propagate out of get_nodes_with_fresh_routes so the
+        # caller (zwave_route_manager's _zrm_bridge_get_nodes)
+        # can capture it into the bridge_error channel and feed
+        # the circuit breaker.
+        async def _do() -> None:
+            client, mock_sio = _make_client_with_mock_sio()
+
+            def _respond(
+                _event: str,
+                body: dict[str, Any],
+                timeout: float,
+            ) -> dict[str, Any]:
+                _ = timeout
+                api = body["api"]
+                if api == API_GET_NODES:
+                    return {
+                        "success": True,
+                        "message": "",
+                        "api": API_GET_NODES,
+                        "result": [
+                            {
+                                "id": 18,
+                                "maxDataRate": 100000,
+                                "isRouting": True,
+                                "isListening": True,
+                                "isFrequentListening": False,
+                                "failed": False,
+                                "protocol": 0,
+                                "applicationRoute": None,
+                                "prioritySUCReturnRoute": None,
+                            },
+                        ],
+                    }
+                raise TimeoutError("controller did not ACK")
+
+            mock_sio.call.side_effect = _respond
+            try:
+                await client.get_nodes_with_fresh_routes()
+            except TimeoutError as e:
+                assert "controller did not ACK" in str(e)
+                return
+            msg = "expected TimeoutError to propagate"
+            raise AssertionError(msg)
+
+        _run(_do())
+
+    def test_get_nodes_with_fresh_routes_bounded_concurrency(self) -> None:
+        # Per-node refresh is gated by a semaphore so the
+        # controller's serial interface isn't flooded. Verify
+        # no more than 2 nodes are in flight at once, even with
+        # many mesh nodes.
+        async def _do() -> None:
+            client, mock_sio = _make_client_with_mock_sio()
+            in_flight = 0
+            max_in_flight = 0
+            # Build 8 mesh nodes so a naive implementation would
+            # fan out 16 calls at once.
+            bulk_nodes = [
+                {
+                    "id": nid,
+                    "maxDataRate": 100000,
+                    "isRouting": True,
+                    "isListening": True,
+                    "isFrequentListening": False,
+                    "failed": False,
+                    "protocol": 0,
+                    "applicationRoute": None,
+                    "prioritySUCReturnRoute": None,
+                }
+                for nid in range(10, 18)
+            ]
+
+            per_node_lock = asyncio.Lock()
+
+            async def _respond(
+                _event: str,
+                body: dict[str, Any],
+                timeout: float,
+            ) -> dict[str, Any]:
+                nonlocal in_flight, max_in_flight
+                _ = timeout
+                api = body["api"]
+                if api == API_GET_NODES:
+                    return {
+                        "success": True,
+                        "message": "",
+                        "api": API_GET_NODES,
+                        "result": bulk_nodes,
+                    }
+                # Only per-node calls contribute to concurrency.
+                # Count one in-flight per node pair (both
+                # getPriorityRoute and getPrioritySUCReturnRoute
+                # for a node happen inside the semaphore); use
+                # a lock to bump on entry and yield control so
+                # overlaps are visible.
+                async with per_node_lock:
+                    in_flight += 1
+                    max_in_flight = max(max_in_flight, in_flight)
+                await asyncio.sleep(0)
+                async with per_node_lock:
+                    in_flight -= 1
+                return {
+                    "success": True,
+                    "message": "",
+                    "api": api,
+                    "result": None,
+                }
+
+            mock_sio.call.side_effect = _respond
+            await client.get_nodes_with_fresh_routes()
+            # Per-node concurrency is 2 nodes; each node fires
+            # its two refresh calls together via asyncio.gather,
+            # so up to 4 calls can be in flight at once. The
+            # semaphore must keep this from exceeding 2 nodes x
+            # 2 calls = 4.
+            assert max_in_flight <= 4, (
+                f"max_in_flight={max_in_flight} exceeds 2 nodes "
+                "x 2 calls per node = 4"
+            )
+
+        _run(_do())
+
     def test_set_application_route_args(self) -> None:
         async def _do() -> None:
             client, mock_sio = _make_client_with_mock_sio()

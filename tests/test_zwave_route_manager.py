@@ -21,6 +21,9 @@ from zwave_js_ui_bridge import (  # noqa: E402
     RouteSpeed,
 )
 from zwave_route_manager import (  # noqa: E402
+    CIRCUIT_BREAKER_COOLDOWN,
+    CIRCUIT_BREAKER_THRESHOLD,
+    CircuitBreakerState,
     ClientSpec,
     Config,
     ConfigError,
@@ -31,7 +34,12 @@ from zwave_route_manager import (  # noqa: E402
     RouteEntry,
     RouteRequest,
     RouteType,
+    circuit_breaker_attrs,
+    circuit_breaker_is_open,
+    circuit_breaker_next,
     diff_and_plan,
+    is_bridge_timeout_error,
+    parse_circuit_breaker_state,
     parse_config,
     parse_route_speed_value,
     resolve_entities,
@@ -1704,6 +1712,200 @@ class TestRouteTypeByValue:
     def test_unknown_returns_none(self) -> None:
         assert route_type_by_value("") is None
         assert route_type_by_value("bogus") is None
+
+
+# -- Circuit breaker ---------------------------------------------
+
+
+class TestIsBridgeTimeoutError:
+    def test_timeout_string(self) -> None:
+        assert is_bridge_timeout_error("TimeoutError") is True
+        assert is_bridge_timeout_error("socketio.TimeoutError: ...") is True
+
+    def test_non_timeout(self) -> None:
+        # Connection / OS errors are transient; they shouldn't
+        # trip the breaker. Only timeouts indicate the "we are
+        # talking to the addon but the controller is wedged"
+        # pattern the breaker is designed for.
+        assert is_bridge_timeout_error("ConnectionError: refused") is False
+        assert is_bridge_timeout_error("OSError: broken pipe") is False
+        assert is_bridge_timeout_error("") is False
+        assert is_bridge_timeout_error(None) is False
+
+
+class TestCircuitBreakerIsOpen:
+    def test_closed_when_open_until_none(self) -> None:
+        state = CircuitBreakerState(streak=0, open_until=None)
+        assert circuit_breaker_is_open(state, NOW) is False
+
+    def test_open_when_now_before_open_until(self) -> None:
+        state = CircuitBreakerState(
+            streak=3,
+            open_until=NOW + timedelta(minutes=10),
+        )
+        assert circuit_breaker_is_open(state, NOW) is True
+
+    def test_closed_when_now_past_open_until(self) -> None:
+        # After the cooldown elapses, the breaker is back to
+        # closed from the "should we skip this reconcile?"
+        # perspective. The next reconcile re-opens or resets
+        # based on the bridge outcome.
+        state = CircuitBreakerState(
+            streak=3,
+            open_until=NOW - timedelta(minutes=1),
+        )
+        assert circuit_breaker_is_open(state, NOW) is False
+
+
+class TestParseCircuitBreakerState:
+    def test_empty_attrs(self) -> None:
+        state = parse_circuit_breaker_state({})
+        assert state.streak == 0
+        assert state.open_until is None
+
+    def test_none_attrs(self) -> None:
+        state = parse_circuit_breaker_state(None)
+        assert state.streak == 0
+        assert state.open_until is None
+
+    def test_round_trip(self) -> None:
+        original = CircuitBreakerState(
+            streak=2,
+            open_until=NOW + timedelta(minutes=15),
+        )
+        attrs = circuit_breaker_attrs(original)
+        parsed = parse_circuit_breaker_state(attrs)
+        assert parsed.streak == original.streak
+        assert parsed.open_until == original.open_until
+
+    def test_malformed_values_default_to_closed(self) -> None:
+        # A hand-edited / corrupted state entity shouldn't
+        # wedge the automation. Gracefully collapse to closed.
+        state = parse_circuit_breaker_state(
+            {
+                "bridge_error_streak": "not an int",
+                "circuit_open_until": "not a timestamp",
+            },
+        )
+        assert state.streak == 0
+        assert state.open_until is None
+
+    def test_negative_streak_clamped(self) -> None:
+        state = parse_circuit_breaker_state(
+            {"bridge_error_streak": -5, "circuit_open_until": ""},
+        )
+        assert state.streak == 0
+
+
+class TestCircuitBreakerNext:
+    def test_success_no_prior_streak_no_transition(self) -> None:
+        prior = CircuitBreakerState(streak=0, open_until=None)
+        new_state, transition = circuit_breaker_next(
+            prior,
+            NOW,
+            bridge_succeeded=True,
+            bridge_timed_out=False,
+        )
+        assert new_state.streak == 0
+        assert new_state.open_until is None
+        assert transition is None
+
+    def test_success_resets_open_circuit(self) -> None:
+        prior = CircuitBreakerState(
+            streak=3,
+            open_until=NOW + timedelta(minutes=15),
+        )
+        new_state, transition = circuit_breaker_next(
+            prior,
+            NOW,
+            bridge_succeeded=True,
+            bridge_timed_out=False,
+        )
+        assert new_state.streak == 0
+        assert new_state.open_until is None
+        assert transition == "closed"
+
+    def test_success_resets_nonzero_streak_below_threshold(self) -> None:
+        # Streak was building but hadn't crossed threshold --
+        # breaker never opened, so the "closed" transition tag
+        # is still appropriate so the caller can clear any
+        # stale notification artifacts.
+        prior = CircuitBreakerState(streak=1, open_until=None)
+        new_state, transition = circuit_breaker_next(
+            prior,
+            NOW,
+            bridge_succeeded=True,
+            bridge_timed_out=False,
+        )
+        assert new_state.streak == 0
+        assert transition == "closed"
+
+    def test_timeout_below_threshold_no_transition(self) -> None:
+        prior = CircuitBreakerState(streak=0, open_until=None)
+        new_state, transition = circuit_breaker_next(
+            prior,
+            NOW,
+            bridge_succeeded=False,
+            bridge_timed_out=True,
+        )
+        assert new_state.streak == 1
+        assert new_state.open_until is None
+        assert transition is None
+
+    def test_timeout_at_threshold_opens_circuit(self) -> None:
+        prior = CircuitBreakerState(
+            streak=CIRCUIT_BREAKER_THRESHOLD - 1,
+            open_until=None,
+        )
+        new_state, transition = circuit_breaker_next(
+            prior,
+            NOW,
+            bridge_succeeded=False,
+            bridge_timed_out=True,
+        )
+        assert new_state.streak == CIRCUIT_BREAKER_THRESHOLD
+        assert new_state.open_until == NOW + CIRCUIT_BREAKER_COOLDOWN
+        assert transition == "open"
+
+    def test_timeout_while_already_open_emits_extended(self) -> None:
+        # While the circuit is open, each fresh timeout
+        # slides the cooldown window forward. The transition
+        # tag must flip to "extended" so the caller can
+        # re-emit the breaker notification with the updated
+        # resume time -- otherwise the user sees stale
+        # "resume at HH:MM" wording from the first open.
+        prior_open_until = NOW + timedelta(minutes=5)
+        prior = CircuitBreakerState(
+            streak=CIRCUIT_BREAKER_THRESHOLD,
+            open_until=prior_open_until,
+        )
+        new_state, transition = circuit_breaker_next(
+            prior,
+            NOW,
+            bridge_succeeded=False,
+            bridge_timed_out=True,
+        )
+        assert new_state.streak == CIRCUIT_BREAKER_THRESHOLD + 1
+        # Window extends from now, not from prior open_until.
+        assert new_state.open_until == NOW + CIRCUIT_BREAKER_COOLDOWN
+        assert transition == "extended"
+
+    def test_non_timeout_bridge_error_preserves_state(self) -> None:
+        # Neither succeeded nor timed out: the breaker should
+        # carry forward unchanged (e.g. a ConnectionError while
+        # the addon is booting shouldn't advance the streak).
+        prior = CircuitBreakerState(
+            streak=2,
+            open_until=NOW + timedelta(minutes=10),
+        )
+        new_state, transition = circuit_breaker_next(
+            prior,
+            NOW,
+            bridge_succeeded=False,
+            bridge_timed_out=False,
+        )
+        assert new_state == prior
+        assert transition is None
 
 
 class TestCodeQuality(CodeQualityBase):

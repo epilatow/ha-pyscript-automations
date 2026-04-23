@@ -401,14 +401,33 @@ def reexec_in_venv() -> None:
 # --- Fetchers ---------------------------------------------------
 
 
-# Max concurrent per-node route refresh RPCs. zwave-js-ui
+class ZwaveApiError(RuntimeError):
+    """zwave-js-ui returned a ``success: false`` envelope.
+
+    Distinct from ``socketio.exceptions.TimeoutError`` (the
+    call never returned at all) and from plain ``RuntimeError``
+    (malformed response shape). Raised when the addon answers
+    quickly but the driver reports a failure -- most commonly
+    the ``"Z-Wave client not connected"`` state seen when the
+    controller is wedged and zwave-js can't complete driver
+    init. The top-level handler catches this so the user sees
+    a clean message with a pointer to ``--use-snapshot-data``.
+    """
+
+
+# Max concurrent per-node route refresh nodes. zwave-js-ui
 # serializes most controller calls anyway; dozens of parallel
-# requests can stall the controller on a large mesh. 8 keeps
-# the connection pipelined without queuing a thundering herd.
-_ROUTE_REFRESH_CONCURRENCY = 8
+# requests have been observed to stall the controller's serial
+# interface. ``2`` keeps the connection pipelined so one slow
+# node doesn't block progress on the rest, without queuing a
+# thundering herd. Mirrored by the ZRM bridge's semaphore in
+# ``pyscript/modules/zwave_js_ui_bridge.py``.
+_ROUTE_REFRESH_CONCURRENCY = 2
 
 
-async def fetch_zwave_nodes() -> dict[int, dict[str, Any]]:
+async def fetch_zwave_nodes(
+    use_snapshot_data: bool = False,
+) -> dict[int, dict[str, Any]]:
     """Bulk node fetch with route fields refreshed per-node.
 
     The bulk ``getNodes`` snapshot's ``applicationRoute`` and
@@ -422,7 +441,20 @@ async def fetch_zwave_nodes() -> dict[int, dict[str, Any]]:
     Refreshes run concurrently (see
     ``_ROUTE_REFRESH_CONCURRENCY``) on a single socket.io
     connection. The controller (node 1) has no inbound route
-    to itself and is skipped entirely.
+    to itself and is skipped entirely. Z-Wave LR nodes (ID
+    256+) are also skipped: LR is a direct-star topology with
+    no mesh, so priority routes and priority SUC return
+    routes don't apply, and on some controller firmware
+    versions ``getPriorityRoute`` for an LR node wedges the
+    controller.
+
+    When ``use_snapshot_data`` is True, the per-node refresh
+    is skipped entirely and the bulk snapshot's route fields
+    are returned as-is. Those values may be stale (the
+    snapshot is updated only when routes are assigned or at
+    driver startup). Use only when the controller can't
+    service the live queries and some data is better than
+    none.
     """
     import socketio  # noqa: PLC0415 - needs venv
 
@@ -434,6 +466,17 @@ async def fetch_zwave_nodes() -> dict[int, dict[str, Any]]:
             {"api": "getNodes", "args": []},
             timeout=10.0,
         )
+        # zwave-js-ui envelope: ``success`` False with a
+        # ``message`` means the addon is up but the driver
+        # can't service the call (e.g. ``"Z-Wave client not
+        # connected"`` when the controller's wedged and
+        # driver init is looping on timeouts). Route to a
+        # dedicated exception so the top-level handler can
+        # print a clean message with ``--use-snapshot-data``
+        # guidance instead of a traceback.
+        if isinstance(resp, dict) and resp.get("success") is False:
+            message = str(resp.get("message") or "no message")
+            raise ZwaveApiError(f"getNodes failed: {message}")
         result = resp.get("result") if isinstance(resp, dict) else None
         if not isinstance(result, list):
             raise RuntimeError(
@@ -442,6 +485,8 @@ async def fetch_zwave_nodes() -> dict[int, dict[str, Any]]:
         nodes = {
             n["id"]: n for n in result if isinstance(n, dict) and "id" in n
         }
+        if use_snapshot_data:
+            return nodes
         sem = asyncio.Semaphore(_ROUTE_REFRESH_CONCURRENCY)
 
         async def _refresh(nid: int) -> None:
@@ -474,10 +519,13 @@ async def fetch_zwave_nodes() -> dict[int, dict[str, Any]]:
             nodes[nid]["applicationRoute"] = ar
             nodes[nid]["prioritySUCReturnRoute"] = psr
 
-        # Skip the controller -- it has no inbound route to
-        # itself, so the per-node refresh would be wasted RPCs.
+        # Skip the controller (no inbound route to itself, so
+        # the refresh would be wasted RPCs) and LR nodes (IDs
+        # 256+: direct star topology, no priority routes, and
+        # ``getPriorityRoute`` on LR has been observed to wedge
+        # the controller on some firmware).
         await asyncio.gather(
-            *(_refresh(nid) for nid in nodes if nid != 1),
+            *(_refresh(nid) for nid in nodes if nid != 1 and nid < 256),
         )
     finally:
         await sio.disconnect()
@@ -1642,6 +1690,7 @@ async def _run(
     api_key: str,
     day_offsets: list[int],
     columns: list[str],
+    use_snapshot_data: bool = False,
 ) -> tuple[
     dict[int, dict[str, Any]],
     dict[int, dict[str, Any]],
@@ -1657,7 +1706,9 @@ async def _run(
     separate API call per node, so they're only fetched when
     the ``neighbors`` column is requested.
     """
-    zwave_task = asyncio.create_task(fetch_zwave_nodes())
+    zwave_task = asyncio.create_task(
+        fetch_zwave_nodes(use_snapshot_data=use_snapshot_data),
+    )
     reg_task = asyncio.create_task(fetch_ha_registries(api_key))
     states_task = asyncio.create_task(fetch_ha_states(api_key))
 
@@ -1761,6 +1812,19 @@ def main() -> int:
         action="store_true",
         help="disable ANSI color output",
     )
+    parser.add_argument(
+        "--use-snapshot-data",
+        action="store_true",
+        help=(
+            "skip the per-node route refresh and use the bulk "
+            "getNodes() snapshot values for priority-route "
+            "and SUC-return-route fields. Those values may be "
+            "stale (the snapshot is only updated on route "
+            "assignment or driver startup). Use when the "
+            "controller can't service the live queries and "
+            "some data is better than none."
+        ),
+    )
     args = parser.parse_args()
 
     if args.days < 0:
@@ -1783,9 +1847,55 @@ def main() -> int:
         return 2
     api_key = API_KEY_FILE.read_text().strip()
 
-    zwave_nodes, node_to_ha, current_states, history, neighbors = asyncio.run(
-        _run(api_key, day_offsets, columns),
-    )
+    # socketio.exceptions.TimeoutError is a distinct class from
+    # the builtin TimeoutError -- catch both so a wedged Z-Wave
+    # controller produces a clear message instead of a traceback.
+    # ZwaveApiError covers the "addon is up but driver can't
+    # service calls" state (e.g. ``"Z-Wave client not
+    # connected"`` while zwave-js loops on controller init).
+    import socketio.exceptions as _sio_exc  # noqa: PLC0415 - needs venv
+
+    try:
+        (
+            zwave_nodes,
+            node_to_ha,
+            current_states,
+            history,
+            neighbors,
+        ) = asyncio.run(
+            _run(
+                api_key,
+                day_offsets,
+                columns,
+                use_snapshot_data=args.use_snapshot_data,
+            ),
+        )
+    except (TimeoutError, _sio_exc.TimeoutError) as e:
+        detail = str(e) or type(e).__name__
+        print(
+            f"Error: Z-Wave query timed out: {detail}",
+            file=sys.stderr,
+        )
+        print(
+            "The Z-Wave controller is unresponsive to API queries. "
+            "Re-run with --use-snapshot-data to fall back to the "
+            "bulk getNodes() snapshot (values may be stale).",
+            file=sys.stderr,
+        )
+        return 3
+    except ZwaveApiError as e:
+        # --use-snapshot-data also calls getNodes, so if the
+        # envelope says the driver isn't connected there's no
+        # fallback to offer here -- just surface the error.
+        print(f"Error: Z-Wave API call failed: {e}", file=sys.stderr)
+        print(
+            "The Z-Wave JS addon is running but its driver "
+            "is not connected to the controller. Check the "
+            "Z-Wave JS addon logs; a stuck controller may "
+            "need an addon restart or a host reboot to clear.",
+            file=sys.stderr,
+        )
+        return 4
     rows = build_rows(
         zwave_nodes,
         node_to_ha,

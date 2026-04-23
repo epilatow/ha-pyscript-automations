@@ -407,9 +407,18 @@ class ZwaveJsUiClient:
         hit the controller fresh, so we use them to overwrite
         the bulk snapshot's route fields.
 
-        The two refresh calls run in parallel per node via
-        ``asyncio.gather``; for a typical 40-node mesh that's
-        ~80 cheap socket.io calls in a few hundred ms.
+        Z-Wave Long Range (LR) nodes are skipped -- LR is a
+        direct-star topology with no mesh, so priority routes
+        and priority SUC return routes do not apply. Asking
+        for them is meaningless, and on some controller
+        firmware versions ``getPriorityRoute`` for an LR node
+        wedges the controller's serial interface.
+
+        Per-node refreshes are bounded by a semaphore (``2``
+        concurrent nodes) to avoid flooding the controller's
+        command queue. The controller serializes these calls
+        internally; a thundering herd has been observed to
+        stall the serial interface on large meshes.
         """
         import asyncio  # noqa: PLC0415 - keep async imports local
 
@@ -425,11 +434,16 @@ class ZwaveJsUiClient:
         if not nodes:
             return bulk_r, nodes
 
+        sem = asyncio.Semaphore(2)
+
         async def _refresh(ni: NodeInfo) -> None:
-            ar, psr = await asyncio.gather(
-                self.get_priority_route(ni.node_id),
-                self.get_priority_suc_return_route(ni.node_id),
-            )
+            if ni.is_long_range:
+                return
+            async with sem:
+                ar, psr = await asyncio.gather(
+                    self.get_priority_route(ni.node_id),
+                    self.get_priority_suc_return_route(ni.node_id),
+                )
             ni.application_route = ar
             ni.priority_suc_return_route = psr
 

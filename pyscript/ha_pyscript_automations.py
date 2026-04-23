@@ -2952,6 +2952,20 @@ def _zrm_bridge_get_nodes(
         "error": "",
     }
 
+    # socketio.exceptions.TimeoutError is a distinct class from
+    # the builtin TimeoutError; capture both so a wedged
+    # controller (which answers getNodes() but not the per-node
+    # route refresh) flows through the same error channel as a
+    # connect-time timeout.
+    import socketio.exceptions as _sio_exc  # noqa: PLC0415
+
+    _bridge_timeout_excs: tuple[type[BaseException], ...] = (
+        ConnectionError,
+        TimeoutError,
+        OSError,
+        _sio_exc.TimeoutError,
+    )
+
     async def _run() -> None:
         client = bridge.ZwaveJsUiClient(
             host=host,
@@ -2961,17 +2975,53 @@ def _zrm_bridge_get_nodes(
         try:
             try:
                 await client.connect()
-            except (ConnectionError, TimeoutError, OSError) as e:
+            except _bridge_timeout_excs as e:
                 # Addon likely booting or misconfigured. Let
                 # the caller carry reconcile_pending forward.
-                result["error"] = str(e) or type(e).__name__
+                # Always prefix the exception class name so the
+                # downstream is_bridge_timeout_error() classifier
+                # can match on "TimeoutError" regardless of whether
+                # the exception carries a custom message. Plain
+                # asyncio/socketio TimeoutError is typically
+                # empty-message, but any timeout that propagates
+                # up with a custom message would otherwise bypass
+                # the breaker.
+                detail = str(e)
+                result["error"] = (
+                    f"{type(e).__name__}: {detail}"
+                    if detail
+                    else type(e).__name__
+                )
                 return
             # Use the fresh-routes variant so route-state diffs
             # ride on per-node ``getPriorityRoute`` /
             # ``getPrioritySUCReturnRoute`` rather than the bulk
             # snapshot's cached fields, which can flap to None
             # while the controller still holds the route.
-            bulk_r, nodes = await client.get_nodes_with_fresh_routes()
+            try:
+                bulk_r, nodes = await client.get_nodes_with_fresh_routes()
+            except _bridge_timeout_excs as e:
+                # Controller answered getNodes() but hung on the
+                # per-node route refresh (observed when the
+                # controller's serial interface is wedged).
+                # Route through the same "bridge_error" channel
+                # as a connect-time timeout so the circuit
+                # breaker can count it.
+                # Always prefix the exception class name so the
+                # downstream is_bridge_timeout_error() classifier
+                # can match on "TimeoutError" regardless of whether
+                # the exception carries a custom message. Plain
+                # asyncio/socketio TimeoutError is typically
+                # empty-message, but any timeout that propagates
+                # up with a custom message would otherwise bypass
+                # the breaker.
+                detail = str(e)
+                result["error"] = (
+                    f"{type(e).__name__}: {detail}"
+                    if detail
+                    else type(e).__name__
+                )
+                return
             result["api_result"] = bulk_r
             result["nodes"] = nodes
             # "ok" means the call landed; the caller still
@@ -3288,6 +3338,45 @@ def _zrm_api_notification(
     return helpers.PersistentNotification(
         active=bool(error),
         notification_id=f"{notif_prefix}api",
+        title=title,
+        message=body,
+    )
+
+
+def _zrm_circuit_breaker_notification(
+    notif_prefix: str,
+    now: datetime,
+    open_until: datetime,
+    streak: int,
+) -> helpers.PersistentNotification:
+    """Circuit-breaker notification raised on the open transition.
+
+    The id does not match the sweep's ``keep_pattern`` so it is
+    cleared automatically by the first successful reconcile
+    after the cooldown elapses.
+    """
+    cooldown_minutes = max(
+        1,
+        int(round((open_until - now).total_seconds() / 60)),
+    )
+    # Local-time "at HH:MM" so the user doesn't have to add the
+    # cooldown themselves. Conversion to local is best-effort;
+    # fall back to UTC-ish ISO if the local conversion explodes.
+    try:
+        local_resume = open_until.astimezone().strftime("%H:%M")
+    except (OverflowError, ValueError):
+        local_resume = open_until.isoformat(timespec="minutes")
+    title = "Z-Wave Route Manager: controller unresponsive"
+    body = (
+        "Z-Wave route reconcile paused -- controller is "
+        "unresponsive to API queries after "
+        f"{streak} consecutive attempts timed out. "
+        f"Automation will retry after {cooldown_minutes} "
+        f"minutes (at {local_resume})."
+    )
+    return helpers.PersistentNotification(
+        active=True,
+        notification_id=f"{notif_prefix}circuit_breaker",
         title=title,
         message=body,
     )
@@ -3651,6 +3740,7 @@ def _zrm_save_failure_state(
     last_reconcile_iso: str,
     trigger_id: str,
     extra: dict[str, Any],
+    circuit_attrs: dict[str, Any] | None = None,
 ) -> None:
     """Persist state for a bailing-out reconcile.
 
@@ -3658,6 +3748,10 @@ def _zrm_save_failure_state(
     operators can see why a reconcile stopped. Centralised
     so the paths stay consistent (one used to be missing a
     save entirely).
+
+    ``circuit_attrs`` carries the bridge-timeout circuit
+    breaker's ``bridge_error_streak`` + ``circuit_open_until``
+    fields through so they survive across every bail-out.
     """
     attrs: dict[str, Any] = {
         "runtime": str(round(time.monotonic() - start_time, 2)),
@@ -3666,6 +3760,9 @@ def _zrm_save_failure_state(
         "last_config_mtime": current_mtime,
         "last_trigger": str(trigger_id or ""),
     }
+    if circuit_attrs is not None:
+        for name, value in circuit_attrs.items():
+            attrs[name] = value
     for name, value in extra.items():
         attrs[name] = value
     _save_state(key, now, attrs)
@@ -3732,6 +3829,13 @@ def zwave_route_manager(
     except ValueError:
         last_reconcile_dt = None
 
+    # Circuit-breaker state: carries bridge-timeout streak +
+    # any open-until timestamp across reconciles. Every bail-out
+    # path threads this dict through _zrm_save_failure_state so
+    # the streak isn't accidentally reset by an unrelated error.
+    circuit_state = zrm.parse_circuit_breaker_state(stored_attrs)
+    circuit_attrs = zrm.circuit_breaker_attrs(circuit_state)
+
     pending = _zrm_paths_from_storage(stored_attrs.get("pending"))
     applied_state = _zrm_paths_from_storage(stored_attrs.get("applied"))
 
@@ -3776,8 +3880,37 @@ def zwave_route_manager(
                 "last_reconcile": last_reconcile_iso,
                 "last_config_mtime": last_config_mtime,
                 "last_trigger": str(trigger_id or ""),
+                **circuit_attrs,
             },
         )
+        return
+
+    # Circuit breaker gate: if the bridge has been timing out
+    # on consecutive reconciles, skip until the cooldown
+    # expires. Every periodic tick that tries the bridge while
+    # the controller is wedged just amplifies the problem by
+    # re-queuing API calls it can't service. Manual triggers
+    # bypass the gate so the user can force a retry ("check
+    # whether the controller has come back yet").
+    if zrm.circuit_breaker_is_open(circuit_state, now) and not manual_trigger:
+        _zrm_save_failure_state(
+            key,
+            now,
+            start_time,
+            current_mtime,
+            last_reconcile_iso,
+            trigger_id,
+            {"bridge_error": "circuit breaker open"},
+            circuit_attrs=circuit_attrs,
+        )
+        if debug_logging:
+            log.warning(  # noqa: F821
+                "%s circuit breaker open until %s; skipping reconcile",
+                tag,
+                circuit_state.open_until.isoformat()
+                if circuit_state.open_until
+                else "?",
+            )
         return
 
     # Read + parse config. Missing or empty files are
@@ -3823,6 +3956,7 @@ def zwave_route_manager(
             last_reconcile_iso,
             trigger_id,
             {"config_errors": len(config_errors)},
+            circuit_attrs=circuit_attrs,
         )
         return
 
@@ -3843,9 +3977,45 @@ def zwave_route_manager(
         port,
         token,
     )
-    if bridge_result.get("error"):
-        # Likely a transient connection error. Carry reconcile
-        # forward, no notification (noise on every HA restart).
+    bridge_error = bridge_result.get("error")
+    if bridge_error:
+        # Connection and data-time timeouts both land here.
+        # Timeouts feed the circuit breaker so repeated
+        # reconciles against a wedged controller don't keep
+        # the controller wedged. Non-timeout bridge errors
+        # (e.g. ``ConnectionError`` when the addon is
+        # booting) don't count, since they're typically
+        # transient and self-clear.
+        bridge_timed_out = zrm.is_bridge_timeout_error(bridge_error)
+        circuit_state, cb_transition = zrm.circuit_breaker_next(
+            circuit_state,
+            now,
+            bridge_succeeded=False,
+            bridge_timed_out=bridge_timed_out,
+        )
+        circuit_attrs = zrm.circuit_breaker_attrs(circuit_state)
+        if (
+            cb_transition in ("open", "extended")
+            and circuit_state.open_until is not None
+        ):
+            # Raise or re-emit the breaker notification.
+            # HA persistent_notification.create with an
+            # existing ID updates the body in place, so
+            # "extended" overwrites the stale resume time
+            # from the previous open/extended cycle. The id
+            # is outside the sweep's keep_pattern so the
+            # next successful reconcile (after the cooldown)
+            # clears it automatically.
+            breaker_notif = _zrm_circuit_breaker_notification(
+                notif_prefix,
+                now,
+                circuit_state.open_until,
+                circuit_state.streak,
+            )
+            _process_persistent_notifications(
+                [breaker_notif],
+                instance_id,
+            )
         _zrm_save_failure_state(
             key,
             now,
@@ -3853,15 +4023,30 @@ def zwave_route_manager(
             current_mtime,
             last_reconcile_iso,
             trigger_id,
-            {"bridge_error": str(bridge_result.get("error"))},
+            {"bridge_error": str(bridge_error)},
+            circuit_attrs=circuit_attrs,
         )
         if debug_logging:
             log.warning(  # noqa: F821
-                "%s bridge not ready: %s",
+                "%s bridge not ready: %s (streak=%d)",
                 tag,
-                bridge_result.get("error"),
+                bridge_error,
+                circuit_state.streak,
             )
         return
+
+    # Bridge returned successfully. Reset the breaker so a
+    # prior failed streak doesn't linger. Any existing
+    # breaker notification is cleared by the normal sweep at
+    # the tail of this function (the id is outside
+    # keep_pattern).
+    circuit_state, _ = zrm.circuit_breaker_next(
+        circuit_state,
+        now,
+        bridge_succeeded=True,
+        bridge_timed_out=False,
+    )
+    circuit_attrs = zrm.circuit_breaker_attrs(circuit_state)
 
     getnodes_result = bridge_result.get("api_result")
     err_msg = None
@@ -3889,6 +4074,7 @@ def zwave_route_manager(
             last_reconcile_iso,
             trigger_id,
             {"api_error": err_msg},
+            circuit_attrs=circuit_attrs,
         )
         return
 
@@ -3931,6 +4117,7 @@ def zwave_route_manager(
             last_reconcile_iso,
             trigger_id,
             {"api_error": err_msg},
+            circuit_attrs=circuit_attrs,
         )
         return
 
@@ -3965,6 +4152,7 @@ def zwave_route_manager(
             last_reconcile_iso,
             trigger_id,
             {"resolve_errors": len(resolve_errors)},
+            circuit_attrs=circuit_attrs,
         )
         return
 
@@ -4016,6 +4204,7 @@ def zwave_route_manager(
                 last_reconcile_iso,
                 trigger_id,
                 {"api_error": err_msg},
+                circuit_attrs=circuit_attrs,
             )
             return
         for action, api_result in apply_results:
@@ -4210,6 +4399,9 @@ def zwave_route_manager(
             "resolve_errors": 0,
             "api_error": "",
             "bridge_error": "",
+            # Breaker was reset to (0, None) immediately after
+            # the successful bridge call above.
+            **circuit_attrs,
             "pending": _zrm_paths_to_storage(final_pending, node_to_entity),
             "applied": _zrm_paths_to_storage(final_applied, node_to_entity),
         },

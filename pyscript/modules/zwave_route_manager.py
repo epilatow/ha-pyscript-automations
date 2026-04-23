@@ -27,6 +27,7 @@ Two Z-Wave routes managed per configured client:
 See ``docs/zwave_route_manager.md`` for user-facing docs.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -367,6 +368,163 @@ class ReconcileResult:
     new_timeouts: list[tuple[bridge.NodeID, RouteType, datetime, int]] = field(
         default_factory=list,
     )
+
+
+# -- Circuit breaker --------------------------------------------
+
+# Threshold + cooldown for the bridge-timeout circuit breaker.
+# The breaker opens after ``CIRCUIT_BREAKER_THRESHOLD`` consecutive
+# reconciles end with a bridge data-time timeout, and stays open
+# for ``CIRCUIT_BREAKER_COOLDOWN`` before the next reconcile
+# retries. While open, reconciles are skipped entirely -- the
+# automation's periodic ticks otherwise amplify a wedged-controller
+# situation by re-queuing API calls the controller can't service.
+CIRCUIT_BREAKER_THRESHOLD = 3
+CIRCUIT_BREAKER_COOLDOWN = timedelta(minutes=15)
+
+
+@dataclass
+class CircuitBreakerState:
+    """State of the bridge-timeout circuit breaker.
+
+    ``streak`` counts consecutive reconciles that ended with a
+    bridge timeout. ``open_until`` is the absolute time at which
+    the circuit closes and the next reconcile is allowed to
+    attempt the bridge again; ``None`` means the circuit is
+    closed.
+    """
+
+    streak: int = 0
+    open_until: datetime | None = None
+
+
+def circuit_breaker_is_open(
+    state: CircuitBreakerState,
+    now: datetime,
+) -> bool:
+    """True iff the circuit is open at ``now``."""
+    return state.open_until is not None and now < state.open_until
+
+
+def circuit_breaker_next(
+    prior: CircuitBreakerState,
+    now: datetime,
+    *,
+    bridge_succeeded: bool,
+    bridge_timed_out: bool,
+    threshold: int = CIRCUIT_BREAKER_THRESHOLD,
+    cooldown: timedelta = CIRCUIT_BREAKER_COOLDOWN,
+) -> tuple[CircuitBreakerState, str | None]:
+    """Compute the next circuit-breaker state and a transition tag.
+
+    Returns ``(new_state, transition)`` where ``transition`` is:
+
+    - ``"open"`` -- the circuit just transitioned from
+      closed to open (caller should raise a persistent
+      notification alerting the user).
+    - ``"extended"`` -- the circuit was already open and
+      the cooldown just slid forward (caller should
+      re-emit the notification so the displayed resume
+      time matches the new ``open_until``).
+    - ``"closed"`` -- the circuit just transitioned from
+      open (or a nonzero streak) back to closed (caller
+      can rely on its normal notification sweep to clear
+      any open-state notification).
+    - ``None`` -- no transition; caller shouldn't touch
+      notifications.
+
+    Exactly one of ``bridge_succeeded`` / ``bridge_timed_out``
+    should be True; if neither is True (e.g. a non-timeout
+    bridge error like a config parse failure), the breaker
+    state carries forward unchanged.
+    """
+    if bridge_succeeded:
+        was_tripped = prior.open_until is not None or prior.streak > 0
+        new_state = CircuitBreakerState(streak=0, open_until=None)
+        return new_state, ("closed" if was_tripped else None)
+
+    if bridge_timed_out:
+        new_streak = prior.streak + 1
+        was_open = prior.open_until is not None
+        if new_streak >= threshold:
+            return (
+                CircuitBreakerState(
+                    streak=new_streak,
+                    open_until=now + cooldown,
+                ),
+                "extended" if was_open else "open",
+            )
+        return (
+            CircuitBreakerState(
+                streak=new_streak,
+                open_until=prior.open_until,
+            ),
+            None,
+        )
+
+    # Neither success nor timeout -- leave the breaker alone.
+    return prior, None
+
+
+def parse_circuit_breaker_state(
+    attrs: Mapping[str, object] | None,
+) -> CircuitBreakerState:
+    """Load circuit-breaker state from stored entity attributes.
+
+    Unknown / malformed values collapse to a closed-circuit
+    default, so a prior release without these attributes (or a
+    hand-edited state entity) doesn't wedge the automation.
+    """
+    if not isinstance(attrs, dict):
+        return CircuitBreakerState()
+    raw_streak = attrs.get("bridge_error_streak", 0)
+    streak: int
+    if isinstance(raw_streak, bool):
+        # bool is a subclass of int; normalise so True/False
+        # from yaml/json don't sneak through as 1/0.
+        streak = int(raw_streak)
+    elif isinstance(raw_streak, int):
+        streak = raw_streak
+    elif isinstance(raw_streak, str):
+        try:
+            streak = int(raw_streak)
+        except ValueError:
+            streak = 0
+    else:
+        streak = 0
+    raw_open = attrs.get("circuit_open_until", "")
+    open_until: datetime | None = None
+    if isinstance(raw_open, str) and raw_open:
+        try:
+            open_until = datetime.fromisoformat(raw_open)
+        except ValueError:
+            open_until = None
+    return CircuitBreakerState(streak=max(streak, 0), open_until=open_until)
+
+
+def circuit_breaker_attrs(state: CircuitBreakerState) -> dict[str, object]:
+    """Serialise circuit-breaker state for entity attributes."""
+    return {
+        "bridge_error_streak": state.streak,
+        "circuit_open_until": (
+            state.open_until.isoformat() if state.open_until else ""
+        ),
+    }
+
+
+def is_bridge_timeout_error(error: object) -> bool:
+    """Classify a ``bridge_result['error']`` string as a timeout.
+
+    The bridge wraps ``socketio.exceptions.TimeoutError`` and
+    Python's builtin ``TimeoutError`` -- both surface with
+    ``TimeoutError`` in the class name of the captured error.
+    Anything else (``ConnectionError``, ``OSError``, ...) is
+    treated as a non-timeout bridge error and does not trip
+    the breaker.
+    """
+    if not isinstance(error, str) or not error:
+        return False
+    return "TimeoutError" in error
 
 
 # -- Parsing -----------------------------------------------------
