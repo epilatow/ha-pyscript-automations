@@ -147,7 +147,7 @@ triggers:
     id: ha_start
 
 actions:
-  - action: pyscript.zwave_route_manager
+  - action: pyscript.zwave_route_manager_blueprint_entrypoint
     data:
       instance_id: "{{ this.entity_id }}"
       trigger_id: "{{ trigger.id | default('manual', true) }}"

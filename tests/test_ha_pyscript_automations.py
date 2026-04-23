@@ -5022,6 +5022,8 @@ class TestZrmNotifications:
             bullets,
             instance_id,
             "Z-Wave Route Manager",
+            False,
+            "",
         )
 
     def test_title_includes_instance_auto_name(self) -> None:

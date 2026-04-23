@@ -733,8 +733,8 @@ def _build_config_error_notification(
     errors: list[str],
     instance_id: str,
     service_label: str,
-    debug_logging: bool = False,
-    tag: str = "",
+    debug_logging: bool,
+    tag: str,
 ) -> PersistentNotification:
     """Build a config-error persistent notification.
 
@@ -3526,26 +3526,24 @@ def _zrm_save_failure_state(
     _save_state(key, now, attrs)
 
 
-@service  # noqa: F821
+_ZRM_SERVICE_LABEL = "Z-Wave Route Manager"
+
+
 def zwave_route_manager(
     instance_id: str,
     trigger_id: str,
     config_file_path: str,
-    zwave_js_ui_host_raw: str,
-    zwave_js_ui_port_raw: str,
-    zwave_js_ui_token_raw: str,
-    clear_unmanaged_routes_raw: object,
-    reconcile_interval_minutes_raw: str,
-    pending_timeout_hours_raw: str,
-    default_route_speed_raw: str,
-    max_notifications_raw: str,
-    debug_logging_raw: object,
+    host: str,
+    port: int,
+    token: str,
+    clear_unmanaged_routes: bool,
+    reconcile_interval_minutes: int,
+    pending_timeout_hours: int,
+    default_route_speed: Any,
+    max_notifications: int,
+    debug_logging: bool,
 ) -> None:
-    """Reconcile Z-Wave priority routes against a YAML config.
-
-    Called by the blueprint-generated automation. Purely
-    reactive: evaluate -> act -> exit. No sleeping, no waiting.
-    """
+    """Reconcile Z-Wave priority routes against a YAML config."""
     import importlib
     from datetime import timedelta
 
@@ -3554,111 +3552,16 @@ def zwave_route_manager(
     auto_name = _automation_name(instance_id)
     tag = f"[ZRM: {auto_name}]"
     notif_prefix = _notification_prefix(
-        "Z-Wave Route Manager",
+        _ZRM_SERVICE_LABEL,
         instance_id,
     )
-
-    # Parse inputs. Blueprint selectors enforce types in the
-    # UI but direct service calls can still hand us garbage;
-    # any parse/range error gets collected and surfaced
-    # through the config-error notification path (same
-    # bundling + auto-clear behaviour as YAML errors).
-    host = str(zwave_js_ui_host_raw).strip() or "core-zwave-js"
-    token = str(zwave_js_ui_token_raw or "").strip()
-    clear_unmanaged = _parse_bool(clear_unmanaged_routes_raw)
-    debug_logging = _parse_bool(debug_logging_raw)
-
-    # Blueprint inputs that need int parsing + range check.
-    # Errors collect under a ``blueprint input: <field>``
-    # location so the ConfigError notification renders them
-    # next to any YAML errors.
-    input_errors: list[tuple[str, str]] = []
-    port, _err = _parse_int_input(zwave_js_ui_port_raw, 1, 65535)
-    if _err is not None:
-        input_errors.append(
-            ("blueprint input: zwave_js_ui_port", _err),
-        )
-    reconcile_interval_minutes, _err = _parse_int_input(
-        reconcile_interval_minutes_raw,
-        1,
-        10080,
-    )
-    if _err is not None:
-        input_errors.append(
-            ("blueprint input: reconcile_interval_minutes", _err),
-        )
-    pending_timeout_hours, _err = _parse_int_input(
-        pending_timeout_hours_raw,
-        1,
-        168,
-    )
-    if _err is not None:
-        input_errors.append(
-            ("blueprint input: pending_timeout_hours", _err),
-        )
-    max_notifications, _err = _parse_int_input(
-        max_notifications_raw,
-        0,
-        1000,
-    )
-    if _err is not None:
-        input_errors.append(
-            ("blueprint input: max_notifications", _err),
-        )
 
     modules_dir = os.path.join(
         hass.config.config_dir,  # noqa: F821
         "pyscript",
         "modules",
     )
-    import sys as _sys
-
-    if modules_dir not in _sys.path:
-        _sys.path.insert(0, modules_dir)
-    # PyScript reload refreshes AST-evaluated code but leaves
-    # importlib-loaded modules cached in sys.modules. Force
-    # reload of bridge + logic so user edits on either take
-    # effect at the next tick. Reload bridge first -- logic
-    # imports symbols from it, and reloading in the wrong
-    # order can leave logic holding stale bridge references.
-    for mod_name in ("zwave_js_ui_bridge", "zwave_route_manager"):
-        cached = _sys.modules.get(mod_name)
-        if cached is not None:
-            importlib.reload(cached)
     logic = importlib.import_module("zwave_route_manager")
-
-    # Default speed: "auto" -> None. Any other value goes
-    # through the logic module's parser; a bad value joins
-    # input_errors.
-    default_speed_str = str(default_route_speed_raw or "auto").strip()
-    default_route_speed = None
-    if default_speed_str != "auto":
-        resolved, speed_err = logic.parse_route_speed_value(
-            default_speed_str,
-            "blueprint input: default_route_speed",
-        )
-        default_route_speed = resolved
-        if speed_err is not None:
-            input_errors.append(
-                (speed_err.location, speed_err.reason),
-            )
-
-    hass_err = _check_hass_available()
-    if hass_err:
-        # No hass means every other call would explode. Bail
-        # via the standard error path. Use the non-sweep
-        # dispatcher since the sweep helpers need hass too.
-        _process_persistent_notifications(
-            [
-                _build_config_error_notification(
-                    [hass_err],
-                    instance_id,
-                    "Z-Wave Route Manager",
-                ),
-            ],
-            instance_id,
-        )
-        return
 
     # Load state: reconcile_pending, last_reconcile,
     # last_config_mtime, pending, applied.
@@ -3695,42 +3598,6 @@ def zwave_route_manager(
     # Resolve config path + check mtime for change detection
     abs_config_path = _zrm_resolve_path(config_file_path)
     current_mtime = _zrm_read_config_mtime(abs_config_path)
-
-    # Bail on invalid blueprint inputs. Routed through the
-    # same ConfigError -> notification path as YAML errors so
-    # users get a single, debuggable surface for "why isn't
-    # this reconciling".
-    if input_errors:
-        typed_errors = [
-            logic.ConfigError(
-                location=loc,
-                entity_id=None,
-                reason=reason,
-            )
-            for loc, reason in input_errors
-        ]
-        notif = _build_config_error_notification(
-            _zrm_error_bullets(typed_errors),
-            instance_id,
-            "Z-Wave Route Manager",
-        )
-        _sweep_and_process_notifications(
-            hass,  # noqa: F821
-            [notif],
-            instance_id,
-            notif_prefix,
-            keep_pattern="__timeout_",
-        )
-        _zrm_save_failure_state(
-            key,
-            now,
-            start_time,
-            current_mtime,
-            last_reconcile_iso,
-            trigger_id,
-            {"config_errors": len(typed_errors)},
-        )
-        return
 
     # Gate decision. Reconcile when any of:
     # - this is an HA-start trigger
@@ -3797,7 +3664,9 @@ def zwave_route_manager(
         notif = _build_config_error_notification(
             _zrm_error_bullets(config_errors),
             instance_id,
-            "Z-Wave Route Manager",
+            _ZRM_SERVICE_LABEL,
+            debug_logging,
+            tag,
         )
         _sweep_and_process_notifications(
             hass,  # noqa: F821
@@ -3941,7 +3810,9 @@ def zwave_route_manager(
         notif = _build_config_error_notification(
             _zrm_error_bullets(resolve_errors),
             instance_id,
-            "Z-Wave Route Manager",
+            _ZRM_SERVICE_LABEL,
+            debug_logging,
+            tag,
         )
         _sweep_and_process_notifications(
             hass,  # noqa: F821
@@ -3969,7 +3840,7 @@ def zwave_route_manager(
         applied_state,
         now,
         timedelta(hours=pending_timeout_hours),
-        clear_unmanaged,
+        clear_unmanaged_routes,
     )
 
     # Apply actions via bridge (worker thread).
@@ -4221,3 +4092,198 @@ def zwave_route_manager(
             len(reconcile.new_timeouts),
             len(reconcile.actions),
         )
+
+
+def zwave_route_manager_blueprint_argparse(
+    instance_id: str,
+    trigger_id: str,
+    config_file_path: str,
+    zwave_js_ui_host_raw: str,
+    zwave_js_ui_port_raw: str,
+    zwave_js_ui_token_raw: str,
+    clear_unmanaged_routes_raw: object,
+    reconcile_interval_minutes_raw: str,
+    pending_timeout_hours_raw: str,
+    default_route_speed_raw: str,
+    max_notifications_raw: str,
+    debug_logging_raw: object,
+) -> None:
+    """Parse and validate ZRM blueprint inputs."""
+    import importlib
+    import sys as _sys
+
+    host = str(zwave_js_ui_host_raw).strip() or "core-zwave-js"
+    token = str(zwave_js_ui_token_raw or "").strip()
+    clear_unmanaged_routes = _parse_bool(clear_unmanaged_routes_raw)
+    debug_logging = _parse_bool(debug_logging_raw)
+    tag = f"[ZRM: {_automation_name(instance_id)}]"
+
+    # Hass must be reachable before we can touch sys.path or
+    # import the logic module (which owns ConfigError). Bail
+    # with a plain-string config_error and return; a later
+    # tick with hass back up dismisses this via the full
+    # pipeline's empty-errors path (same notification_id).
+    hass_err = _check_hass_available()
+    if hass_err is not None:
+        config_error = _build_config_error_notification(
+            [hass_err],
+            instance_id,
+            _ZRM_SERVICE_LABEL,
+            debug_logging,
+            tag,
+        )
+        _process_persistent_notifications(
+            [config_error],
+            instance_id,
+        )
+        return
+
+    # Reload the logic + bridge modules so user edits on
+    # either take effect at the next tick. PyScript reload
+    # refreshes AST-evaluated code but leaves importlib-
+    # loaded modules cached in sys.modules. Reload bridge
+    # first -- logic imports symbols from it, and reloading
+    # in the wrong order can leave logic holding stale bridge
+    # references.
+    modules_dir = os.path.join(
+        hass.config.config_dir,  # noqa: F821
+        "pyscript",
+        "modules",
+    )
+    if modules_dir not in _sys.path:
+        _sys.path.insert(0, modules_dir)
+    for mod_name in ("zwave_js_ui_bridge", "zwave_route_manager"):
+        cached = _sys.modules.get(mod_name)
+        if cached is not None:
+            importlib.reload(cached)
+    logic = importlib.import_module("zwave_route_manager")
+
+    # Blueprint selectors enforce types in the UI but direct
+    # service calls can still hand us garbage. Collect errors
+    # as logic.ConfigError so they flow through the same
+    # bullet formatter as YAML config errors.
+    typed_errors: list[Any] = []
+    port, _err = _parse_int_input(zwave_js_ui_port_raw, 1, 65535)
+    if _err is not None:
+        typed_errors.append(
+            logic.ConfigError(
+                location="blueprint input: zwave_js_ui_port",
+                entity_id=None,
+                reason=_err,
+            ),
+        )
+    reconcile_interval_minutes, _err = _parse_int_input(
+        reconcile_interval_minutes_raw,
+        1,
+        10080,
+    )
+    if _err is not None:
+        typed_errors.append(
+            logic.ConfigError(
+                location="blueprint input: reconcile_interval_minutes",
+                entity_id=None,
+                reason=_err,
+            ),
+        )
+    pending_timeout_hours, _err = _parse_int_input(
+        pending_timeout_hours_raw,
+        1,
+        168,
+    )
+    if _err is not None:
+        typed_errors.append(
+            logic.ConfigError(
+                location="blueprint input: pending_timeout_hours",
+                entity_id=None,
+                reason=_err,
+            ),
+        )
+    max_notifications, _err = _parse_int_input(
+        max_notifications_raw,
+        0,
+        1000,
+    )
+    if _err is not None:
+        typed_errors.append(
+            logic.ConfigError(
+                location="blueprint input: max_notifications",
+                entity_id=None,
+                reason=_err,
+            ),
+        )
+
+    # Default speed: "auto" -> None. Any other value goes
+    # through the logic module's parser; a bad value joins
+    # typed_errors.
+    default_speed_str = str(default_route_speed_raw or "auto").strip()
+    default_route_speed = None
+    if default_speed_str != "auto":
+        resolved, speed_err = logic.parse_route_speed_value(
+            default_speed_str,
+            "blueprint input: default_route_speed",
+        )
+        default_route_speed = resolved
+        if speed_err is not None:
+            typed_errors.append(speed_err)
+
+    # Always emit config_error: active with bullets when there
+    # are errors, inactive (dismissal) when clean. Matches DW/
+    # EDW/RW/STSC/TEC convention -- argparse owns only its own
+    # config_error notification; sweep is the service
+    # function's territory.
+    config_error = _build_config_error_notification(
+        _zrm_error_bullets(typed_errors),
+        instance_id,
+        _ZRM_SERVICE_LABEL,
+        debug_logging,
+        tag,
+    )
+    _process_persistent_notifications(
+        [config_error],
+        instance_id,
+    )
+    if typed_errors:
+        return
+
+    zwave_route_manager(
+        instance_id=instance_id,
+        trigger_id=trigger_id,
+        config_file_path=config_file_path,
+        host=host,
+        port=port,
+        token=token,
+        clear_unmanaged_routes=clear_unmanaged_routes,
+        reconcile_interval_minutes=reconcile_interval_minutes,
+        pending_timeout_hours=pending_timeout_hours,
+        default_route_speed=default_route_speed,
+        max_notifications=max_notifications,
+        debug_logging=debug_logging,
+    )
+
+
+_BLUEPRINT_SERVICES[_ZRM_SERVICE_LABEL] = (
+    "zwave_route_manager.yaml",
+    frozenset(
+        [
+            "instance_id",
+            "trigger_id",
+            "config_file_path",
+            "zwave_js_ui_host_raw",
+            "zwave_js_ui_port_raw",
+            "zwave_js_ui_token_raw",
+            "clear_unmanaged_routes_raw",
+            "reconcile_interval_minutes_raw",
+            "pending_timeout_hours_raw",
+            "default_route_speed_raw",
+            "max_notifications_raw",
+            "debug_logging_raw",
+        ],
+    ),
+    zwave_route_manager_blueprint_argparse,
+)
+
+
+@service  # noqa: F821
+def zwave_route_manager_blueprint_entrypoint(**kwargs: object) -> None:
+    """Blueprint-facing entrypoint for Z-Wave Route Manager."""
+    _dispatch_blueprint_service(_ZRM_SERVICE_LABEL, kwargs)
