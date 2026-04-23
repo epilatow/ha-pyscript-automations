@@ -5446,7 +5446,7 @@ def _rw_call(env: _WatchdogEnv, **overrides: Any) -> None:
         "debug_logging_raw": "false",
     }
     defaults.update(overrides)
-    env._ns["reference_watchdog"](**defaults)
+    env._ns["reference_watchdog_blueprint_entrypoint"](**defaults)
 
 
 class TestRwIntInputValidation:

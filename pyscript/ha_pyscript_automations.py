@@ -2537,25 +2537,22 @@ def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
 
 # Parameter defaults are defined in the blueprint YAML,
 # so don't duplicate them here.
-@service  # noqa: F821
+_RW_SERVICE_LABEL = "Reference Watchdog"
+
+
 def reference_watchdog(
     instance_id: str,
-    trigger_platform_raw: str,
-    exclude_paths_raw: str,
-    exclude_integrations_raw: object,
-    exclude_entities_raw: object,
-    exclude_entity_regex_raw: str,
-    check_disabled_entities_raw: str,
-    check_interval_minutes_raw: str,
-    max_source_notifications_raw: str,
-    debug_logging_raw: str,
+    trigger_platform: str,
+    exclude_paths: list[str],
+    exclude_integrations: list[str],
+    exclude_entities: list[str],
+    exclude_entity_regex: str,
+    check_disabled_entities: bool,
+    check_interval_minutes: int,
+    max_notifications: int,
+    debug_logging: bool,
 ) -> None:
-    """Scan HA config for broken entity and device references.
-
-    Called by blueprint-generated automation.
-    Purely reactive: evaluate -> act -> exit.
-    No sleeping, no waiting.
-    """
+    """Scan HA config for broken entity and device references."""
     from reference_watchdog import Config  # noqa: F821
 
     start_time = time.monotonic()
@@ -2563,70 +2560,20 @@ def reference_watchdog(
     auto_name = _automation_name(instance_id)
     tag = f"[RW: {auto_name}]"
 
-    # Parse inputs
-    exclude_integrations = _normalize_list(exclude_integrations_raw)
-    exclude_entities = _normalize_list(exclude_entities_raw)
-    debug_logging = _parse_bool(debug_logging_raw)
-    check_disabled_entities = _parse_bool(check_disabled_entities_raw)
-
-    # Validate config (accumulate all errors)
-    errors: list[str] = []
-    # Parse + range-check int inputs. Blueprint selectors
-    # enforce these in the UI but direct service calls can
-    # still pass garbage; parse errors surface through the
-    # standard config-error notification.
-    check_interval_minutes, err = _parse_int_input(
-        check_interval_minutes_raw,
-        1,
-        10080,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: check_interval_minutes: {err}")
-    max_notifications, err = _parse_int_input(
-        max_source_notifications_raw,
-        0,
-        1000,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: max_source_notifications: {err}")
-    if hass_err := _check_hass_available():
-        errors.append(hass_err)
-    exclude_entity_regex = _validate_and_join_patterns(
-        exclude_entity_regex_raw,
-        "exclude_entity_regex",
-        errors,
-    )
-    exclude_paths_list = [
-        p.strip()
-        for p in str(exclude_paths_raw or "").splitlines()
-        if p.strip()
-    ]
-    config_error_notif = _build_config_error_notification(
-        errors,
-        instance_id,
-        "Reference Watchdog",
-    )
-    _process_persistent_notifications(
-        [config_error_notif],
-        instance_id,
-    )
-    if errors:
-        return
-
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
-    if str(trigger_platform_raw) == "time_pattern":
+    if trigger_platform == "time_pattern":
         if not on_interval(check_interval_minutes, now, instance_id):
             return
 
     config = Config(
-        exclude_paths=exclude_paths_list,
+        exclude_paths=exclude_paths,
         exclude_integrations=exclude_integrations,
         exclude_entities=exclude_entities,
         exclude_entity_regex=exclude_entity_regex,
         check_disabled_entities=check_disabled_entities,
         notification_prefix=_notification_prefix(
-            "Reference Watchdog",
+            _RW_SERVICE_LABEL,
             instance_id,
         ),
     )
@@ -2653,7 +2600,7 @@ def reference_watchdog(
         config_dir,
         config,
         truth_set,
-        exclude_paths_list,
+        exclude_paths,
         max_notifications,
     )
 
@@ -2712,6 +2659,108 @@ def reference_watchdog(
             ev.source_orphan_count,
             ev.source_orphan_candidates,
         )
+
+
+def reference_watchdog_blueprint_argparse(
+    instance_id: str,
+    trigger_platform_raw: str,
+    exclude_paths_raw: str,
+    exclude_integrations_raw: object,
+    exclude_entities_raw: object,
+    exclude_entity_regex_raw: str,
+    check_disabled_entities_raw: str,
+    check_interval_minutes_raw: str,
+    max_source_notifications_raw: str,
+    debug_logging_raw: str,
+) -> None:
+    """Parse and validate RW blueprint inputs."""
+    exclude_integrations = _normalize_list(exclude_integrations_raw)
+    exclude_entities = _normalize_list(exclude_entities_raw)
+    debug_logging = _parse_bool(debug_logging_raw)
+    check_disabled_entities = _parse_bool(check_disabled_entities_raw)
+    trigger_platform = str(trigger_platform_raw)
+    tag = f"[RW: {_automation_name(instance_id)}]"
+    exclude_paths = [
+        p.strip()
+        for p in str(exclude_paths_raw or "").splitlines()
+        if p.strip()
+    ]
+
+    errors: list[str] = []
+    check_interval_minutes, err = _parse_int_input(
+        check_interval_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: check_interval_minutes: {err}")
+    max_notifications, err = _parse_int_input(
+        max_source_notifications_raw,
+        0,
+        1000,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: max_source_notifications: {err}")
+    if hass_err := _check_hass_available():
+        errors.append(hass_err)
+    exclude_entity_regex = _validate_and_join_patterns(
+        exclude_entity_regex_raw,
+        "exclude_entity_regex",
+        errors,
+    )
+
+    config_error = _build_config_error_notification(
+        errors,
+        instance_id,
+        _RW_SERVICE_LABEL,
+        debug_logging,
+        tag,
+    )
+    _process_persistent_notifications(
+        [config_error],
+        instance_id,
+    )
+    if errors:
+        return
+
+    reference_watchdog(
+        instance_id=instance_id,
+        trigger_platform=trigger_platform,
+        exclude_paths=exclude_paths,
+        exclude_integrations=exclude_integrations,
+        exclude_entities=exclude_entities,
+        exclude_entity_regex=exclude_entity_regex,
+        check_disabled_entities=check_disabled_entities,
+        check_interval_minutes=check_interval_minutes,
+        max_notifications=max_notifications,
+        debug_logging=debug_logging,
+    )
+
+
+_BLUEPRINT_SERVICES[_RW_SERVICE_LABEL] = (
+    "reference_watchdog.yaml",
+    frozenset(
+        [
+            "instance_id",
+            "trigger_platform_raw",
+            "exclude_paths_raw",
+            "exclude_integrations_raw",
+            "exclude_entities_raw",
+            "exclude_entity_regex_raw",
+            "check_disabled_entities_raw",
+            "check_interval_minutes_raw",
+            "max_source_notifications_raw",
+            "debug_logging_raw",
+        ],
+    ),
+    reference_watchdog_blueprint_argparse,
+)
+
+
+@service  # noqa: F821
+def reference_watchdog_blueprint_entrypoint(**kwargs: object) -> None:
+    """Blueprint-facing entrypoint for Reference Watchdog."""
+    _dispatch_blueprint_service(_RW_SERVICE_LABEL, kwargs)
 
 
 # -- Z-Wave Route Manager --------------------------
