@@ -808,8 +808,35 @@ def sensor_threshold_switch_controller(
     auto_name = _automation_name(instance_id)
     tag = f"[STSC: {auto_name}]"
 
+    # Parse + range-check int inputs. Blueprint selectors
+    # enforce these in the UI but direct service calls can
+    # still pass garbage; parse errors surface through the
+    # standard config-error notification.
+    errors: list[str] = []
+    sampling_window_s, err = _parse_int_input(
+        sampling_window_seconds_raw,
+        10,
+        3600,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: sampling_window_s: {err}")
+    disable_window_s, err = _parse_int_input(
+        disable_window_seconds_raw,
+        0,
+        60,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: disable_window_s: {err}")
+    auto_off_min, err = _parse_int_input(
+        auto_off_minutes_raw,
+        0,
+        1440,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: auto_off_min: {err}")
+
     # Validate entities and notification service
-    errors = _validate_entities(
+    errors += _validate_entities(
         [target_switch_entity],
         EntityType.CONTROLLABLE,
     )
@@ -870,9 +897,9 @@ def sensor_threshold_switch_controller(
         trigger_entity=trigger_entity,
         trigger_threshold=float(trigger_threshold_raw),
         release_threshold=float(release_threshold_raw),
-        sampling_window_s=int(sampling_window_seconds_raw),
-        disable_window_s=int(disable_window_seconds_raw),
-        auto_off_min=int(auto_off_minutes_raw),
+        sampling_window_s=sampling_window_s,
+        disable_window_s=disable_window_s,
+        auto_off_min=auto_off_min,
         notification_prefix=notification_prefix,
         notification_suffix=notification_suffix,
     )
@@ -1022,25 +1049,39 @@ def device_watchdog(
     monitored_entity_domains = _normalize_list(
         monitored_entity_domains_raw,
     )
-    dead_device_threshold_minutes = int(
-        dead_device_threshold_minutes_raw,
-    )
-    assert dead_device_threshold_minutes >= 1, (
-        "dead_device_threshold_minutes must be >= 1,"
-        f" got {dead_device_threshold_minutes}"
-    )
-    dead_threshold_seconds = dead_device_threshold_minutes * 60
     enabled_checks = _normalize_frozenset(enabled_checks_raw)
     debug_logging = _parse_bool(debug_logging_raw)
-    check_interval_minutes = int(
-        check_interval_minutes_raw,
-    )
-    max_notifications = int(
-        max_device_notifications_raw,
-    )
 
     # Validate config (accumulate all errors)
     errors: list[str] = []
+    # Parse + range-check int inputs. Blueprint selectors
+    # enforce these in the UI but direct service calls can
+    # still pass garbage; parse errors surface through the
+    # standard config-error notification.
+    check_interval_minutes, err = _parse_int_input(
+        check_interval_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: check_interval_minutes: {err}")
+    dead_device_threshold_minutes, err = _parse_int_input(
+        dead_device_threshold_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(
+            f"blueprint input: dead_device_threshold_minutes: {err}",
+        )
+    dead_threshold_seconds = dead_device_threshold_minutes * 60
+    max_notifications, err = _parse_int_input(
+        max_device_notifications_raw,
+        0,
+        1000,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: max_device_notifications: {err}")
     if hass_err := _check_hass_available():
         errors.append(hass_err)
     device_exclude_regex = _validate_and_join_patterns(
@@ -1079,9 +1120,6 @@ def device_watchdog(
 
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
-    assert check_interval_minutes >= 1, (
-        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
-    )
     if str(trigger_platform_raw) == "time_pattern":
         if not on_interval(check_interval_minutes, now, instance_id):
             return
@@ -1293,16 +1331,25 @@ def trigger_entity_controller(
     auto_off_disabling_entities = _normalize_list(
         auto_off_disabling_entities_raw,
     )
-    auto_off_minutes = int(auto_off_minutes_raw)
-    assert auto_off_minutes >= 0, (
-        f"auto_off_minutes must be >= 0, got {auto_off_minutes}"
-    )
     notification_events = parse_notification_events(
         _normalize_list(notification_events_raw),
     )
 
+    # Parse + range-check int inputs. Blueprint selectors
+    # enforce these in the UI but direct service calls can
+    # still pass garbage; parse errors surface through the
+    # standard config-error notification.
+    errors: list[str] = []
+    auto_off_minutes, err = _parse_int_input(
+        auto_off_minutes_raw,
+        0,
+        60,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: auto_off_minutes: {err}")
+
     # Validate entities
-    errors = _validate_entities(
+    errors += _validate_entities(
         controlled_entities,
         EntityType.CONTROLLABLE,
     )
@@ -1736,15 +1783,27 @@ def entity_defaults_watchdog(
         exclude_entities_raw,
     )
     debug_logging = _parse_bool(debug_logging_raw)
-    check_interval_minutes = int(
-        check_interval_minutes_raw,
-    )
-    max_notifications = int(
-        max_device_notifications_raw,
-    )
 
     # Validate config (accumulate all errors)
     errors: list[str] = []
+    # Parse + range-check int inputs. Blueprint selectors
+    # enforce these in the UI but direct service calls can
+    # still pass garbage; parse errors surface through the
+    # standard config-error notification.
+    check_interval_minutes, err = _parse_int_input(
+        check_interval_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: check_interval_minutes: {err}")
+    max_notifications, err = _parse_int_input(
+        max_device_notifications_raw,
+        0,
+        1000,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: max_device_notifications: {err}")
     if hass_err := _check_hass_available():
         errors.append(hass_err)
     unknown_checks = [c for c in drift_checks if c not in CHECK_ALL]
@@ -1788,9 +1847,6 @@ def entity_defaults_watchdog(
 
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
-    assert check_interval_minutes >= 1, (
-        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
-    )
     if str(trigger_platform_raw) == "time_pattern":
         if not on_interval(check_interval_minutes, now, instance_id):
             return
@@ -2098,11 +2154,27 @@ def reference_watchdog(
     exclude_entities = _normalize_list(exclude_entities_raw)
     debug_logging = _parse_bool(debug_logging_raw)
     check_disabled_entities = _parse_bool(check_disabled_entities_raw)
-    check_interval_minutes = int(check_interval_minutes_raw)
-    max_notifications = int(max_source_notifications_raw)
 
     # Validate config (accumulate all errors)
     errors: list[str] = []
+    # Parse + range-check int inputs. Blueprint selectors
+    # enforce these in the UI but direct service calls can
+    # still pass garbage; parse errors surface through the
+    # standard config-error notification.
+    check_interval_minutes, err = _parse_int_input(
+        check_interval_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: check_interval_minutes: {err}")
+    max_notifications, err = _parse_int_input(
+        max_source_notifications_raw,
+        0,
+        1000,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: max_source_notifications: {err}")
     if hass_err := _check_hass_available():
         errors.append(hass_err)
     exclude_entity_regex = _validate_and_join_patterns(
@@ -2129,9 +2201,6 @@ def reference_watchdog(
 
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
-    assert check_interval_minutes >= 1, (
-        f"check_interval_minutes must be >= 1, got {check_interval_minutes}"
-    )
     if str(trigger_platform_raw) == "time_pattern":
         if not on_interval(check_interval_minutes, now, instance_id):
             return

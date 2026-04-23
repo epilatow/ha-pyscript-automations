@@ -1,7 +1,14 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
+# dependencies = [
+#   "pytest",
+#   "pytest-cov",
+#   "ruff",
+#   "mypy",
+#   "PyYAML>=6",
+#   "Jinja2>=3",
+# ]
 # ///
 # This is AI generated code
 """Tests for the pyscript/ha_pyscript_automations.py bridge.
@@ -1512,6 +1519,35 @@ class TestStscNotificationServiceValidation:
         assert env.mock_pn.create_calls == []
 
 
+class TestStscIntInputValidation:
+    """STSC rejects non-numeric / out-of-range int inputs."""
+
+    def test_non_numeric_sampling_window_creates_notification(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        env.call(sampling_window_seconds_raw="not-a-number")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "sampling_window_s" in msg
+        assert "must be an integer" in msg
+
+    def test_out_of_range_auto_off_creates_notification(self) -> None:
+        env = _ServiceEnv()
+        env.call(auto_off_minutes_raw="9999")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "auto_off_min" in msg
+        assert "must be between 0 and 1440" in msg
+
+    def test_invalid_int_blocks_action(self) -> None:
+        env = _ServiceEnv()
+        env.call(disable_window_seconds_raw="-5")
+        # Parse error -> early return -> no action.
+        assert env.mock_ha.turn_on_calls == []
+        assert env.mock_ha.turn_off_calls == []
+
+
 class TestStscStateSavedWhenNotifyRaises:
     """The reorder invariant: state saves even if
     notification dispatch raises.
@@ -1933,6 +1969,37 @@ class TestDeviceWatchdogRegexValidation:
         env.call(device_exclude_regex_raw="|||||")
         assert len(env.mock_pn.create_calls) == 1
         assert "empty string" in (env.mock_pn.create_calls[0]["message"])
+
+
+class TestDeviceWatchdogIntInputValidation:
+    """DW rejects non-numeric / out-of-range int inputs."""
+
+    def test_non_numeric_check_interval_notifies(self) -> None:
+        env = _WatchdogEnv()
+        env.call(check_interval_minutes_raw="not-a-number")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "check_interval_minutes" in msg
+        assert "must be an integer" in msg
+
+    def test_out_of_range_dead_threshold_notifies(self) -> None:
+        env = _WatchdogEnv()
+        env.call(dead_device_threshold_minutes_raw="0")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "dead_device_threshold_minutes" in msg
+        assert "must be between 1 and 10080" in msg
+
+    def test_all_int_errors_reported(self) -> None:
+        env = _WatchdogEnv()
+        env.call(
+            check_interval_minutes_raw="abc",
+            max_device_notifications_raw="-1",
+        )
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "check_interval_minutes" in msg
+        assert "max_device_notifications" in msg
 
 
 class TestDeviceWatchdogEnabledChecks:
@@ -2951,6 +3018,42 @@ class TestTecNotificationServiceValidation:
         assert len(env.mock_pn.dismiss_calls) == 1
 
 
+class TestTecIntInputValidation:
+    """TEC rejects non-numeric / out-of-range auto_off_minutes."""
+
+    def test_non_numeric_auto_off_creates_notification(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.call(auto_off_minutes_raw="not-a-number")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "auto_off_minutes" in msg
+        assert "must be an integer" in msg
+
+    def test_out_of_range_auto_off_creates_notification(
+        self,
+    ) -> None:
+        env = _TecEnv()
+        env.call(auto_off_minutes_raw="999")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "auto_off_minutes" in msg
+        assert "must be between 0 and 60" in msg
+
+    def test_invalid_int_blocks_action(self) -> None:
+        env = _TecEnv()
+        env.set_entity_state("light.hallway", "off")
+        env.set_entity_state("binary_sensor.motion", "on")
+        env.call(
+            auto_off_minutes_raw="bad",
+            trigger_entity_id="binary_sensor.motion",
+            trigger_to_state="on",
+        )
+        assert env.mock_ha.turn_on_calls == []
+        assert env.mock_ha.turn_off_calls == []
+
+
 class TestTecStateSavedWhenNotifyRaises:
     """The reorder invariant for TEC: state saves even
     if notification dispatch raises."""
@@ -3373,6 +3476,26 @@ class TestEdwRegexValidation:
         assert "device_exclude_regex" in msg
         assert "entity_id_exclude_regex" in msg
         assert "entity_name_exclude_regex" in msg
+
+
+class TestEdwIntInputValidation:
+    """EDW rejects non-numeric / out-of-range int inputs."""
+
+    def test_non_numeric_check_interval_notifies(self) -> None:
+        env = _EdwEnv()
+        env.call(check_interval_minutes_raw="not-a-number")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "check_interval_minutes" in msg
+        assert "must be an integer" in msg
+
+    def test_out_of_range_max_notifications_notifies(self) -> None:
+        env = _EdwEnv()
+        env.call(max_device_notifications_raw="9999")
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "max_device_notifications" in msg
+        assert "must be between 0 and 1000" in msg
 
 
 class TestEdwDevicelessE2E:
@@ -4917,6 +5040,55 @@ class TestZrmPathStorage:
         out = from_storage(stored)
         assert out[18][0].repeater_node_ids == []
         assert out[18][0].speed is None
+
+
+def _rw_call(env: _WatchdogEnv, **overrides: Any) -> None:
+    """Invoke the reference_watchdog service wrapper with defaults."""
+    defaults: dict[str, Any] = {
+        "instance_id": "auto.rw_test",
+        "trigger_platform_raw": "state",
+        "scan_sources_raw": [],
+        "exclude_paths_raw": "",
+        "exclude_integrations_raw": [],
+        "exclude_entities_raw": [],
+        "exclude_entity_regex_raw": "",
+        "check_disabled_entities_raw": "false",
+        "check_interval_minutes_raw": "1",
+        "max_source_notifications_raw": "0",
+        "debug_logging_raw": "false",
+    }
+    defaults.update(overrides)
+    env._ns["reference_watchdog"](**defaults)
+
+
+class TestRwIntInputValidation:
+    """RW rejects non-numeric / out-of-range int inputs."""
+
+    def test_non_numeric_check_interval_notifies(self) -> None:
+        env = _WatchdogEnv()
+        _rw_call(env, check_interval_minutes_raw="not-a-number")
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if "Invalid" in c.get("title", "")
+        ]
+        assert len(config_errors) == 1
+        msg = config_errors[0]["message"]
+        assert "check_interval_minutes" in msg
+        assert "must be an integer" in msg
+
+    def test_out_of_range_max_notifications_notifies(self) -> None:
+        env = _WatchdogEnv()
+        _rw_call(env, max_source_notifications_raw="9999")
+        config_errors = [
+            c
+            for c in env.mock_pn.create_calls
+            if "Invalid" in c.get("title", "")
+        ]
+        assert len(config_errors) == 1
+        msg = config_errors[0]["message"]
+        assert "max_source_notifications" in msg
+        assert "must be between 0 and 1000" in msg
 
 
 class TestCodeQuality(CodeQualityBase):
