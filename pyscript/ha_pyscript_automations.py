@@ -439,6 +439,14 @@ def _check_hass_available() -> str | None:
     return None
 
 
+def _hass_or_none() -> Any:
+    """Return the pyscript ``hass`` global or ``None``."""
+    try:
+        return hass  # noqa: F821
+    except NameError:
+        return None
+
+
 def _validate_and_join_patterns(
     raw: str,
     field_name: str,
@@ -721,6 +729,8 @@ def _build_config_error_notification(
     errors: list[str],
     instance_id: str,
     service_label: str,
+    debug_logging: bool = False,
+    tag: str = "",
 ) -> PersistentNotification:
     """Build a config-error persistent notification.
 
@@ -731,8 +741,9 @@ def _build_config_error_notification(
     verbatim -- callers pre-format per-domain bullet text
     (e.g. ZRM prefixes with a location/entity ref).
 
-    service_label: label used in the notification ID
-      prefix.
+    When ``debug_logging`` is True and ``errors`` is non-
+    empty, a warning is also written to the pyscript log
+    using ``tag`` as the line prefix.
     """
     prefix = _notification_prefix(service_label, instance_id)
     notif_id = f"{prefix}config_error"
@@ -745,6 +756,12 @@ def _build_config_error_notification(
             f"Configuration errors:\n\n- {error_list}"
             "\n\nPlease fix the automation configuration."
         )
+        if debug_logging:
+            log.warning(  # noqa: F821
+                "%s invalid config: %s",
+                tag,
+                errors,
+            )
 
     return PersistentNotification(
         active=bool(errors),
@@ -752,6 +769,137 @@ def _build_config_error_notification(
         title=f"{name}: Invalid Configuration",
         message=message,
     )
+
+
+# -- Three-layer blueprint dispatch --------------------
+
+# Hardcoded because ``__file__`` is NameError under
+# pyscript's AST evaluator.
+_WRAPPER_BASENAME = "ha_pyscript_automations.py"
+
+
+_BLUEPRINT_SERVICES: dict[
+    str,
+    "tuple[str, frozenset[str], Callable[..., None]]",
+] = {}
+
+
+# Kwargs pyscript's @service decorator auto-injects into
+# any service function whose signature accepts them,
+# including ``**kwargs``. Mirrors
+# ``TRIGGER_KWARGS`` in pyscript's ``eval.py``. The
+# blueprint's ``data:`` block never sets these, so the
+# dispatcher pops them from ``kwargs`` before the shape
+# check -- otherwise every automation-triggered call
+# would surface them as "unexpected parameters".
+_PYSCRIPT_TRIGGER_KWARGS: frozenset[str] = frozenset(
+    [
+        "context",
+        "event_type",
+        "old_value",
+        "payload",
+        "payload_obj",
+        "qos",
+        "retain",
+        "topic",
+        "trigger_type",
+        "trigger_time",
+        "var_name",
+        "value",
+        "webhook_id",
+    ],
+)
+
+
+def _build_blueprint_mismatch_notification(
+    service_label: str,
+    instance_id: str,
+    notif_prefix: str,
+    blueprint_basename: str,
+    missing: list[str],
+    extras: list[str],
+) -> PersistentNotification:
+    """Build the blueprint-vs-pyscript mismatch notification."""
+    notif_id = f"{notif_prefix}blueprint_mismatch"
+    if not missing and not extras:
+        # Empty input returns an inactive notification
+        # so any stale one gets dismissed by the sweep.
+        return PersistentNotification(
+            active=False,
+            notification_id=notif_id,
+            title="",
+            message="",
+        )
+    lines: list[str] = [
+        (
+            f"The pyscript service wrapper for {service_label}"
+            " has received invalid parameters. This indicates"
+            " that the blueprint source"
+            f" ({blueprint_basename}) and the pyscript service"
+            f" wrapper ({_WRAPPER_BASENAME}) are out of sync."
+        ),
+    ]
+    if missing:
+        lines.append("")
+        lines.append(
+            "The following required parameters were missing:",
+        )
+        for name in missing:
+            lines.append(f"  - {name}")
+    if extras:
+        lines.append("")
+        lines.append(
+            "The following invalid parameters were received:",
+        )
+        for name in extras:
+            lines.append(f"  - {name}")
+    lines.append("")
+    lines.append(
+        "To fix this issue, please ensure the"
+        " ha-pyscript-automations repository is installed"
+        " correctly and restart Home Assistant.",
+    )
+    return PersistentNotification(
+        active=True,
+        notification_id=notif_id,
+        title=f"{service_label}: blueprint vs pyscript mismatch",
+        message="\n".join(lines),
+    )
+
+
+def _dispatch_blueprint_service(
+    service_label: str,
+    kwargs: dict[str, object],
+) -> None:
+    """Shape-check kwargs, then forward to the argparse layer."""
+    blueprint_basename, expected_keys, argparse_fn = _BLUEPRINT_SERVICES[
+        service_label
+    ]
+    # Drop pyscript-injected trigger kwargs; they are
+    # never in the blueprint's data block.
+    blueprint_kwargs = {
+        k: v for k, v in kwargs.items() if k not in _PYSCRIPT_TRIGGER_KWARGS
+    }
+    instance_id = str(blueprint_kwargs.get("instance_id", "unknown"))
+    notif_prefix = _notification_prefix(service_label, instance_id)
+    given = frozenset(blueprint_kwargs.keys())
+    missing = sorted(expected_keys - given)
+    extras = sorted(given - expected_keys)
+    notification = _build_blueprint_mismatch_notification(
+        service_label=service_label,
+        instance_id=instance_id,
+        notif_prefix=notif_prefix,
+        blueprint_basename=blueprint_basename,
+        missing=missing,
+        extras=extras,
+    )
+    _process_persistent_notifications(
+        [notification],
+        instance_id,
+    )
+    if missing or extras:
+        return
+    argparse_fn(**blueprint_kwargs)
 
 
 # -- Sensor Threshold Switch Controller --------------

@@ -1233,6 +1233,376 @@ class TestSweepOrphanNotifications:
         assert dismissed_ids == {f"{prefix}apply_42"}
 
 
+class TestBuildBlueprintMismatchNotification:
+    """Three-layer dispatch: the blueprint-vs-pyscript
+    mismatch notification builder. Tests the PersistentNotification
+    payload directly, no HA calls involved.
+    """
+
+    def _call(
+        self,
+        env: _ServiceEnv,
+        *,
+        missing: list[str],
+        extras: list[str],
+        service_label: str = "TEC",
+        instance_id: str = "automation.tec_test",
+        blueprint_basename: str = "trigger_entity_controller.yaml",
+    ) -> Any:
+        fn = env._ns["_build_blueprint_mismatch_notification"]
+        prefix = env._ns["_notification_prefix"](
+            service_label,
+            instance_id,
+        )
+        return fn(
+            service_label=service_label,
+            instance_id=instance_id,
+            notif_prefix=prefix,
+            blueprint_basename=blueprint_basename,
+            missing=missing,
+            extras=extras,
+        )
+
+    def test_notification_id_format(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(env, missing=["foo"], extras=[])
+        assert n.notification_id == (
+            "tec_automation_tec_test__blueprint_mismatch"
+        )
+
+    def test_title_uses_service_label(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(env, missing=["foo"], extras=[])
+        assert n.title == "TEC: blueprint vs pyscript mismatch"
+
+    def test_active_when_any_mismatch(self) -> None:
+        env = _ServiceEnv()
+        assert self._call(env, missing=["a"], extras=[]).active
+        assert self._call(env, missing=[], extras=["z"]).active
+        assert self._call(env, missing=["a"], extras=["z"]).active
+
+    def test_inactive_when_no_mismatch(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(env, missing=[], extras=[])
+        assert n.active is False
+
+    def test_missing_section_rendered(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(env, missing=["alpha", "beta"], extras=[])
+        assert "required parameters were missing" in n.message
+        assert "  - alpha" in n.message
+        assert "  - beta" in n.message
+        assert "invalid parameters were received" not in n.message
+
+    def test_extras_section_rendered(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(env, missing=[], extras=["stale_raw"])
+        assert "invalid parameters were received" in n.message
+        assert "  - stale_raw" in n.message
+        assert "required parameters were missing" not in n.message
+
+    def test_both_sections_rendered(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(env, missing=["a"], extras=["z"])
+        assert "required parameters were missing" in n.message
+        assert "  - a" in n.message
+        assert "invalid parameters were received" in n.message
+        assert "  - z" in n.message
+
+    def test_body_references_both_file_basenames(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(
+            env,
+            missing=["x"],
+            extras=[],
+            blueprint_basename="my_bp.yaml",
+        )
+        assert "my_bp.yaml" in n.message
+        assert "ha_pyscript_automations.py" in n.message
+
+    def test_body_includes_remediation_hint(self) -> None:
+        env = _ServiceEnv()
+        n = self._call(env, missing=["x"], extras=[])
+        assert "ha-pyscript-automations repository" in n.message
+        assert "restart Home Assistant" in n.message
+
+
+class TestDispatchBlueprintService:
+    """Three-layer dispatch: the shape-check helper that
+    every entrypoint routes through. Asserts forwarding
+    behavior on matching kwargs and notification behavior
+    on mismatched kwargs.
+    """
+
+    _EXPECTED = frozenset(
+        [
+            "instance_id",
+            "alpha_raw",
+            "beta_raw",
+        ],
+    )
+
+    def _dispatch(
+        self,
+        env: _ServiceEnv,
+        kwargs: dict[str, Any],
+        argparse_fn: Any,
+        *,
+        service_label: str = "TEC",
+        blueprint_basename: str = "trigger_entity_controller.yaml",
+    ) -> None:
+        env._ns["_BLUEPRINT_SERVICES"][service_label] = (
+            blueprint_basename,
+            self._EXPECTED,
+            argparse_fn,
+        )
+        fn = env._ns["_dispatch_blueprint_service"]
+        fn(service_label=service_label, kwargs=kwargs)
+
+    def test_forwards_on_exact_match(self) -> None:
+        env = _ServiceEnv()
+        calls: list[dict[str, Any]] = []
+        self._dispatch(
+            env,
+            {
+                "instance_id": "automation.tec_test",
+                "alpha_raw": "1",
+                "beta_raw": "2",
+            },
+            lambda **kw: calls.append(kw),
+        )
+        assert calls == [
+            {
+                "instance_id": "automation.tec_test",
+                "alpha_raw": "1",
+                "beta_raw": "2",
+            },
+        ]
+        assert env.mock_pn.create_calls == []
+
+    def test_missing_key_emits_mismatch(self) -> None:
+        env = _ServiceEnv()
+        calls: list[dict[str, Any]] = []
+        self._dispatch(
+            env,
+            {
+                "instance_id": "automation.tec_test",
+                "alpha_raw": "1",
+                # beta_raw missing
+            },
+            lambda **kw: calls.append(kw),
+        )
+        assert calls == []
+        assert len(env.mock_pn.create_calls) == 1
+        msg = env.mock_pn.create_calls[0]["message"]
+        nid = env.mock_pn.create_calls[0]["notification_id"]
+        assert nid == "tec_automation_tec_test__blueprint_mismatch"
+        assert "  - beta_raw" in msg
+
+    def test_extra_key_emits_mismatch(self) -> None:
+        env = _ServiceEnv()
+        calls: list[dict[str, Any]] = []
+        self._dispatch(
+            env,
+            {
+                "instance_id": "automation.tec_test",
+                "alpha_raw": "1",
+                "beta_raw": "2",
+                "ghost_raw": "9",
+            },
+            lambda **kw: calls.append(kw),
+        )
+        assert calls == []
+        assert len(env.mock_pn.create_calls) == 1
+        assert "  - ghost_raw" in env.mock_pn.create_calls[0]["message"]
+
+    def test_both_missing_and_extra(self) -> None:
+        env = _ServiceEnv()
+        calls: list[dict[str, Any]] = []
+        self._dispatch(
+            env,
+            {
+                "instance_id": "automation.tec_test",
+                "alpha_raw": "1",
+                "ghost_raw": "9",
+            },
+            lambda **kw: calls.append(kw),
+        )
+        assert calls == []
+        msg = env.mock_pn.create_calls[0]["message"]
+        assert "  - beta_raw" in msg
+        assert "  - ghost_raw" in msg
+
+    def test_missing_instance_id_falls_back_to_unknown(
+        self,
+    ) -> None:
+        env = _ServiceEnv()
+        calls: list[dict[str, Any]] = []
+        self._dispatch(
+            env,
+            {
+                # instance_id missing
+                "alpha_raw": "1",
+                "beta_raw": "2",
+            },
+            lambda **kw: calls.append(kw),
+        )
+        assert calls == []
+        nid = env.mock_pn.create_calls[0]["notification_id"]
+        assert nid == "tec_unknown__blueprint_mismatch"
+
+    def test_pyscript_trigger_kwargs_filtered(self) -> None:
+        """pyscript's @service decorator auto-injects
+        ``context``, ``trigger_type``, ``trigger_time``
+        and similar trigger metadata. Those must be
+        silently dropped before the shape check, and
+        must not reach the argparse function.
+        """
+        env = _ServiceEnv()
+        calls: list[dict[str, Any]] = []
+        self._dispatch(
+            env,
+            {
+                "instance_id": "automation.tec_test",
+                "alpha_raw": "1",
+                "beta_raw": "2",
+                # Anything in pyscript's TRIGGER_KWARGS
+                # set is invisible to the shape check.
+                "context": "stub-context",
+                "trigger_type": "time",
+                "trigger_time": "2026-04-23T12:00:00",
+                "old_value": "off",
+                "value": "on",
+                "var_name": "switch.x",
+                "event_type": "state_changed",
+                "payload": "{}",
+                "payload_obj": {},
+                "qos": 0,
+                "retain": False,
+                "topic": "t",
+                "webhook_id": "w",
+            },
+            lambda **kw: calls.append(kw),
+        )
+        assert env.mock_pn.create_calls == []
+        assert calls == [
+            {
+                "instance_id": "automation.tec_test",
+                "alpha_raw": "1",
+                "beta_raw": "2",
+            },
+        ]
+
+
+class TestBlueprintExpectedKeys:
+    """Verifies each service's ``_EXPECTED_KEYS`` constant
+    matches the live signature of its ``*_blueprint_argparse``
+    function. Drift between the two is the root cause the
+    entrypoint's shape check is meant to catch; this test
+    ensures the constant itself never drifts from the
+    function it describes.
+
+    The service registry lives in the wrapper module as
+    ``_BLUEPRINT_SERVICES``; this test reads it directly
+    so adding a new service registration automatically
+    extends drift coverage.
+    """
+
+    def test_all_services_match(self) -> None:
+        import inspect
+
+        env = _ServiceEnv()
+        registry = env._ns["_BLUEPRINT_SERVICES"]
+        for label, entry in registry.items():
+            _blueprint, expected_keys, argparse_fn = entry
+            sig_keys = frozenset(
+                inspect.signature(argparse_fn).parameters.keys(),
+            )
+            diff = expected_keys ^ sig_keys
+            assert expected_keys == sig_keys, (
+                f"{label}: _EXPECTED_KEYS drift; symmetric diff"
+                f" {sorted(diff)}. Update the constant to match"
+                " the argparse signature (or vice versa)."
+            )
+
+
+class TestBlueprintYamlMatchesRegistry:
+    """Each service's blueprint YAML exposes exactly the
+    expected kwargs under its ``action:`` ``data:`` block,
+    and its ``action:`` targets the registered entrypoint.
+
+    Catches drift between a blueprint's ``data:`` keys and
+    the service's ``_BLUEPRINT_SERVICES`` entry that the
+    dispatcher would only surface at runtime (via a
+    blueprint_mismatch notification).
+    """
+
+    _BLUEPRINT_DIR = (
+        REPO_ROOT / "blueprints" / "automation" / "ha_pyscript_automations"
+    )
+
+    def test_all_blueprints_match_registry(self) -> None:
+        import yaml
+
+        # HA blueprints use tags like ``!input``;
+        # SafeLoader rejects unknown tags. Register a
+        # permissive constructor so parsing succeeds --
+        # this test only cares about keys, not values.
+        class _HABlueprintLoader(yaml.SafeLoader):
+            pass
+
+        def _passthrough(
+            loader: yaml.SafeLoader,
+            tag_suffix: str,
+            node: yaml.Node,
+        ) -> Any:
+            if isinstance(node, yaml.ScalarNode):
+                return loader.construct_scalar(node)
+            if isinstance(node, yaml.SequenceNode):
+                return loader.construct_sequence(node)
+            if isinstance(node, yaml.MappingNode):
+                return loader.construct_mapping(node)
+            return None
+
+        _HABlueprintLoader.add_multi_constructor("!", _passthrough)
+
+        env = _ServiceEnv()
+        registry = env._ns["_BLUEPRINT_SERVICES"]
+        for label, (basename, expected_keys, argparse_fn) in registry.items():
+            bp_path = self._BLUEPRINT_DIR / basename
+            assert bp_path.exists(), (
+                f"{label}: blueprint file {basename} not found at {bp_path}"
+            )
+            with bp_path.open() as f:
+                parsed = yaml.load(f, Loader=_HABlueprintLoader)
+            actions = parsed.get("actions") or parsed.get("action")
+            assert actions, (
+                f"{label}: {basename} has no 'actions:' or 'action:' block"
+            )
+            first = actions[0] if isinstance(actions, list) else actions
+            yaml_keys = frozenset((first.get("data") or {}).keys())
+            assert yaml_keys == expected_keys, (
+                f"{label}: blueprint {basename} 'data:' keys do not match"
+                " the _BLUEPRINT_SERVICES registry.\n"
+                f"  only in YAML:     {sorted(yaml_keys - expected_keys)}\n"
+                f"  only in registry: {sorted(expected_keys - yaml_keys)}"
+            )
+            # The ``action:`` line must route through the
+            # entrypoint (derived from the argparse name by
+            # convention).
+            expected_entrypoint = argparse_fn.__name__.replace(
+                "_blueprint_argparse",
+                "_blueprint_entrypoint",
+            )
+            expected_action = f"pyscript.{expected_entrypoint}"
+            action_name = first.get("action", "")
+            assert action_name == expected_action, (
+                f"{label}: blueprint {basename} action:"
+                f" {action_name!r} does not match the registered"
+                f" entrypoint {expected_action!r}"
+            )
+
+
 class TestStscEntityValidation:
     def test_missing_entity_creates_notification(
         self,
@@ -1607,17 +1977,34 @@ class TestStscStateSavedWhenNotifyRaises:
 
 
 class _MockPersistentNotification:
-    """Mock for ``persistent_notification`` service."""
+    """Mock for ``persistent_notification`` service.
+
+    ``dismiss_calls`` filters out ``blueprint_mismatch``
+    entries by default: the dispatcher emits an inactive
+    mismatch on every successful tick as a cross-layer
+    cleanup step, which is noise for tests focused on a
+    specific service's own notifications. Tests that
+    explicitly exercise the dispatcher's mismatch path
+    read ``raw_dismiss_calls``.
+    """
 
     def __init__(self) -> None:
         self.create_calls: list[dict[str, str]] = []
-        self.dismiss_calls: list[dict[str, str]] = []
+        self.raw_dismiss_calls: list[dict[str, str]] = []
 
     def create(self, **kwargs: str) -> None:
         self.create_calls.append(kwargs)
 
     def dismiss(self, **kwargs: str) -> None:
-        self.dismiss_calls.append(kwargs)
+        self.raw_dismiss_calls.append(kwargs)
+
+    @property
+    def dismiss_calls(self) -> list[dict[str, str]]:
+        return [
+            c
+            for c in self.raw_dismiss_calls
+            if "blueprint_mismatch" not in c.get("notification_id", "")
+        ]
 
 
 class _WatchdogEnv:

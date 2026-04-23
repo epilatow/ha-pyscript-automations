@@ -171,6 +171,106 @@ Controller), `DW` (Device Watchdog), `EDW` (Entity
 Defaults Watchdog), `TEC` (Trigger Entity Controller),
 `RW` (Reference Watchdog).
 
+### Three-layer dispatch model
+
+Every service is implemented as three independently
+callable layers. Each layer either emits a persistent
+notification and returns, or calls the next layer
+directly — no layer propagates a return value.
+
+1. **Entrypoint — `<service>_blueprint_entrypoint(**kwargs)`**
+   `@service`-decorated. The blueprint's `action:` calls
+   this. Body is a one-line call to
+   `_dispatch_blueprint_service(service_label, kwargs)`,
+   which looks up the registered argparse function and
+   expected-keys set from the `_BLUEPRINT_SERVICES`
+   module dict. On missing or extra kwargs it emits a
+   `blueprint_mismatch` notification and returns;
+   otherwise it calls the argparse layer.
+
+2. **Argparse — `<service>_blueprint_argparse(...typed _raw kwargs)`**
+   Parses every `_raw` blueprint input into a native
+   Python type and runs every config-validation check:
+   pure parsing, set-math on the parsed values, and
+   read-only HA state reads such as entity existence
+   or service registration. On any errors it emits a
+   `config_error` notification and returns; otherwise
+   it calls the service layer directly with native-
+   typed kwargs. Argparse has no side effects beyond
+   reads and its error notification.
+
+3. **Service — `<service>(...native-typed kwargs)`**
+   Takes strongly typed native Python parameters
+   (`list[str]`, `int`, `bool`, etc.). No parsing, no
+   validation. Executes the business logic: evaluate,
+   act, save state, emit domain-specific findings
+   notifications.
+
+Notification ownership follows the layers: entrypoint
+owns `blueprint_mismatch`, argparse owns `config_error`,
+service owns findings. Only the service uses
+`_sweep_and_process_notifications` — its orphan sweep
+handles findings that no longer apply (device removed,
+reference fixed, etc.). Entrypoint and argparse each
+call `_process_persistent_notifications` with their
+single owned notification (active on failure, inactive
+on success as a specific-ID dismiss); they never
+orphan-sweep, because that would collateral-dismiss
+findings emitted by the service layer.
+
+The blueprint `action:` line calls
+`pyscript.<service>_blueprint_entrypoint` (not
+`pyscript.<service>`).
+
+Each service defines a module-level
+`_<SVC>_SERVICE_LABEL` constant (the human-readable
+label used for the registry key, the notification-
+prefix builder, and `_build_config_error_notification`)
+and registers itself in `_BLUEPRINT_SERVICES` right
+after its argparse function is defined. The expected-
+kwargs frozenset is inlined in the registry entry:
+
+```python
+_TEC_SERVICE_LABEL = "Trigger Entity Controller"
+
+
+def trigger_entity_controller_blueprint_argparse(...):
+    notif_prefix = _notification_prefix(
+        _TEC_SERVICE_LABEL, instance_id,
+    )
+    config_error = _build_config_error_notification(
+        errors, instance_id, _TEC_SERVICE_LABEL,
+    )
+    ...
+
+
+_BLUEPRINT_SERVICES[_TEC_SERVICE_LABEL] = (
+    "trigger_entity_controller.yaml",
+    frozenset([
+        "instance_id",
+        "controlled_entities_raw",
+        # ...
+    ]),
+    trigger_entity_controller_blueprint_argparse,
+)
+
+
+@service
+def trigger_entity_controller_blueprint_entrypoint(**kwargs):
+    _dispatch_blueprint_service(_TEC_SERVICE_LABEL, kwargs)
+```
+
+The registry is the single source of truth wired by
+both the dispatcher and the `TestBlueprintExpectedKeys`
+drift test — registering a service is all that's
+needed for dispatch to route through it and for the
+drift test to catch any mismatch between its inlined
+expected-kwargs frozenset and the live argparse
+signature (pyscript's AST evaluator can't introspect
+real parameter names at runtime, which is why the
+frozenset exists; CPython's `inspect.signature` still
+works normally in tests).
+
 ## Notifications
 
 Use friendly names (not raw entity IDs) in all user-facing
