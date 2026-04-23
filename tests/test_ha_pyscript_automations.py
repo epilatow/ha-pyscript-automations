@@ -3769,7 +3769,7 @@ class _EdwEnv:
 
     @property
     def edw_fn(self) -> Any:
-        return self._ns["entity_defaults_watchdog"]
+        return self._ns["entity_defaults_watchdog_blueprint_entrypoint"]
 
     def call(self, **kwargs: Any) -> None:
         self.edw_fn(**_edw_default_kwargs(**kwargs))

@@ -2101,29 +2101,25 @@ def _discover_deviceless_entities(
 
 # Parameter defaults are defined in the blueprint YAML,
 # so don't duplicate them here.
-@service  # noqa: F821
+_EDW_SERVICE_LABEL = "Entity Defaults Watchdog"
+
+
 def entity_defaults_watchdog(
     instance_id: str,
-    trigger_platform_raw: str,
-    drift_checks_raw: object,
-    include_integrations_raw: object,
-    exclude_integrations_raw: object,
-    device_exclude_regex_raw: str,
-    exclude_entities_raw: object,
-    entity_id_exclude_regex_raw: str,
-    entity_name_exclude_regex_raw: str,
-    check_interval_minutes_raw: str,
-    max_device_notifications_raw: str,
-    debug_logging_raw: str,
+    trigger_platform: str,
+    drift_checks: frozenset[str],
+    include_integrations: list[str],
+    exclude_integrations: list[str],
+    device_exclude_regex: str,
+    exclude_entities: list[str],
+    entity_id_exclude_regex: str,
+    entity_name_exclude_regex: str,
+    check_interval_minutes: int,
+    max_notifications: int,
+    debug_logging: bool,
 ) -> None:
-    """Detect entity ID and name drift.
-
-    Called by blueprint-generated automation.
-    Purely reactive: evaluate -> act -> exit.
-    No sleeping, no waiting.
-    """
+    """Detect entity ID and name drift."""
     from entity_defaults_watchdog import (  # noqa: F821
-        CHECK_ALL,
         DEVICELESS_DOMAINS,
         Config,
         DeviceInfo,
@@ -2135,83 +2131,9 @@ def entity_defaults_watchdog(
     auto_name = _automation_name(instance_id)
     tag = f"[EDW: {auto_name}]"
 
-    # Parse all config inputs
-    drift_checks = _normalize_frozenset(drift_checks_raw)
-    include_integrations = _normalize_list(
-        include_integrations_raw,
-    )
-    exclude_integrations = _normalize_list(
-        exclude_integrations_raw,
-    )
-    exclude_entities = _normalize_list(
-        exclude_entities_raw,
-    )
-    debug_logging = _parse_bool(debug_logging_raw)
-
-    # Validate config (accumulate all errors)
-    errors: list[str] = []
-    # Parse + range-check int inputs. Blueprint selectors
-    # enforce these in the UI but direct service calls can
-    # still pass garbage; parse errors surface through the
-    # standard config-error notification.
-    check_interval_minutes, err = _parse_int_input(
-        check_interval_minutes_raw,
-        1,
-        10080,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: check_interval_minutes: {err}")
-    max_notifications, err = _parse_int_input(
-        max_device_notifications_raw,
-        0,
-        1000,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: max_device_notifications: {err}")
-    if hass_err := _check_hass_available():
-        errors.append(hass_err)
-    unknown_checks = [c for c in drift_checks if c not in CHECK_ALL]
-    if unknown_checks:
-        bad = ", ".join(sorted(unknown_checks))
-        valid = ", ".join(sorted(CHECK_ALL))
-        errors.append(
-            f"drift_checks: unknown value(s) {bad}. Valid values: {valid}.",
-        )
-    # Empty selection means "all checks" (mirrors
-    # device_watchdog and the include_integrations
-    # convention of empty == all).
-    if not drift_checks:
-        drift_checks = CHECK_ALL
-    device_exclude_regex = _validate_and_join_patterns(
-        device_exclude_regex_raw,
-        "device_exclude_regex",
-        errors,
-    )
-    entity_id_exclude_regex = _validate_and_join_patterns(
-        entity_id_exclude_regex_raw,
-        "entity_id_exclude_regex",
-        errors,
-    )
-    entity_name_exclude_regex = _validate_and_join_patterns(
-        entity_name_exclude_regex_raw,
-        "entity_name_exclude_regex",
-        errors,
-    )
-    config_error_notif = _build_config_error_notification(
-        errors,
-        instance_id,
-        "Entity Defaults Watchdog",
-    )
-    _process_persistent_notifications(
-        [config_error_notif],
-        instance_id,
-    )
-    if errors:
-        return
-
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
-    if str(trigger_platform_raw) == "time_pattern":
+    if trigger_platform == "time_pattern":
         if not on_interval(check_interval_minutes, now, instance_id):
             return
 
@@ -2220,9 +2142,9 @@ def entity_defaults_watchdog(
         device_exclude_regex=device_exclude_regex,
         exclude_entity_ids=exclude_entities,
         entity_id_exclude_regex=entity_id_exclude_regex,
-        entity_name_exclude_regex=(entity_name_exclude_regex),
+        entity_name_exclude_regex=entity_name_exclude_regex,
         notification_prefix=_notification_prefix(
-            "Entity Defaults Watchdog",
+            _EDW_SERVICE_LABEL,
             instance_id,
         ),
     )
@@ -2371,6 +2293,136 @@ def entity_defaults_watchdog(
             ev.issues_count,
             ev.stat_entity_issues,
         )
+
+
+def entity_defaults_watchdog_blueprint_argparse(
+    instance_id: str,
+    trigger_platform_raw: str,
+    drift_checks_raw: object,
+    include_integrations_raw: object,
+    exclude_integrations_raw: object,
+    device_exclude_regex_raw: str,
+    exclude_entities_raw: object,
+    entity_id_exclude_regex_raw: str,
+    entity_name_exclude_regex_raw: str,
+    check_interval_minutes_raw: str,
+    max_device_notifications_raw: str,
+    debug_logging_raw: str,
+) -> None:
+    """Parse and validate EDW blueprint inputs."""
+    from entity_defaults_watchdog import CHECK_ALL  # noqa: F821
+
+    drift_checks = _normalize_frozenset(drift_checks_raw)
+    include_integrations = _normalize_list(include_integrations_raw)
+    exclude_integrations = _normalize_list(exclude_integrations_raw)
+    exclude_entities = _normalize_list(exclude_entities_raw)
+    debug_logging = _parse_bool(debug_logging_raw)
+    trigger_platform = str(trigger_platform_raw)
+    tag = f"[EDW: {_automation_name(instance_id)}]"
+
+    errors: list[str] = []
+    check_interval_minutes, err = _parse_int_input(
+        check_interval_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: check_interval_minutes: {err}")
+    max_notifications, err = _parse_int_input(
+        max_device_notifications_raw,
+        0,
+        1000,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: max_device_notifications: {err}")
+    if hass_err := _check_hass_available():
+        errors.append(hass_err)
+    unknown_checks = [c for c in drift_checks if c not in CHECK_ALL]
+    if unknown_checks:
+        bad = ", ".join(sorted(unknown_checks))
+        valid = ", ".join(sorted(CHECK_ALL))
+        errors.append(
+            f"drift_checks: unknown value(s) {bad}. Valid values: {valid}.",
+        )
+    # Empty selection means "all checks" (mirrors
+    # device_watchdog and the include_integrations
+    # convention of empty == all).
+    if not drift_checks:
+        drift_checks = CHECK_ALL
+    device_exclude_regex = _validate_and_join_patterns(
+        device_exclude_regex_raw,
+        "device_exclude_regex",
+        errors,
+    )
+    entity_id_exclude_regex = _validate_and_join_patterns(
+        entity_id_exclude_regex_raw,
+        "entity_id_exclude_regex",
+        errors,
+    )
+    entity_name_exclude_regex = _validate_and_join_patterns(
+        entity_name_exclude_regex_raw,
+        "entity_name_exclude_regex",
+        errors,
+    )
+
+    config_error = _build_config_error_notification(
+        errors,
+        instance_id,
+        _EDW_SERVICE_LABEL,
+        debug_logging,
+        tag,
+    )
+    _process_persistent_notifications(
+        [config_error],
+        instance_id,
+    )
+    if errors:
+        return
+
+    entity_defaults_watchdog(
+        instance_id=instance_id,
+        trigger_platform=trigger_platform,
+        drift_checks=drift_checks,
+        include_integrations=include_integrations,
+        exclude_integrations=exclude_integrations,
+        device_exclude_regex=device_exclude_regex,
+        exclude_entities=exclude_entities,
+        entity_id_exclude_regex=entity_id_exclude_regex,
+        entity_name_exclude_regex=entity_name_exclude_regex,
+        check_interval_minutes=check_interval_minutes,
+        max_notifications=max_notifications,
+        debug_logging=debug_logging,
+    )
+
+
+_BLUEPRINT_SERVICES[_EDW_SERVICE_LABEL] = (
+    "entity_defaults_watchdog.yaml",
+    frozenset(
+        [
+            "instance_id",
+            "trigger_platform_raw",
+            "drift_checks_raw",
+            "include_integrations_raw",
+            "exclude_integrations_raw",
+            "device_exclude_regex_raw",
+            "exclude_entities_raw",
+            "entity_id_exclude_regex_raw",
+            "entity_name_exclude_regex_raw",
+            "check_interval_minutes_raw",
+            "max_device_notifications_raw",
+            "debug_logging_raw",
+        ],
+    ),
+    entity_defaults_watchdog_blueprint_argparse,
+)
+
+
+@service  # noqa: F821
+def entity_defaults_watchdog_blueprint_entrypoint(
+    **kwargs: object,
+) -> None:
+    """Blueprint-facing entrypoint for Entity Defaults Watchdog."""
+    _dispatch_blueprint_service(_EDW_SERVICE_LABEL, kwargs)
 
 
 # -- Reference Watchdog ----------------------------
