@@ -105,6 +105,10 @@ if TYPE_CHECKING:
     # standard Python imports).
     from entity_defaults_watchdog import DevicelessEntityInfo
     from reference_watchdog import TruthSet
+    from trigger_entity_controller import (
+        NotificationEvent,
+        Period,
+    )
 
 # -- Shared helpers ----------------------------------
 
@@ -1426,128 +1430,45 @@ def device_watchdog(
 
 # Parameter defaults are defined in the blueprint YAML,
 # so don't duplicate them here.
-@service  # noqa: F821
+_TEC_SERVICE_LABEL = "Trigger Entity Controller"
+
+
 def trigger_entity_controller(
     instance_id: str,
-    controlled_entities_raw: object,
+    controlled_entities: list[str],
     trigger_entity_id: str,
     trigger_to_state: str,
-    auto_off_minutes_raw: str,
-    trigger_entities_raw: object,
-    trigger_period_raw: str,
-    trigger_forces_on_raw: str,
-    trigger_disabling_entities_raw: object,
-    trigger_disabling_period_raw: str,
-    auto_off_disabling_entities_raw: object,
+    auto_off_minutes: int,
+    auto_off_disabling_entities: list[str],
+    trigger_entities: list[str],
+    trigger_period: "Period",
+    trigger_forces_on: bool,
+    trigger_disabling_entities: list[str],
+    trigger_disabling_period: "Period",
     notification_service: str,
-    notification_prefix_raw: str,
-    notification_suffix_raw: str,
-    notification_events_raw: object,
-    debug_logging_raw: str,
+    notification_prefix: str,
+    notification_suffix: str,
+    notification_events: "list[NotificationEvent]",
+    debug_logging: bool,
 ) -> None:
-    """Control entities with trigger-based activation.
-
-    Called by blueprint-generated automation.
-    Purely reactive: evaluate -> act -> exit.
-    No sleeping, no waiting.
-    """
+    """Control entities with trigger-based activation."""
     from trigger_entity_controller import (  # noqa: F821
         ActionType,
         Config,
         Inputs,
         determine_event_type,
         evaluate,
-        parse_notification_events,
-        parse_period,
     )
 
     now = datetime.now()
-    debug_logging = _parse_bool(debug_logging_raw)
     auto_name = _automation_name(instance_id)
     tag = f"[TEC: {auto_name}]"
 
-    # Parse inputs
-    controlled_entities = _normalize_list(
-        controlled_entities_raw,
-    )
-    trigger_entities = _normalize_list(
-        trigger_entities_raw,
-    )
-    trigger_disabling_entities = _normalize_list(
-        trigger_disabling_entities_raw,
-    )
-    auto_off_disabling_entities = _normalize_list(
-        auto_off_disabling_entities_raw,
-    )
-    notification_events = parse_notification_events(
-        _normalize_list(notification_events_raw),
-    )
-
-    # Parse + range-check int inputs. Blueprint selectors
-    # enforce these in the UI but direct service calls can
-    # still pass garbage; parse errors surface through the
-    # standard config-error notification.
-    errors: list[str] = []
-    auto_off_minutes, err = _parse_int_input(
-        auto_off_minutes_raw,
-        0,
-        60,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: auto_off_minutes: {err}")
-
-    # Validate entities
-    errors += _validate_entities(
-        controlled_entities,
-        EntityType.CONTROLLABLE,
-    )
-    all_disabling = trigger_disabling_entities + auto_off_disabling_entities
-    errors += _validate_entities(
-        trigger_entities + all_disabling,
-        EntityType.BINARY,
-    )
-
-    # Check for overlapping entity sets
-    ctrl_set = set(controlled_entities)
-    trig_set = set(trigger_entities)
-    dis_set = set(all_disabling)
-    for eid in ctrl_set & trig_set:
-        errors.append(
-            f"{eid} is in both controlled and trigger entities",
-        )
-    for eid in ctrl_set & dis_set:
-        errors.append(
-            f"{eid} is in both controlled and disabling entities",
-        )
-    for eid in trig_set & dis_set:
-        errors.append(
-            f"{eid} is in both trigger and disabling entities",
-        )
-    errors += _validate_notification_service(
-        notification_service,
-    )
-    config_error_notif = _build_config_error_notification(
-        errors,
-        instance_id,
-        "Trigger Entity Controller",
-    )
-    _process_persistent_notifications(
-        [config_error_notif],
-        instance_id,
-    )
-    if errors:
-        if debug_logging:
-            log.warning(  # noqa: F821
-                "%s invalid config: %s",
-                tag,
-                errors,
-            )
-        return
-
     # Determine event type
+    all_disabling = trigger_disabling_entities + auto_off_disabling_entities
     event_type = determine_event_type(
-        str(trigger_entity_id or ""),
-        str(trigger_to_state or ""),
+        trigger_entity_id,
+        trigger_to_state,
         trigger_entities,
         controlled_entities,
         all_disabling,
@@ -1606,27 +1527,14 @@ def trigger_entity_controller(
         pass
 
     # Build config and inputs, evaluate
-    trigger_period = parse_period(
-        str(trigger_period_raw),
-    )
-    trigger_forces_on = _parse_bool(trigger_forces_on_raw)
-    trigger_disabling_period = parse_period(
-        str(trigger_disabling_period_raw),
-    )
-    notification_prefix = str(
-        notification_prefix_raw or "",
-    )
-    notification_suffix = str(
-        notification_suffix_raw or "",
-    )
     config = Config(
         controlled_entities=controlled_entities,
         auto_off_minutes=auto_off_minutes,
-        auto_off_disabling_entities=(auto_off_disabling_entities),
+        auto_off_disabling_entities=auto_off_disabling_entities,
         trigger_entities=trigger_entities,
         trigger_period=trigger_period,
         trigger_forces_on=trigger_forces_on,
-        trigger_disabling_entities=(trigger_disabling_entities),
+        trigger_disabling_entities=trigger_disabling_entities,
         trigger_disabling_period=trigger_disabling_period,
         notification_prefix=notification_prefix,
         notification_suffix=notification_suffix,
@@ -1635,7 +1543,7 @@ def trigger_entity_controller(
     inputs = Inputs(
         current_time=now,
         event_type=event_type,
-        changed_entity=str(trigger_entity_id or ""),
+        changed_entity=trigger_entity_id,
         triggers_on=triggers_on,
         controlled_on=controlled_on,
         is_day_time=is_day_time,
@@ -1697,6 +1605,178 @@ def trigger_entity_controller(
             controlled_on,
             is_day_time,
         )
+
+    # TEC has no persistent findings; a no-op sweep
+    # with an empty batch lets the instance-prefix
+    # orphan sweep pick up stale entrypoint / argparse
+    # notifications still lingering from prior runs.
+    _sweep_and_process_notifications(
+        hass,  # noqa: F821
+        [],
+        instance_id,
+        _notification_prefix(_TEC_SERVICE_LABEL, instance_id),
+    )
+
+
+def trigger_entity_controller_blueprint_argparse(
+    instance_id: str,
+    controlled_entities_raw: object,
+    trigger_entity_id: str,
+    trigger_to_state: str,
+    auto_off_minutes_raw: str,
+    auto_off_disabling_entities_raw: object,
+    trigger_entities_raw: object,
+    trigger_period_raw: str,
+    trigger_forces_on_raw: str,
+    trigger_disabling_entities_raw: object,
+    trigger_disabling_period_raw: str,
+    notification_service: str,
+    notification_prefix_raw: str,
+    notification_suffix_raw: str,
+    notification_events_raw: object,
+    debug_logging_raw: str,
+) -> None:
+    """Parse and validate TEC blueprint inputs."""
+    from trigger_entity_controller import (  # noqa: F821
+        parse_notification_events,
+        parse_period,
+    )
+
+    debug_logging = _parse_bool(debug_logging_raw)
+    auto_name = _automation_name(instance_id)
+    tag = f"[TEC: {auto_name}]"
+
+    # Parse inputs to native types
+    controlled_entities = _normalize_list(
+        controlled_entities_raw,
+    )
+    trigger_entities = _normalize_list(trigger_entities_raw)
+    trigger_disabling_entities = _normalize_list(
+        trigger_disabling_entities_raw,
+    )
+    auto_off_disabling_entities = _normalize_list(
+        auto_off_disabling_entities_raw,
+    )
+    notification_events = parse_notification_events(
+        _normalize_list(notification_events_raw),
+    )
+    trigger_period = parse_period(str(trigger_period_raw))
+    trigger_forces_on = _parse_bool(trigger_forces_on_raw)
+    trigger_disabling_period = parse_period(
+        str(trigger_disabling_period_raw),
+    )
+    notification_prefix = str(notification_prefix_raw or "")
+    notification_suffix = str(notification_suffix_raw or "")
+
+    # Parse + range-check int inputs. Blueprint selectors
+    # enforce these in the UI but direct service calls
+    # can still pass garbage; parse errors surface
+    # through the standard config-error notification.
+    errors: list[str] = []
+    auto_off_minutes, err = _parse_int_input(
+        auto_off_minutes_raw,
+        0,
+        60,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: auto_off_minutes: {err}")
+
+    # Validate entities exist and have expected domains
+    errors += _validate_entities(
+        controlled_entities,
+        EntityType.CONTROLLABLE,
+    )
+    all_disabling = trigger_disabling_entities + auto_off_disabling_entities
+    errors += _validate_entities(
+        trigger_entities + all_disabling,
+        EntityType.BINARY,
+    )
+
+    # Check for overlapping entity sets
+    ctrl_set = set(controlled_entities)
+    trig_set = set(trigger_entities)
+    dis_set = set(all_disabling)
+    for eid in ctrl_set & trig_set:
+        errors.append(
+            f"{eid} is in both controlled and trigger entities",
+        )
+    for eid in ctrl_set & dis_set:
+        errors.append(
+            f"{eid} is in both controlled and disabling entities",
+        )
+    for eid in trig_set & dis_set:
+        errors.append(
+            f"{eid} is in both trigger and disabling entities",
+        )
+    errors += _validate_notification_service(notification_service)
+
+    config_error = _build_config_error_notification(
+        errors,
+        instance_id,
+        _TEC_SERVICE_LABEL,
+        debug_logging,
+        tag,
+    )
+    _process_persistent_notifications(
+        [config_error],
+        instance_id,
+    )
+    if errors:
+        return
+
+    # Dispatch to the service layer with native types.
+    trigger_entity_controller(
+        instance_id=instance_id,
+        controlled_entities=controlled_entities,
+        trigger_entity_id=str(trigger_entity_id or ""),
+        trigger_to_state=str(trigger_to_state or ""),
+        auto_off_minutes=auto_off_minutes,
+        auto_off_disabling_entities=auto_off_disabling_entities,
+        trigger_entities=trigger_entities,
+        trigger_period=trigger_period,
+        trigger_forces_on=trigger_forces_on,
+        trigger_disabling_entities=trigger_disabling_entities,
+        trigger_disabling_period=trigger_disabling_period,
+        notification_service=notification_service,
+        notification_prefix=notification_prefix,
+        notification_suffix=notification_suffix,
+        notification_events=notification_events,
+        debug_logging=debug_logging,
+    )
+
+
+_BLUEPRINT_SERVICES[_TEC_SERVICE_LABEL] = (
+    "trigger_entity_controller.yaml",
+    frozenset(
+        [
+            "instance_id",
+            "controlled_entities_raw",
+            "trigger_entity_id",
+            "trigger_to_state",
+            "auto_off_minutes_raw",
+            "auto_off_disabling_entities_raw",
+            "trigger_entities_raw",
+            "trigger_period_raw",
+            "trigger_forces_on_raw",
+            "trigger_disabling_entities_raw",
+            "trigger_disabling_period_raw",
+            "notification_service",
+            "notification_prefix_raw",
+            "notification_suffix_raw",
+            "notification_events_raw",
+            "debug_logging_raw",
+        ],
+    ),
+    trigger_entity_controller_blueprint_argparse,
+)
+
+
+@service  # noqa: F821
+def trigger_entity_controller_blueprint_entrypoint(
+    **kwargs: object,
+) -> None:
+    """Blueprint-facing entrypoint for TEC."""
+    _dispatch_blueprint_service(_TEC_SERVICE_LABEL, kwargs)
 
 
 # -- Entity Defaults Watchdog ----------------------

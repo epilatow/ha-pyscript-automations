@@ -209,7 +209,7 @@ triggers:
     minutes: "/1"
 
 actions:
-  - action: pyscript.trigger_entity_controller
+  - action: pyscript.trigger_entity_controller_blueprint_entrypoint
     data:
       instance_id: "{{ this.entity_id }}"
       controlled_entities_raw: !input controlled_entities

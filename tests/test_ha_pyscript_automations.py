@@ -3058,7 +3058,7 @@ class _TecEnv:
 
     @property
     def tec_fn(self) -> Any:
-        return self._ns["trigger_entity_controller"]
+        return self._ns["trigger_entity_controller_blueprint_entrypoint"]
 
     @property
     def state_key_fn(self) -> Any:
