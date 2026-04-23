@@ -1240,29 +1240,25 @@ def _run_in_executor(
 
 # Parameter defaults are defined in the blueprint YAML,
 # so don't duplicate them here.
-@service  # noqa: F821
+_DW_SERVICE_LABEL = "Device Watchdog"
+
+
 def device_watchdog(
     instance_id: str,
-    include_integrations_raw: object,
-    exclude_integrations_raw: object,
-    device_exclude_regex_raw: str,
-    entity_id_exclude_regex_raw: str,
-    monitored_entity_domains_raw: object,
-    check_interval_minutes_raw: str,
-    dead_device_threshold_minutes_raw: str,
-    enabled_checks_raw: object,
-    max_device_notifications_raw: str,
-    debug_logging_raw: str,
-    trigger_platform_raw: str,
+    trigger_platform: str,
+    include_integrations: list[str],
+    exclude_integrations: list[str],
+    device_exclude_regex: str,
+    entity_id_exclude_regex: str,
+    monitored_entity_domains: list[str],
+    check_interval_minutes: int,
+    dead_threshold_seconds: int,
+    enabled_checks: frozenset[str],
+    max_notifications: int,
+    debug_logging: bool,
 ) -> None:
-    """Evaluate device health across integrations.
-
-    Called by blueprint-generated automation.
-    Purely reactive: evaluate -> act -> exit.
-    No sleeping, no waiting.
-    """
+    """Evaluate device health across integrations."""
     from device_watchdog import (  # noqa: F821
-        CHECK_ALL,
         CHECK_DISABLED_DIAGNOSTICS,
         Config,
         DeviceInfo,
@@ -1275,88 +1271,9 @@ def device_watchdog(
     auto_name = _automation_name(instance_id)
     tag = f"[DW: {auto_name}]"
 
-    # Parse all config inputs
-    include_integrations = _normalize_list(
-        include_integrations_raw,
-    )
-    exclude_integrations = _normalize_list(
-        exclude_integrations_raw,
-    )
-    monitored_entity_domains = _normalize_list(
-        monitored_entity_domains_raw,
-    )
-    enabled_checks = _normalize_frozenset(enabled_checks_raw)
-    debug_logging = _parse_bool(debug_logging_raw)
-
-    # Validate config (accumulate all errors)
-    errors: list[str] = []
-    # Parse + range-check int inputs. Blueprint selectors
-    # enforce these in the UI but direct service calls can
-    # still pass garbage; parse errors surface through the
-    # standard config-error notification.
-    check_interval_minutes, err = _parse_int_input(
-        check_interval_minutes_raw,
-        1,
-        10080,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: check_interval_minutes: {err}")
-    dead_device_threshold_minutes, err = _parse_int_input(
-        dead_device_threshold_minutes_raw,
-        1,
-        10080,
-    )
-    if err is not None:
-        errors.append(
-            f"blueprint input: dead_device_threshold_minutes: {err}",
-        )
-    dead_threshold_seconds = dead_device_threshold_minutes * 60
-    max_notifications, err = _parse_int_input(
-        max_device_notifications_raw,
-        0,
-        1000,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: max_device_notifications: {err}")
-    if hass_err := _check_hass_available():
-        errors.append(hass_err)
-    device_exclude_regex = _validate_and_join_patterns(
-        device_exclude_regex_raw,
-        "device_exclude_regex",
-        errors,
-    )
-    entity_id_exclude_regex = _validate_and_join_patterns(
-        entity_id_exclude_regex_raw,
-        "entity_id_exclude_regex",
-        errors,
-    )
-    unknown_checks = [c for c in enabled_checks if c not in CHECK_ALL]
-    if unknown_checks:
-        bad = ", ".join(sorted(unknown_checks))
-        valid = ", ".join(sorted(CHECK_ALL))
-        errors.append(
-            f"enabled_checks: unknown value(s) {bad}. Valid values: {valid}.",
-        )
-    # Empty selection means "all checks" (blueprint default
-    # is also all three; this just mirrors the
-    # include_integrations convention of empty == all).
-    if not enabled_checks:
-        enabled_checks = CHECK_ALL
-    config_error_notif = _build_config_error_notification(
-        errors,
-        instance_id,
-        "Device Watchdog",
-    )
-    _process_persistent_notifications(
-        [config_error_notif],
-        instance_id,
-    )
-    if errors:
-        return
-
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
-    if str(trigger_platform_raw) == "time_pattern":
+    if trigger_platform == "time_pattern":
         if not on_interval(check_interval_minutes, now, instance_id):
             return
 
@@ -1367,7 +1284,7 @@ def device_watchdog(
         dead_threshold_seconds=dead_threshold_seconds,
         enabled_checks=enabled_checks,
         notification_prefix=_notification_prefix(
-            "Device Watchdog",
+            _DW_SERVICE_LABEL,
             instance_id,
         ),
     )
@@ -1507,6 +1424,141 @@ def device_watchdog(
             ev.issues_count,
             ev.stat_entity_issues,
         )
+
+
+def device_watchdog_blueprint_argparse(
+    instance_id: str,
+    trigger_platform_raw: str,
+    include_integrations_raw: object,
+    exclude_integrations_raw: object,
+    device_exclude_regex_raw: str,
+    entity_id_exclude_regex_raw: str,
+    monitored_entity_domains_raw: object,
+    check_interval_minutes_raw: str,
+    dead_device_threshold_minutes_raw: str,
+    enabled_checks_raw: object,
+    max_device_notifications_raw: str,
+    debug_logging_raw: str,
+) -> None:
+    """Parse and validate DW blueprint inputs."""
+    from device_watchdog import CHECK_ALL  # noqa: F821
+
+    include_integrations = _normalize_list(include_integrations_raw)
+    exclude_integrations = _normalize_list(exclude_integrations_raw)
+    monitored_entity_domains = _normalize_list(
+        monitored_entity_domains_raw,
+    )
+    enabled_checks = _normalize_frozenset(enabled_checks_raw)
+    debug_logging = _parse_bool(debug_logging_raw)
+    trigger_platform = str(trigger_platform_raw)
+    tag = f"[DW: {_automation_name(instance_id)}]"
+
+    errors: list[str] = []
+    check_interval_minutes, err = _parse_int_input(
+        check_interval_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: check_interval_minutes: {err}")
+    dead_device_threshold_minutes, err = _parse_int_input(
+        dead_device_threshold_minutes_raw,
+        1,
+        10080,
+    )
+    if err is not None:
+        errors.append(
+            f"blueprint input: dead_device_threshold_minutes: {err}",
+        )
+    dead_threshold_seconds = dead_device_threshold_minutes * 60
+    max_notifications, err = _parse_int_input(
+        max_device_notifications_raw,
+        0,
+        1000,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: max_device_notifications: {err}")
+    if hass_err := _check_hass_available():
+        errors.append(hass_err)
+    device_exclude_regex = _validate_and_join_patterns(
+        device_exclude_regex_raw,
+        "device_exclude_regex",
+        errors,
+    )
+    entity_id_exclude_regex = _validate_and_join_patterns(
+        entity_id_exclude_regex_raw,
+        "entity_id_exclude_regex",
+        errors,
+    )
+    unknown_checks = [c for c in enabled_checks if c not in CHECK_ALL]
+    if unknown_checks:
+        bad = ", ".join(sorted(unknown_checks))
+        valid = ", ".join(sorted(CHECK_ALL))
+        errors.append(
+            f"enabled_checks: unknown value(s) {bad}. Valid values: {valid}.",
+        )
+    # Empty selection means "all checks" (blueprint default
+    # is also all three; this just mirrors the
+    # include_integrations convention of empty == all).
+    if not enabled_checks:
+        enabled_checks = CHECK_ALL
+
+    config_error = _build_config_error_notification(
+        errors,
+        instance_id,
+        _DW_SERVICE_LABEL,
+        debug_logging,
+        tag,
+    )
+    _process_persistent_notifications(
+        [config_error],
+        instance_id,
+    )
+    if errors:
+        return
+
+    device_watchdog(
+        instance_id=instance_id,
+        trigger_platform=trigger_platform,
+        include_integrations=include_integrations,
+        exclude_integrations=exclude_integrations,
+        device_exclude_regex=device_exclude_regex,
+        entity_id_exclude_regex=entity_id_exclude_regex,
+        monitored_entity_domains=monitored_entity_domains,
+        check_interval_minutes=check_interval_minutes,
+        dead_threshold_seconds=dead_threshold_seconds,
+        enabled_checks=enabled_checks,
+        max_notifications=max_notifications,
+        debug_logging=debug_logging,
+    )
+
+
+_BLUEPRINT_SERVICES[_DW_SERVICE_LABEL] = (
+    "device_watchdog.yaml",
+    frozenset(
+        [
+            "instance_id",
+            "trigger_platform_raw",
+            "include_integrations_raw",
+            "exclude_integrations_raw",
+            "device_exclude_regex_raw",
+            "entity_id_exclude_regex_raw",
+            "monitored_entity_domains_raw",
+            "check_interval_minutes_raw",
+            "dead_device_threshold_minutes_raw",
+            "enabled_checks_raw",
+            "max_device_notifications_raw",
+            "debug_logging_raw",
+        ],
+    ),
+    device_watchdog_blueprint_argparse,
+)
+
+
+@service  # noqa: F821
+def device_watchdog_blueprint_entrypoint(**kwargs: object) -> None:
+    """Blueprint-facing entrypoint for Device Watchdog."""
+    _dispatch_blueprint_service(_DW_SERVICE_LABEL, kwargs)
 
 
 # -- Trigger Entity Controller --------------------

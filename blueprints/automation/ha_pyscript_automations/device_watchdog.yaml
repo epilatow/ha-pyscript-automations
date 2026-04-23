@@ -158,7 +158,7 @@ triggers:
     minutes: "/1"
 
 actions:
-  - action: pyscript.device_watchdog
+  - action: pyscript.device_watchdog_blueprint_entrypoint
     data:
       instance_id: "{{ this.entity_id }}"
       trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"

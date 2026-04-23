@@ -2207,7 +2207,7 @@ class _WatchdogEnv:
 
     @property
     def watchdog_fn(self) -> Any:
-        return self._ns["device_watchdog"]
+        return self._ns["device_watchdog_blueprint_entrypoint"]
 
     def call(self, **kwargs: Any) -> None:
         self.watchdog_fn(**_dw_default_kwargs(**kwargs))
