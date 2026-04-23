@@ -928,9 +928,9 @@ class TestEvaluate:
             "trigger_entity": "timer",
             "trigger_threshold": 5.0,
             "release_threshold": 2.0,
-            "sampling_window_s": 300,
-            "disable_window_s": 10,
-            "auto_off_min": 30,
+            "sampling_window_seconds": 300,
+            "disable_window_seconds": 10,
+            "auto_off_minutes": 30,
             "notification_prefix": "",
             "notification_suffix": "",
         }
@@ -979,7 +979,7 @@ class TestEvaluate:
             **self._eval_kwargs(
                 switch_state="on",
                 trigger_entity="switch.fan",
-                auto_off_min=5,
+                auto_off_minutes=5,
             ),
         )
         assert result.action == Action.NONE
@@ -1032,9 +1032,9 @@ class TestHandleServiceCall:
             "trigger_entity": "timer",
             "trigger_threshold": 5.0,
             "release_threshold": 2.0,
-            "sampling_window_s": 300,
-            "disable_window_s": 10,
-            "auto_off_min": 30,
+            "sampling_window_seconds": 300,
+            "disable_window_seconds": 10,
+            "auto_off_minutes": 30,
             "notification_prefix": "",
             "notification_suffix": "",
         }

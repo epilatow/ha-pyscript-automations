@@ -284,7 +284,9 @@ class _ServiceEnv:
     @property
     def service_fn(self) -> Any:
         """Return the service function."""
-        return self._ns["sensor_threshold_switch_controller"]
+        return self._ns[
+            "sensor_threshold_switch_controller_blueprint_entrypoint"
+        ]
 
     def call(self, **kwargs: Any) -> None:
         """Call the service with defaults."""
@@ -1899,7 +1901,7 @@ class TestStscIntInputValidation:
         env.call(sampling_window_seconds_raw="not-a-number")
         assert len(env.mock_pn.create_calls) == 1
         msg = env.mock_pn.create_calls[0]["message"]
-        assert "sampling_window_s" in msg
+        assert "sampling_window_seconds" in msg
         assert "must be an integer" in msg
 
     def test_out_of_range_auto_off_creates_notification(self) -> None:
@@ -1907,7 +1909,7 @@ class TestStscIntInputValidation:
         env.call(auto_off_minutes_raw="9999")
         assert len(env.mock_pn.create_calls) == 1
         msg = env.mock_pn.create_calls[0]["message"]
-        assert "auto_off_min" in msg
+        assert "auto_off_minutes" in msg
         assert "must be between 0 and 1440" in msg
 
     def test_invalid_int_blocks_action(self) -> None:

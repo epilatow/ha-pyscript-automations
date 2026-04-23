@@ -518,9 +518,9 @@ def evaluate(
     trigger_entity: str,
     trigger_threshold: float,
     release_threshold: float,
-    sampling_window_s: int,
-    disable_window_s: int,
-    auto_off_min: int,
+    sampling_window_seconds: int,
+    disable_window_seconds: int,
+    auto_off_minutes: int,
     notification_prefix: str,
     notification_suffix: str,
 ) -> Result:
@@ -533,9 +533,9 @@ def evaluate(
     config = Config(
         trigger_threshold=trigger_threshold,
         release_threshold=release_threshold,
-        sampling_window_seconds=sampling_window_s,
-        disable_window_seconds=disable_window_s,
-        auto_off_minutes=auto_off_min,
+        sampling_window_seconds=sampling_window_seconds,
+        disable_window_seconds=disable_window_seconds,
+        auto_off_minutes=auto_off_minutes,
     )
 
     event_type = determine_event_type(

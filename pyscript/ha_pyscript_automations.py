@@ -927,91 +927,34 @@ def _stsc_debug_dict(
 
 # Parameter defaults are defined in the blueprint YAML,
 # so don't duplicate them here.
-@service  # noqa: F821
+_STSC_SERVICE_LABEL = "Sensor Threshold Switch Controller"
+
+
 def sensor_threshold_switch_controller(
     instance_id: str,
     target_switch_entity: str,
     sensor_value: str,
     switch_state: str,
     trigger_entity: str,
-    trigger_threshold_raw: str,
-    release_threshold_raw: str,
-    sampling_window_seconds_raw: str,
-    disable_window_seconds_raw: str,
-    auto_off_minutes_raw: str,
+    trigger_threshold: float,
+    release_threshold: float,
+    sampling_window_seconds: int,
+    disable_window_seconds: int,
+    auto_off_minutes: int,
     notification_service: str,
     notification_prefix: str,
     notification_suffix: str,
-    debug_logging_raw: str,
+    debug_logging: bool,
 ) -> None:
-    """Evaluate sensor threshold switch controller.
-
-    Called by blueprint-generated automation.
-    Purely reactive: evaluate -> act -> exit.
-    No sleeping, no waiting.
-    """
+    """Evaluate sensor threshold switch controller."""
     from sensor_threshold_switch_controller import (  # noqa: F821
         Action,
         handle_service_call,
     )
 
     now = datetime.now()
-    debug_logging = _parse_bool(debug_logging_raw)
     auto_name = _automation_name(instance_id)
     tag = f"[STSC: {auto_name}]"
-
-    # Parse + range-check int inputs. Blueprint selectors
-    # enforce these in the UI but direct service calls can
-    # still pass garbage; parse errors surface through the
-    # standard config-error notification.
-    errors: list[str] = []
-    sampling_window_s, err = _parse_int_input(
-        sampling_window_seconds_raw,
-        10,
-        3600,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: sampling_window_s: {err}")
-    disable_window_s, err = _parse_int_input(
-        disable_window_seconds_raw,
-        0,
-        60,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: disable_window_s: {err}")
-    auto_off_min, err = _parse_int_input(
-        auto_off_minutes_raw,
-        0,
-        1440,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: auto_off_min: {err}")
-
-    # Validate entities and notification service
-    errors += _validate_entities(
-        [target_switch_entity],
-        EntityType.CONTROLLABLE,
-    )
-    errors += _validate_notification_service(
-        notification_service,
-    )
-    config_error_notif = _build_config_error_notification(
-        errors,
-        instance_id,
-        "Sensor Threshold Switch Controller",
-    )
-    _process_persistent_notifications(
-        [config_error_notif],
-        instance_id,
-    )
-    if errors:
-        if debug_logging:
-            log.warning(  # noqa: F821
-                "%s invalid config: %s",
-                tag,
-                errors,
-            )
-        return
 
     # Load state from HA entity attribute
     #    (entity state is limited to 255 chars; attributes
@@ -1047,11 +990,11 @@ def sensor_threshold_switch_controller(
         sensor_value=sensor_value,
         switch_state=switch_state,
         trigger_entity=trigger_entity,
-        trigger_threshold=float(trigger_threshold_raw),
-        release_threshold=float(release_threshold_raw),
-        sampling_window_s=sampling_window_s,
-        disable_window_s=disable_window_s,
-        auto_off_min=auto_off_min,
+        trigger_threshold=trigger_threshold,
+        release_threshold=release_threshold,
+        sampling_window_seconds=sampling_window_seconds,
+        disable_window_seconds=disable_window_seconds,
+        auto_off_minutes=auto_off_minutes,
         notification_prefix=notification_prefix,
         notification_suffix=notification_suffix,
     )
@@ -1093,6 +1036,147 @@ def sensor_threshold_switch_controller(
             info["last_action"],
             info["last_reason"],
         )
+
+    # STSC has no persistent findings; a no-op sweep
+    # with an empty batch lets the instance-prefix
+    # orphan sweep pick up stale entrypoint / argparse
+    # notifications still lingering from prior runs.
+    _sweep_and_process_notifications(
+        hass,  # noqa: F821
+        [],
+        instance_id,
+        _notification_prefix(_STSC_SERVICE_LABEL, instance_id),
+    )
+
+
+def sensor_threshold_switch_controller_blueprint_argparse(
+    instance_id: str,
+    target_switch_entity: str,
+    sensor_value: str,
+    switch_state: str,
+    trigger_entity: str,
+    trigger_threshold_raw: str,
+    release_threshold_raw: str,
+    sampling_window_seconds_raw: str,
+    disable_window_seconds_raw: str,
+    auto_off_minutes_raw: str,
+    notification_service: str,
+    notification_prefix: str,
+    notification_suffix: str,
+    debug_logging_raw: str,
+) -> None:
+    """Parse and validate STSC blueprint inputs."""
+    debug_logging = _parse_bool(debug_logging_raw)
+    auto_name = _automation_name(instance_id)
+    tag = f"[STSC: {auto_name}]"
+
+    errors: list[str] = []
+    try:
+        trigger_threshold = float(trigger_threshold_raw)
+    except (TypeError, ValueError):
+        trigger_threshold = 0.0
+        errors.append(
+            "blueprint input: trigger_threshold: must be a number;"
+            f" got {trigger_threshold_raw!r}",
+        )
+    try:
+        release_threshold = float(release_threshold_raw)
+    except (TypeError, ValueError):
+        release_threshold = 0.0
+        errors.append(
+            "blueprint input: release_threshold: must be a number;"
+            f" got {release_threshold_raw!r}",
+        )
+    sampling_window_seconds, err = _parse_int_input(
+        sampling_window_seconds_raw,
+        10,
+        3600,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: sampling_window_seconds: {err}")
+    disable_window_seconds, err = _parse_int_input(
+        disable_window_seconds_raw,
+        0,
+        60,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: disable_window_seconds: {err}")
+    auto_off_minutes, err = _parse_int_input(
+        auto_off_minutes_raw,
+        0,
+        1440,
+    )
+    if err is not None:
+        errors.append(f"blueprint input: auto_off_minutes: {err}")
+
+    errors += _validate_entities(
+        [target_switch_entity],
+        EntityType.CONTROLLABLE,
+    )
+    errors += _validate_notification_service(notification_service)
+
+    config_error = _build_config_error_notification(
+        errors,
+        instance_id,
+        _STSC_SERVICE_LABEL,
+        debug_logging,
+        tag,
+    )
+    _process_persistent_notifications(
+        [config_error],
+        instance_id,
+    )
+    if errors:
+        return
+
+    sensor_threshold_switch_controller(
+        instance_id=instance_id,
+        target_switch_entity=target_switch_entity,
+        sensor_value=sensor_value,
+        switch_state=switch_state,
+        trigger_entity=trigger_entity,
+        trigger_threshold=trigger_threshold,
+        release_threshold=release_threshold,
+        sampling_window_seconds=sampling_window_seconds,
+        disable_window_seconds=disable_window_seconds,
+        auto_off_minutes=auto_off_minutes,
+        notification_service=notification_service,
+        notification_prefix=notification_prefix,
+        notification_suffix=notification_suffix,
+        debug_logging=debug_logging,
+    )
+
+
+_BLUEPRINT_SERVICES[_STSC_SERVICE_LABEL] = (
+    "sensor_threshold_switch_controller.yaml",
+    frozenset(
+        [
+            "instance_id",
+            "target_switch_entity",
+            "sensor_value",
+            "switch_state",
+            "trigger_entity",
+            "trigger_threshold_raw",
+            "release_threshold_raw",
+            "sampling_window_seconds_raw",
+            "disable_window_seconds_raw",
+            "auto_off_minutes_raw",
+            "notification_service",
+            "notification_prefix",
+            "notification_suffix",
+            "debug_logging_raw",
+        ],
+    ),
+    sensor_threshold_switch_controller_blueprint_argparse,
+)
+
+
+@service  # noqa: F821
+def sensor_threshold_switch_controller_blueprint_entrypoint(
+    **kwargs: object,
+) -> None:
+    """Blueprint-facing entrypoint for STSC."""
+    _dispatch_blueprint_service(_STSC_SERVICE_LABEL, kwargs)
 
 
 # -- Worker thread executor --------------------------

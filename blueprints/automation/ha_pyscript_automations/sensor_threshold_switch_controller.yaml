@@ -148,7 +148,7 @@ triggers:
     minutes: "/1"
 
 actions:
-  - action: pyscript.sensor_threshold_switch_controller
+  - action: pyscript.sensor_threshold_switch_controller_blueprint_entrypoint
     data:
       instance_id: "{{ this.entity_id }}"
       target_switch_entity: "{{ target_switch_entity }}"
