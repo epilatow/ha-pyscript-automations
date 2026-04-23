@@ -327,6 +327,70 @@ uvx mypy pyscript/ --strict
 - Be strongly typed. Use dataclasses for structured data,
   not `Dict[str, Any]`.
 
+## HA deployment testing
+
+- **Deploy with `scripts/dev-deploy.py`.** Ships every
+  git-tracked file to the install path on the HA host
+  (default `/config/ha-pyscript-automations`), removes
+  files the host has under owned top-level entries that
+  git does not, runs `scripts/install.sh` when any new
+  `pyscript/*.py` or `blueprints/*.yaml` file was
+  installed, prunes HA-config symlinks for removed files
+  so nothing dangles, and runs whichever reloads the
+  diff implies. Refuses to run if the working tree has
+  any uncommitted or untracked files. `--dry-run` prints
+  the plan without touching the host, `--force-reloads`
+  runs both API reloads unconditionally, `--ha-restart`
+  runs `ha core restart` instead of the API reloads,
+  `--allow-dirty` skips the clean-tree check and ships
+  working-tree content as-is (tracked files with local
+  edits plus any untracked files `.gitignore` does not
+  exclude) -- intended for iterative dev, not production
+  deploys.
+
+- **Run `pyscript.reload` after pyscript changes.**
+  Re-imports every file under `pyscript/`. Needed when
+  you touch `pyscript/ha_pyscript_automations.py` or any
+  `pyscript/modules/*.py`. Reload picks up the current
+  `@service` signatures and module contents:
+  ```bash
+  curl -s -X POST \
+    -H "Authorization: Bearer $API_KEY" \
+    http://$HA_HOST:8123/api/services/pyscript/reload
+  ```
+
+- **Run `automation.reload` after blueprint changes.**
+  Re-reads `automations.yaml` *and* re-renders
+  blueprint-backed automation actions from the current
+  blueprint YAML. Needed when you touch any
+  `blueprints/automation/ha_pyscript_automations/*.yaml`
+  file. Without this, HA keeps dispatching the cached
+  rendered action, so if a blueprint input was renamed
+  or removed the service call still arrives with the
+  stale kwarg and pyscript raises
+  `TypeError: <service>() called with unexpected keyword
+  arguments`:
+  ```bash
+  curl -s -X POST \
+    -H "Authorization: Bearer $API_KEY" \
+    http://$HA_HOST:8123/api/services/automation/reload
+  ```
+
+- **Fetch `pyscript.automation_<slug>_state`.** Every
+  blueprint-backed automation writes a state entity on
+  each successful run with `last_run`, `runtime`, and
+  per-automation findings attributes. Read it with:
+  ```bash
+  curl -s -H "Authorization: Bearer $API_KEY" \
+    http://$HA_HOST:8123/api/states/pyscript.automation_<slug>_state
+  ```
+  A fresh `last_run` plus a nonzero `runtime` and no
+  error attributes mean the run completed. Persistent
+  notifications are no longer exposed as `/api/states`
+  entities in HA 2026.4+; fetch them via the websocket
+  `persistent_notification/get` command when you need to
+  verify notification content.
+
 ## Commit Messages
 
 - Use `- component: Summary of change.` format.

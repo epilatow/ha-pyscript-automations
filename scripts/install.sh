@@ -123,6 +123,35 @@ for file_rel in "${FILES[@]}"; do
     fi
 done
 
+# -- Prune dangling repo-owned symlinks --------------
+# Sweep HA_CONFIG/pyscript and HA_CONFIG/blueprints for
+# symlinks whose readlink target points back into this
+# repo (matched by REPO_REL as a path component) but
+# whose target no longer resolves. These are leftovers
+# from files that have been removed from the repo since
+# a previous install; install never reaches them via the
+# FILES loop, so we clean them up here.
+scan_dirs=()
+[ -d "$HA_CONFIG/pyscript" ] && scan_dirs+=("$HA_CONFIG/pyscript")
+[ -d "$HA_CONFIG/blueprints" ] && scan_dirs+=("$HA_CONFIG/blueprints")
+
+if [ "${#scan_dirs[@]}" -gt 0 ]; then
+    while IFS= read -r -d '' link; do
+        # test -e follows symlinks; false => target missing.
+        if [ -e "$link" ]; then
+            continue
+        fi
+        link_target="$(readlink "$link")"
+        case "$link_target" in
+            *"/$REPO_REL/"*|"$REPO_REL/"*)
+                rm -f "$link"
+                echo "  ${link#"$HA_CONFIG/"}" \
+                    "(dangling, removed)"
+                ;;
+        esac
+    done < <(find "${scan_dirs[@]}" -type l -print0)
+fi
+
 if [ "$errors" -gt 0 ]; then
     echo ""
     echo "Failed: $errors error(s). Fix the above" \
