@@ -76,38 +76,41 @@ HA host.
 
 ## Installation
 
-This repo is migrating toward a HACS-installable integration. In
-the meantime, a developer install path is supported.
+1. Install [PyScript](https://github.com/custom-components/pyscript)
+   via HACS if you don't already have it.
 
-1. Clone the repo on your HA host somewhere outside `/config/`
-   (HACS reserves `/config/custom_components/`):
+2. Add the following to your `configuration.yaml`. The two options
+   are required for our pyscript modules to load:
 
-   ```bash
-   cd /root
-   git clone <repo-url> ha-pyscript-automations
+   ```yaml
+   pyscript:
+     allow_all_imports: true
+     hass_is_global: true
    ```
 
-2. Run the developer installer:
+3. In Home Assistant, go to HACS, then the menu in the top right
+   and choose **Custom repositories**. Add this repo's URL with
+   the **Integration** type.
 
-   ```bash
-   /root/ha-pyscript-automations/scripts/dev-install.py \
-       --repo-dir /root/ha-pyscript-automations \
-       --ha-config /config
-   ```
+4. Find **HA PyScript Automations** in HACS and click
+   **Download**.
 
-   The installer reconciles symlinks under `/config/blueprints/`,
-   `/config/pyscript/`, and `/config/www/ha_pyscript_automations/`
-   pointing into the cloned repo. Add `--cli-symlink-dir /root`
-   (or your preferred location) to also install the Z-Wave
-   Network Info CLI as a symlink there.
+5. Restart Home Assistant.
 
-3. Restart Home Assistant (or reload the PyScript integration and
-   automation config).
+6. Go to **Settings > Devices & Services > Add Integration** and
+   add **HA PyScript Automations**. The integration installs the
+   bundled blueprints, pyscript modules, and rendered docs into
+   your `/config/` directory.
 
-4. Go to **Settings > Automations & Scenes > Blueprints** to create
-   automations from the installed blueprints.
+7. Optionally, open the integration's **Configure** dialog to set
+   **CLI symlink directory** if you want the
+   `zwave_network_info.py` shell tool symlinked into a directory
+   on your `$PATH` (e.g. `/root`). Leave blank to skip it.
+
+8. Go to **Settings > Automations & Scenes > Blueprints** to
+   create automations from the installed blueprints.
 
 ## Development
 
-See [Development Guide](DEVELOPMENT.md) for
-architecture, coding conventions, and testing instructions.
+See [Development Guide](DEVELOPMENT.md) for architecture, coding
+conventions, and testing instructions.

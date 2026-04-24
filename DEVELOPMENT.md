@@ -420,6 +420,30 @@ missing its HTML counterpart, or if an orphan HTML has
 no matching source. The test's failure message points
 at the render command.
 
+#### How rendered HTML reaches the user's browser
+
+The rendered HTML is **not** installed under
+`/config/www/`. HA's default `/local/` static handler:
+
+- Is only registered at HA startup if `/config/www/`
+  already exists (our integration runs after that).
+- Refuses to follow symlinks whose targets escape
+  `/config/www/`, which is exactly what an installed
+  symlink-into-bundled would do.
+
+Instead, the integration's `async_setup_entry`
+registers its own aiohttp static route at
+`/local/ha_pyscript_automations/docs/` pointing
+directly at the bundled docs directory. Real files,
+no symlinks, no dependency on `/config/www/`.
+
+**dev-install limitation**: users on the
+`scripts/dev-install.py` path don't load the HA
+integration, so the static route is never registered
+and the blueprints' `/local/.../docs/...html` links
+404. Read the markdown sources under
+`bundled/docs/` directly during dev work.
+
 ## Comments
 
 Do not number steps in comments (e.g., `# 1. Parse state`).
@@ -496,14 +520,37 @@ interactive browser-based development.
 `tests/test_hacc_harness.py` uses
 [`pytest-homeassistant-custom-component`](https://pypi.org/project/pytest-homeassistant-custom-component/)
 to stand up an in-process HA instance for tests that need
-real HA machinery (blueprint loader, integration setup,
-config flow, repairs). Pinned to a specific HA release in
-the file's PEP 723 dependency block; first run downloads
-HA into a uv-script env (~minute), subsequent runs are
-cached. Runs in the default suite via
-`tests/run_all.py`. Step 6 onwards adds tests that
-exercise our integration's async_setup_entry, config
-flow, and repair flows here.
+real HA machinery. Pinned to a specific HA release in the
+file's PEP 723 dependency block; first run downloads HA
+into a uv-script env (~minute), subsequent runs are
+cached. Runs in the default suite via `tests/run_all.py`.
+
+`tests/test_integration.py` uses the same harness to
+exercise the integration's async lifecycle (config flow,
+options flow, async_setup_entry, async_remove_entry).
+
+### Manifest version bump rule
+
+The integration version in
+`custom_components/ha_pyscript_automations/manifest.json`
+must increment with every commit that changes anything
+under `custom_components/`, and stay equal otherwise.
+`tests/test_manifest.py` enforces both this rule and the
+canonical formatting (`json.dumps(..., indent=2)` plus a
+trailing newline) in the default test run.
+
+Before committing any change under `custom_components/`,
+bump the patch:
+
+```bash
+scripts/bump-manifest-version.py
+```
+
+The script rewrites `manifest.json` and re-stages it. For
+non-patch bumps (a deliberate minor or major graduation),
+edit the manifest by hand instead -- the test only
+checks that the version is strictly greater than the
+parent's, not that it's exactly +1.
 
 ### Code quality
 

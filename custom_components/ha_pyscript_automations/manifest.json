@@ -1,0 +1,20 @@
+{
+  "domain": "ha_pyscript_automations",
+  "name": "HA PyScript Automations",
+  "version": "0.0.0",
+  "documentation": "https://github.com/epilatow/ha-pyscript-automations",
+  "issue_tracker": "https://github.com/epilatow/ha-pyscript-automations/issues",
+  "codeowners": [
+    "@epilatow"
+  ],
+  "dependencies": [
+    "http"
+  ],
+  "after_dependencies": [
+    "pyscript"
+  ],
+  "iot_class": "local_polling",
+  "config_flow": true,
+  "integration_type": "service",
+  "requirements": []
+}

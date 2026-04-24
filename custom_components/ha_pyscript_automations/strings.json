@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA PyScript Automations",
+        "description": "Set up the integration. Click Submit to install the bundled blueprints, pyscript modules, and rendered docs into your config directory."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one instance of HA PyScript Automations can be configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA PyScript Automations Options",
+        "data": {
+          "cli_symlink_dir": "CLI symlink directory"
+        },
+        "data_description": {
+          "cli_symlink_dir": "Optional directory where bundled CLI scripts will be symlinked. Leave empty to skip installing CLI scripts."
+        }
+      }
+    }
+  }
+}
