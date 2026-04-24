@@ -13,6 +13,13 @@ markers = [
 # uses tests_dir.glob('test_*.py'), which is non-recursive, so
 # it never discovers tests/docker/test_*.py either way.
 addopts = "-m 'not docker'"
+# pytest-homeassistant-custom-component (used by
+# test_hacc_harness.py) provides an async ``hass`` fixture.
+# In auto mode pytest-asyncio adopts each test's coroutine
+# without requiring per-test @mark.asyncio decoration; this
+# is what HA's own integration repos use. No effect on the
+# existing sync tests.
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 80

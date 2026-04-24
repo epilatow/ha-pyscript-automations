@@ -484,12 +484,26 @@ automatically by `uv`. Run tools via `uvx <tool> [args]`.
 ### Docker test harness (opt-in, slow)
 
 `tests/docker/` spins up a real HA container with pyscript
-pre-installed and exercises `scripts/install.sh` and
+pre-installed and exercises `scripts/dev-install.py` and
 `scripts/dev-deploy.py` end-to-end. Not run by
 `tests/run_all.py`; opt in with `pytest -m docker
 tests/docker`. See `tests/docker/README.md` for details
 and for how to bring the same environment up for
 interactive browser-based development.
+
+### pytest-homeassistant-custom-component harness
+
+`tests/test_hacc_harness.py` uses
+[`pytest-homeassistant-custom-component`](https://pypi.org/project/pytest-homeassistant-custom-component/)
+to stand up an in-process HA instance for tests that need
+real HA machinery (blueprint loader, integration setup,
+config flow, repairs). Pinned to a specific HA release in
+the file's PEP 723 dependency block; first run downloads
+HA into a uv-script env (~minute), subsequent runs are
+cached. Runs in the default suite via
+`tests/run_all.py`. Step 6 onwards adds tests that
+exercise our integration's async_setup_entry, config
+flow, and repair flows here.
 
 ### Code quality
 
