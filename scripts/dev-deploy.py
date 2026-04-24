@@ -152,6 +152,22 @@ def diff_files(
     return sorted(installed), sorted(updated), sorted(removed)
 
 
+# Two prefixes per install domain: the bundled subtree
+# where tracked files actually live (post-HACS-migration
+# layout), and the legacy top-level prefix that pre-
+# migration tracked files used. Matching either keeps
+# deploys working across revisions on both sides of step 2.
+_PYSCRIPT_PREFIXES = (
+    "pyscript/",
+    "custom_components/ha_pyscript_automations/bundled/pyscript/",
+)
+_BLUEPRINT_PREFIXES = (
+    "blueprints/",
+    "custom_components/ha_pyscript_automations/bundled/blueprints/",
+)
+_SYMLINKED_EXTS = (".py", ".yaml")
+
+
 def plan_reloads(
     changed: set[str],
     *,
@@ -168,22 +184,18 @@ def plan_reloads(
     if force_reloads:
         return ["pyscript.reload", "automation.reload"]
     actions: list[str] = []
-    if any(p.startswith("pyscript/") for p in changed):
+    if any(p.startswith(_PYSCRIPT_PREFIXES) for p in changed):
         actions.append("pyscript.reload")
-    if any(p.startswith("blueprints/") for p in changed):
+    if any(p.startswith(_BLUEPRINT_PREFIXES) for p in changed):
         actions.append("automation.reload")
     return actions
 
 
-_SYMLINKED_DIRS = ("pyscript/", "blueprints/")
-_SYMLINKED_EXTS = (".py", ".yaml")
-
-
 def _is_symlinked(rel_path: str) -> bool:
     """True iff install.sh would manage a symlink for ``rel_path``."""
-    return rel_path.startswith(_SYMLINKED_DIRS) and rel_path.endswith(
-        _SYMLINKED_EXTS,
-    )
+    return rel_path.startswith(
+        _PYSCRIPT_PREFIXES + _BLUEPRINT_PREFIXES,
+    ) and rel_path.endswith(_SYMLINKED_EXTS)
 
 
 def want_install_script(installed: list[str], removed: list[str]) -> bool:

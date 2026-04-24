@@ -55,13 +55,21 @@ chmod -R a+rX "$REPO_DIR"
 # .yaml files under blueprints/. Paths are relative to
 # both the repo and HA config directory (repo layout
 # mirrors the HA config layout).
+#
+# The trailing slash after the starting path forces find
+# to descend through it even when the starting path is a
+# symlink, which it is in the post-HACS-migration layout
+# (pyscript/ and blueprints/ at the repo root are symlinks
+# into custom_components/ha_pyscript_automations/bundled/).
+# Without the trailing slash, BSD find (macOS) treats the
+# starting symlink as a leaf and reports no files.
 FILES=()
 while IFS= read -r -d '' f; do
     FILES+=("${f#"$REPO_DIR/"}")
-done < <(find "$REPO_DIR/pyscript" -name '*.py' -print0)
+done < <(find "$REPO_DIR/pyscript/" -name '*.py' -print0)
 while IFS= read -r -d '' f; do
     FILES+=("${f#"$REPO_DIR/"}")
-done < <(find "$REPO_DIR/blueprints" -name '*.yaml' -print0)
+done < <(find "$REPO_DIR/blueprints/" -name '*.yaml' -print0)
 
 # -- Helpers -----------------------------------------
 

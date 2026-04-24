@@ -23,7 +23,14 @@ from unittest.mock import patch
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
-_SCRIPT_PATH = REPO_ROOT / "scripts" / "zwave_network_info.py"
+_SCRIPT_PATH = (
+    REPO_ROOT
+    / "custom_components"
+    / "ha_pyscript_automations"
+    / "bundled"
+    / "cli"
+    / "zwave_network_info.py"
+)
 
 sys.path.insert(0, str(_SCRIPT_PATH.parent))
 
@@ -1179,11 +1186,11 @@ class TestRenderTable:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "scripts/zwave_network_info.py",
+        "custom_components/ha_pyscript_automations/bundled/cli/zwave_network_info.py",
         "tests/test_zwave_network_info.py",
     ]
     mypy_targets = [
-        "scripts/zwave_network_info.py",
+        "custom_components/ha_pyscript_automations/bundled/cli/zwave_network_info.py",
     ]
 
 

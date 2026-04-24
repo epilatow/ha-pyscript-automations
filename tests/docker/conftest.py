@@ -395,56 +395,69 @@ def docker_ha(
         _compose_down(HARNESS_DIR, env)
 
 
-def copy_repo_into_container(
-    container_path: str,
-    *,
-    reset_to: str | None = None,
-) -> None:
-    """Clone the host repo into a host tempdir, then docker cp it in.
+_WORKTREE_EXCLUDES = (
+    ".venv",
+    "tmp",
+    "node_modules",
+    ".pytest_cache",
+    "tests/docker/.cache",
+)
 
-    Bind-mounting the clone instead would be simpler but
-    Docker Desktop on macOS blocks chmod across the
-    user-namespace boundary, which install.sh fails on.
-    docker cp brings the tree under the container root
-    uid so chmod succeeds.
+
+def copy_repo_into_container(container_path: str) -> None:
+    """Ship the host working tree into the container.
+
+    Tars the current working tree (including .git and any
+    uncommitted edits) and extracts inside the container
+    at ``container_path``. Uses docker cp via a tar pipe
+    rather than a bind mount because Docker Desktop on
+    macOS blocks chmod across the user-namespace boundary
+    (install.sh's ``chmod -R a+rX`` fails on bind mounts).
+
+    Shipping the working tree rather than cloning from
+    .git means tests exercise the developer's live code,
+    including uncommitted edits. That matters because the
+    point of running the harness is validating changes
+    before they're committed.
     """
-    import tempfile
-
-    tmp = tempfile.mkdtemp(prefix="hapa-clone-")
-    try:
-        subprocess.run(
-            ["git", "clone", "--no-hardlinks", str(REPO_ROOT), tmp],
-            check=True,
-            capture_output=True,
+    subprocess.run(
+        [
+            "docker",
+            "exec",
+            CONTAINER_NAME,
+            "sh",
+            "-c",
+            f"rm -rf {container_path} && mkdir -p {container_path}",
+        ],
+        check=True,
+    )
+    tar_cmd = ["tar", "-cf", "-"]
+    for excl in _WORKTREE_EXCLUDES:
+        tar_cmd.extend(["--exclude", f"./{excl}"])
+    tar_cmd.extend(["-C", str(REPO_ROOT), "."])
+    extract_cmd = [
+        "docker",
+        "exec",
+        "-i",
+        CONTAINER_NAME,
+        "sh",
+        "-c",
+        f"cd {container_path} && tar -xf -",
+    ]
+    with subprocess.Popen(tar_cmd, stdout=subprocess.PIPE) as tar_proc:
+        result = subprocess.run(
+            extract_cmd,
+            stdin=tar_proc.stdout,
+            check=False,
         )
-        if reset_to:
-            subprocess.run(
-                ["git", "-C", tmp, "reset", "--hard", reset_to],
-                check=True,
-                capture_output=True,
-            )
-        subprocess.run(
-            [
-                "docker",
-                "exec",
-                CONTAINER_NAME,
-                "sh",
-                "-c",
-                f"rm -rf {container_path} && mkdir -p {container_path}",
-            ],
-            check=True,
+        if tar_proc.stdout is not None:
+            tar_proc.stdout.close()
+        if tar_proc.wait() != 0:
+            raise RuntimeError("local tar exited non-zero")
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"container-side tar extract exited {result.returncode}",
         )
-        subprocess.run(
-            [
-                "docker",
-                "cp",
-                f"{tmp}/.",
-                f"{CONTAINER_NAME}:{container_path}",
-            ],
-            check=True,
-        )
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @pytest.fixture

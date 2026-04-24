@@ -204,33 +204,32 @@ class TestInstallShEndToEnd:
 class TestDevDeployEndToEnd:
     """Exercise scripts/dev-deploy.py inside the container.
 
-    Sets up a source clone (at HEAD, under /root/source)
-    and a target (at HEAD~N, under /config/ha-pyscript-
-    automations -- today's dev-deploy default). Runs
-    install.sh on the target so /config symlinks resolve,
-    then runs dev-deploy via ssh root@localhost to sync
-    source -> target and trigger reload.
+    Models the common iterative-dev cycle: developer has
+    their HA host deployed from the current HEAD, they edit
+    a file locally, and they push it via dev-deploy. Both
+    source and target start at HEAD; source then gets a
+    local edit. dev-deploy diffs, ships the updated file,
+    and triggers reload.
+
+    The one-time pre-migration-to-post-migration transition
+    deploy is a separate scenario handled by wiping
+    /config/ha-pyscript-automations/ on the HA host before
+    the first post-migration deploy; it is not covered here.
     """
 
-    def test_dev_deploy_syncs_target_and_reloads(
+    def test_dev_deploy_ships_edit_and_reloads(
         self,
         docker_ha: DockerHA,
     ) -> None:
-        # Shared state from the previous test may have
-        # symlinks installed. Remove them; the target
-        # install below re-creates them pointing at the
-        # rolled-back target repo.
         _clear_installed_symlinks(docker_ha)
 
-        # Target: HEAD~5 clone at the dev-deploy default
+        # Target: current HEAD at the dev-deploy default
         # install path. Inside /config so install.sh's
         # "repo must be inside HA config dir" check
         # succeeds.
-        copy_repo_into_container(
-            REPO_IN_CONFIG,
-            reset_to="HEAD~5",
-        )
-        # Source: current HEAD under /root/source.
+        copy_repo_into_container(REPO_IN_CONFIG)
+        # Source: current HEAD under /root/source; we edit
+        # a file below to give dev-deploy something to ship.
         copy_repo_into_container("/root/source")
 
         # git 2.35+ refuses cross-uid repos without this.
@@ -246,6 +245,17 @@ class TestDevDeployEndToEnd:
         )
         assert r.returncode == 0, (
             f"initial install.sh on target failed: {r.stdout}{r.stderr}"
+        )
+
+        # Edit a file in source to simulate local
+        # development work.
+        marker = "# dev-deploy-test-marker\n"
+        edited_path = (
+            "custom_components/ha_pyscript_automations/bundled/"
+            "pyscript/modules/helpers.py"
+        )
+        docker_ha.exec_shell(
+            f"printf '%s' '{marker}' >> /root/source/{edited_path}",
         )
 
         # ssh setup for dev-deploy. The ssh client inside
@@ -284,22 +294,41 @@ class TestDevDeployEndToEnd:
         assert r.returncode == 0, (
             f"dev-deploy.py failed: stdout={r.stdout} stderr={r.stderr}"
         )
+        assert f"updated: {edited_path}" in r.stdout, (
+            f"expected edited file in plan; got: {r.stdout}"
+        )
         assert "reload: pyscript.reload" in r.stdout, (
             f"expected pyscript.reload in plan; got: {r.stdout}"
         )
 
-        # Verify the target file content now matches
-        # source. Picking a pyscript module that exists in
-        # both HEAD~5 and HEAD.
-        src = docker_ha.exec_capture(
-            "sha256sum",
-            "/root/source/pyscript/modules/zwave_route_manager.py",
-        ).stdout.split()[0]
-        tgt = docker_ha.exec_capture(
-            "sha256sum",
-            f"{REPO_IN_CONFIG}/pyscript/modules/zwave_route_manager.py",
-        ).stdout.split()[0]
-        assert src == tgt, "target file did not match source after dev-deploy"
+        # Verify the target's copy now contains the marker
+        # we appended to source.
+        r = docker_ha.exec_capture(
+            "grep",
+            "-c",
+            marker.rstrip(),
+            f"{REPO_IN_CONFIG}/{edited_path}",
+        )
+        assert r.returncode == 0 and r.stdout.strip() == "1", (
+            "marker did not propagate to target: "
+            f"stdout={r.stdout!r} stderr={r.stderr!r}"
+        )
+
+        # The /config symlink should resolve to the same
+        # file (through the repo-root symlink) and thus
+        # pick up the same content.
+        via_symlink = docker_ha.exec_capture(
+            "grep",
+            "-c",
+            marker.rstrip(),
+            "/config/pyscript/modules/helpers.py",
+        )
+        assert (
+            via_symlink.returncode == 0 and via_symlink.stdout.strip() == "1"
+        ), (
+            "edit did not reach HA via /config symlink: "
+            f"stdout={via_symlink.stdout!r} stderr={via_symlink.stderr!r}"
+        )
 
         # pyscript services should still be present after
         # the reload dev-deploy triggered.

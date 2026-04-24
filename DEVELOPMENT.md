@@ -1,5 +1,74 @@
 # Development Guide
 
+## Repo layout
+
+This repo is preparing to ship as a HACS-distributed
+custom integration. Two external constraints drive the
+top-level layout; everything below that is our own
+convention.
+
+Home Assistant's custom-integration loader looks for
+integrations at `/config/custom_components/<domain>/`,
+where `<domain>` matches the integration's `manifest.json`
+domain. That's why the repo's installable code lives
+under `custom_components/ha_pyscript_automations/` --
+when HACS (or a developer's manual install) puts that
+subtree at `/config/custom_components/ha_pyscript_automations/`,
+HA finds it.
+
+HACS itself only downloads files from the repo that live
+under `custom_components/<name>/`; it discards everything
+outside that subtree at install time. So every file we
+want users to receive has to live inside
+`custom_components/ha_pyscript_automations/`.
+
+Inside that subtree, the `bundled/` subdirectory is our
+own convention for the blueprints, pyscript modules,
+docs, and CLI script the installer ships to their
+user-visible `/config/...` paths via symlinks. Integration
+code (`__init__.py`, `manifest.json`, `reconciler.py`,
+etc.) will live alongside it at the
+`custom_components/ha_pyscript_automations/` level when
+it arrives in a later commit.
+
+```
+custom_components/ha_pyscript_automations/bundled/
+    blueprints/automation/ha_pyscript_automations/*.yaml
+    cli/zwave_network_info.py
+    docs/*.md
+    pyscript/ha_pyscript_automations.py
+    pyscript/modules/*.py
+```
+
+The repo root keeps three committed symlinks into the
+bundle for path-typing convenience and so existing test
+paths keep resolving:
+
+```
+blueprints -> custom_components/ha_pyscript_automations/bundled/blueprints
+pyscript   -> custom_components/ha_pyscript_automations/bundled/pyscript
+docs       -> custom_components/ha_pyscript_automations/bundled/docs
+```
+
+These are real git symlinks (mode 120000). They live
+outside HACS's download path and are never shipped to
+users. When referring to files, either path works --
+`pyscript/modules/foo.py` and
+`custom_components/ha_pyscript_automations/bundled/pyscript/modules/foo.py`
+resolve to the same file.
+
+**POSIX filesystem required for development.** The repo
+uses mode-120000 symlinks that Windows (with default git
+settings) checks out as text files containing the target
+path, which breaks tests, install scripts, and deploys.
+Use macOS or Linux; WSL2 works too.
+
+Brand assets for the HA integration live at `assets/` at
+the repo root (source SVG + 256/512 PNG renders). They
+are only consumed by a future PR to `home-assistant/brands`;
+they do not ship inside the bundle because HA's UI only
+reads brand assets from the brands CDN.
+
 ## Architecture
 
 All automations follow a three-layer architecture:
