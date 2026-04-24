@@ -6,9 +6,11 @@
 """Deploy this repo to a Home Assistant host.
 
 Ships every git-tracked file to the install path on the HA
-host (default /config/ha-pyscript-automations), removes
-files the host has under owned top-level entries that git
-does not, and runs whichever reloads the diff implies.
+host (default /root/ha-pyscript-automations), removes files
+the host has under owned top-level entries that git does
+not, runs scripts/dev-install.py on the host to reconcile
+the /config/... symlinks, then fires pyscript.reload and
+automation.reload via the HA REST API.
 
 Requires a clean working tree by default: refuses to run
 if ``git status --porcelain`` is non-empty. Pass
@@ -16,9 +18,9 @@ if ``git status --porcelain`` is non-empty. Pass
 working-tree content as-is (tracked files with local
 modifications ship as-is; untracked files matching
 ``.gitignore`` remain excluded; untracked files not
-matching ship too). Without an API key, file deploy
-still runs but any needed reload is skipped with a
-warning.
+matching ship too). Without an API key the file deploy
+and dev-install run normally but the reload calls are
+skipped with a warning.
 
 Use --dry-run to print the deploy + reload plan without
 touching the host.
@@ -37,7 +39,10 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_HOST = "root@homeassistant"
-DEFAULT_INSTALL_PATH = "/config/ha-pyscript-automations"
+# Outside of /config/ so the clone never collides with the
+# HACS-installed tree under /config/custom_components/.
+DEFAULT_INSTALL_PATH = "/root/ha-pyscript-automations"
+DEFAULT_HA_CONFIG = "/config"
 
 
 def git_root() -> Path:
@@ -152,20 +157,15 @@ def diff_files(
     return sorted(installed), sorted(updated), sorted(removed)
 
 
-# Two prefixes per install domain: the bundled subtree
-# where tracked files actually live (post-HACS-migration
-# layout), and the legacy top-level prefix that pre-
-# migration tracked files used. Matching either keeps
-# deploys working across revisions on both sides of step 2.
-_PYSCRIPT_PREFIXES = (
-    "pyscript/",
-    "custom_components/ha_pyscript_automations/bundled/pyscript/",
-)
-_BLUEPRINT_PREFIXES = (
-    "blueprints/",
-    "custom_components/ha_pyscript_automations/bundled/blueprints/",
-)
-_SYMLINKED_EXTS = (".py", ".yaml")
+# After the HACS migration, the on-host repo has symlinks
+# at its root (blueprints/, pyscript/, docs/) that resolve
+# into custom_components/ha_pyscript_automations/bundled/.
+# Any file change under bundled/ affects HA's view via those
+# symlinks, so we always fire both reload services when
+# anything ships -- keeping the heuristic simple and
+# impossible to get wrong in a way that leaves HA serving
+# stale code.
+_BUNDLED_PREFIX = "custom_components/ha_pyscript_automations/bundled/"
 
 
 def plan_reloads(
@@ -183,36 +183,25 @@ def plan_reloads(
         return ["ha core restart"]
     if force_reloads:
         return ["pyscript.reload", "automation.reload"]
-    actions: list[str] = []
-    if any(p.startswith(_PYSCRIPT_PREFIXES) for p in changed):
-        actions.append("pyscript.reload")
-    if any(p.startswith(_BLUEPRINT_PREFIXES) for p in changed):
-        actions.append("automation.reload")
-    return actions
-
-
-def _is_symlinked(rel_path: str) -> bool:
-    """True iff install.sh would manage a symlink for ``rel_path``."""
-    return rel_path.startswith(
-        _PYSCRIPT_PREFIXES + _BLUEPRINT_PREFIXES,
-    ) and rel_path.endswith(_SYMLINKED_EXTS)
-
-
-def want_install_script(installed: list[str], removed: list[str]) -> bool:
-    """True if install.sh should run.
-
-    Triggered by installs (to create fresh symlinks) and
-    by removes (install.sh also prunes dangling symlinks
-    that point back into the repo).
-    """
-    return any(_is_symlinked(p) for p in installed + removed)
+    # Any change under bundled/ or under the legacy top-
+    # level pyscript/ or blueprints/ triggers both reloads.
+    # Cheaper than trying to detect which kind of content
+    # changed -- both services are fast.
+    if any(
+        p.startswith(_BUNDLED_PREFIX)
+        or p.startswith("pyscript/")
+        or p.startswith("blueprints/")
+        for p in changed
+    ):
+        return ["pyscript.reload", "automation.reload"]
+    return []
 
 
 def print_plan(
     installed: list[str],
     updated: list[str],
     removed: list[str],
-    run_install: bool,
+    run_dev_install: bool,
     reloads: list[str],
 ) -> None:
     for p in installed:
@@ -221,8 +210,8 @@ def print_plan(
         print(f"updated: {p}")
     for p in removed:
         print(f"removed: {p}")
-    if run_install:
-        print("run: install.sh")
+    if run_dev_install:
+        print("run: dev-install.py")
     for action in reloads:
         print(f"reload: {action}")
 
@@ -273,13 +262,27 @@ def remove_remote(
     )
 
 
-def run_install_script(host: str, install_path: str) -> None:
-    ha_config = str(Path(install_path).parent)
-    script = f"{install_path.rstrip('/')}/scripts/install.sh"
-    subprocess.run(
-        ["ssh", host, f"{shlex.quote(script)} {shlex.quote(ha_config)}"],
-        check=True,
+def run_dev_install(
+    host: str,
+    install_path: str,
+    ha_config: str,
+    cli_symlink_dir: str | None,
+) -> None:
+    """Invoke scripts/dev-install.py on the host.
+
+    dev-install.py reconciles /config/... symlinks against
+    the shipped bundle. Always run after a file change;
+    it is idempotent and fast.
+    """
+    script = f"{install_path.rstrip('/')}/scripts/dev-install.py"
+    cmd = (
+        f"{shlex.quote(script)} "
+        f"--repo-dir {shlex.quote(install_path)} "
+        f"--ha-config {shlex.quote(ha_config)}"
     )
+    if cli_symlink_dir is not None:
+        cmd += f" --cli-symlink-dir {shlex.quote(cli_symlink_dir)}"
+    subprocess.run(["ssh", host, cmd], check=True)
 
 
 def host_only(host: str) -> str:
@@ -348,6 +351,23 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--ha-config",
+        default=DEFAULT_HA_CONFIG,
+        help=(
+            "absolute path of HA's config dir on the host "
+            f"(default: {DEFAULT_HA_CONFIG}). Passed to "
+            "dev-install.py --ha-config."
+        ),
+    )
+    p.add_argument(
+        "--cli-symlink-dir",
+        default=None,
+        help=(
+            "passed to dev-install.py --cli-symlink-dir. "
+            "If unset, the CLI script is not symlinked anywhere."
+        ),
+    )
+    p.add_argument(
         "--api-key-file",
         type=Path,
         default=None,
@@ -394,7 +414,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     # Line-buffer stdout so our plan header reliably prints
-    # before any subprocess output (tar, ssh, install.sh)
+    # before any subprocess output (tar, ssh, dev-install.py)
     # when stdout is piped.
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(line_buffering=True)
@@ -420,7 +440,9 @@ def main() -> int:
         force_reloads=args.force_reloads,
         ha_restart=args.ha_restart,
     )
-    run_install = want_install_script(installed, removed)
+    # dev-install.py runs whenever any file changed on the
+    # host. It is idempotent and fast; no heuristic skip.
+    run_install = bool(changed)
 
     print_plan(installed, updated, removed, run_install, reloads)
 
@@ -435,7 +457,12 @@ def main() -> int:
     deploy_files(args.host, args.install_path, root, to_deploy)
     remove_remote(args.host, args.install_path, removed)
     if run_install:
-        run_install_script(args.host, args.install_path)
+        run_dev_install(
+            args.host,
+            args.install_path,
+            args.ha_config,
+            args.cli_symlink_dir,
+        )
     execute_reloads(args.host, api_key, reloads)
     return 0
 

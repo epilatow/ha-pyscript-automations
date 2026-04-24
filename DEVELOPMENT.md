@@ -546,22 +546,40 @@ uvx mypy pyscript/ --strict
 
 - **Deploy with `scripts/dev-deploy.py`.** Ships every
   git-tracked file to the install path on the HA host
-  (default `/config/ha-pyscript-automations`), removes
-  files the host has under owned top-level entries that
-  git does not, runs `scripts/install.sh` when any new
-  `pyscript/*.py` or `blueprints/*.yaml` file was
-  installed, prunes HA-config symlinks for removed files
-  so nothing dangles, and runs whichever reloads the
-  diff implies. Refuses to run if the working tree has
-  any uncommitted or untracked files. `--dry-run` prints
-  the plan without touching the host, `--force-reloads`
-  runs both API reloads unconditionally, `--ha-restart`
-  runs `ha core restart` instead of the API reloads,
+  (default `/root/ha-pyscript-automations`; outside
+  `/config/` so it never collides with a HACS install),
+  removes files the host has under owned top-level
+  entries that git does not, then invokes
+  `scripts/dev-install.py` on the host to reconcile the
+  `/config/...` symlinks, and finally runs the reload
+  services. Refuses to run if the working tree has any
+  uncommitted or untracked files. `--dry-run` prints the
+  plan without touching the host, `--force-reloads` runs
+  both API reloads unconditionally, `--ha-restart` runs
+  `ha core restart` instead of the API reloads,
   `--allow-dirty` skips the clean-tree check and ships
   working-tree content as-is (tracked files with local
   edits plus any untracked files `.gitignore` does not
   exclude) -- intended for iterative dev, not production
-  deploys.
+  deploys. `--cli-symlink-dir` is passed through to
+  `dev-install.py` when set; if omitted, the CLI
+  script is not symlinked anywhere.
+
+- **`scripts/dev-install.py` runs on the HA host.** Plain
+  Python (no uv). Reads the checked-out repo under
+  `--repo-dir` and reconciles its bundled payload into
+  `/config/blueprints/`, `/config/pyscript/`,
+  `/config/www/ha_pyscript_automations/`, and optionally
+  `<cli-symlink-dir>/` as symlinks pointing back into the
+  bundled subtree. Idempotent; tracks state in
+  `<ha-config>/.ha_pyscript_automations.manifest.json`
+  so stale symlinks from renamed or removed bundled
+  files get cleaned up on the next run. Refuses to
+  overwrite regular files at any destination; existing
+  symlinks whose targets match the bundled marker are
+  treated as ours and rewritten. Invoked by
+  `dev-deploy.py` on every push, but can also be run
+  directly on the host during debugging.
 
 - **Run `pyscript.reload` after pyscript changes.**
   Re-imports every file under `pyscript/`. Needed when

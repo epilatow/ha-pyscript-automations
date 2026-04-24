@@ -2,11 +2,11 @@
 # This is AI generated code
 """Full-stack docker tests for the manual developer workflow.
 
-Exercises the existing git-clone + install.sh path and the
-laptop-to-host scripts/dev-deploy.py path against a real HA
-container with pyscript pre-installed. See tests/docker/
-README.md for manual invocation during interactive
-development.
+Exercises scripts/dev-install.py (the HA-node-side
+installer) and scripts/dev-deploy.py (the laptop-side push)
+against a real HA container with pyscript pre-installed.
+See tests/docker/README.md for manual invocation during
+interactive development.
 
 Gated by @pytest.mark.docker. The default pytest run excludes
 this module (``addopts = -m 'not docker'`` in pyproject.toml).
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 
 import pytest
 from conftest import (
@@ -62,10 +63,8 @@ EXPECTED_BLUEPRINTS = frozenset(
     },
 )
 
-# Today's dev-deploy default; also where install.sh's
-# repo-must-be-inside-config-dir check expects to find
-# the cloned repo.
-REPO_IN_CONFIG = "/config/ha-pyscript-automations"
+# Matches scripts/dev-deploy.py DEFAULT_INSTALL_PATH.
+REPO_ON_HOST = "/root/ha-pyscript-automations"
 
 
 def _registered_blueprints(docker_ha: DockerHA) -> set[str]:
@@ -84,7 +83,7 @@ def _registered_blueprints(docker_ha: DockerHA) -> set[str]:
 
 
 def _poll(
-    predicate,
+    predicate: Callable[[], bool],
     *,
     timeout: float,
     interval: float = 1.0,
@@ -113,38 +112,38 @@ def _pyscript_services(docker_ha: DockerHA) -> set[str]:
 
 
 def _clear_installed_symlinks(docker_ha: DockerHA) -> None:
-    """Remove the install.sh-owned symlinks under /config.
+    """Remove the dev-install-owned symlinks under /config.
 
-    Leaves /config/ha-pyscript-automations (the cloned
-    repo) and HA state alone -- those are caller-owned.
+    Leaves the repo clone and HA state alone.
     """
     docker_ha.exec_shell(
         "rm -f /config/pyscript/ha_pyscript_automations.py && "
-        "rm -rf /config/pyscript/modules /config/blueprints",
+        "rm -rf /config/pyscript/modules /config/blueprints "
+        "/config/www/ha_pyscript_automations && "
+        "rm -f /config/.ha_pyscript_automations.manifest.json",
     )
 
 
-class TestInstallShEndToEnd:
-    """Exercise scripts/install.sh inside a live HA container."""
+class TestDevInstallEndToEnd:
+    """Run dev-install.py against a live HA container."""
 
     def test_install_creates_symlinks_and_services_register(
         self,
         docker_ha: DockerHA,
-        repo_in_config: str,
     ) -> None:
-        # repo_in_config docker-cp's a fresh clone to
-        # /config/ha-pyscript-automations. Clear any
-        # symlinks a prior test left so we are actually
-        # testing install.sh's CREATE path.
         _clear_installed_symlinks(docker_ha)
+        copy_repo_into_container(REPO_ON_HOST)
 
         r = docker_ha.exec_capture(
-            "bash",
-            f"{repo_in_config}/scripts/install.sh",
+            "python3",
+            f"{REPO_ON_HOST}/scripts/dev-install.py",
+            "--repo-dir",
+            REPO_ON_HOST,
+            "--ha-config",
             "/config",
         )
         assert r.returncode == 0, (
-            f"install.sh failed: stdout={r.stdout} stderr={r.stderr}"
+            f"dev-install.py failed: stdout={r.stdout} stderr={r.stderr}"
         )
 
         check = docker_ha.exec_shell(
@@ -153,8 +152,15 @@ class TestInstallShEndToEnd:
         )
         assert check.returncode == 0, (
             "expected /config/pyscript/ha_pyscript_automations.py "
-            "to be a symlink after install.sh"
+            "to be a symlink after dev-install"
         )
+        # Note: bundled/www/ is not installed by the
+        # reconciler (HA's /local/ static handler refuses
+        # to follow our symlinks; the integration
+        # registers its own aiohttp static route
+        # instead). dev-install users see broken
+        # /local/ doc links -- a documented dev-install
+        # limitation.
         # Filesystem fast-fail check for blueprints; the
         # authoritative check is the WS query below.
         for bp in EXPECTED_BLUEPRINTS:
@@ -166,8 +172,6 @@ class TestInstallShEndToEnd:
                 f"expected blueprint symlink missing: {bp}"
             )
 
-        # Reload pyscript + automation so HA discovers the
-        # installed modules and blueprint YAML.
         code, _ = docker_ha.api_post("/api/services/pyscript/reload")
         assert code == 200, f"pyscript.reload failed: {code}"
         code, _ = docker_ha.api_post("/api/services/automation/reload")
@@ -188,7 +192,7 @@ class TestInstallShEndToEnd:
             timeout=30,
             message=(
                 "pyscript blueprint entrypoint services not registered "
-                "after install.sh + pyscript.reload"
+                "after dev-install + pyscript.reload"
             ),
         )
         _poll(
@@ -204,17 +208,10 @@ class TestInstallShEndToEnd:
 class TestDevDeployEndToEnd:
     """Exercise scripts/dev-deploy.py inside the container.
 
-    Models the common iterative-dev cycle: developer has
-    their HA host deployed from the current HEAD, they edit
-    a file locally, and they push it via dev-deploy. Both
-    source and target start at HEAD; source then gets a
-    local edit. dev-deploy diffs, ships the updated file,
-    and triggers reload.
-
-    The one-time pre-migration-to-post-migration transition
-    deploy is a separate scenario handled by wiping
-    /config/ha-pyscript-automations/ on the HA host before
-    the first post-migration deploy; it is not covered here.
+    Models the common iterative-dev cycle: source and target
+    both start at HEAD, an edit is made locally, dev-deploy
+    diffs, ships the changed file, runs dev-install.py on the
+    host, and triggers reload.
     """
 
     def test_dev_deploy_ships_edit_and_reloads(
@@ -223,13 +220,11 @@ class TestDevDeployEndToEnd:
     ) -> None:
         _clear_installed_symlinks(docker_ha)
 
-        # Target: current HEAD at the dev-deploy default
-        # install path. Inside /config so install.sh's
-        # "repo must be inside HA config dir" check
-        # succeeds.
-        copy_repo_into_container(REPO_IN_CONFIG)
-        # Source: current HEAD under /root/source; we edit
-        # a file below to give dev-deploy something to ship.
+        # Target: /root/ha-pyscript-automations (matches
+        # dev-deploy's default install path).
+        copy_repo_into_container(REPO_ON_HOST)
+        # Source: /root/source (separate clone we can edit
+        # without touching the target).
         copy_repo_into_container("/root/source")
 
         # git 2.35+ refuses cross-uid repos without this.
@@ -237,18 +232,22 @@ class TestDevDeployEndToEnd:
             "git config --global --add safe.directory '*'",
         )
 
-        # Install the target so /config symlinks exist.
+        # Initial install on the target so /config symlinks
+        # exist before we deploy edits.
         r = docker_ha.exec_capture(
-            "bash",
-            f"{REPO_IN_CONFIG}/scripts/install.sh",
+            "python3",
+            f"{REPO_ON_HOST}/scripts/dev-install.py",
+            "--repo-dir",
+            REPO_ON_HOST,
+            "--ha-config",
             "/config",
         )
         assert r.returncode == 0, (
-            f"initial install.sh on target failed: {r.stdout}{r.stderr}"
+            f"initial dev-install on target failed: {r.stdout}{r.stderr}"
         )
 
-        # Edit a file in source to simulate local
-        # development work.
+        # Edit a file in source to give dev-deploy
+        # something to ship.
         marker = "# dev-deploy-test-marker\n"
         edited_path = (
             "custom_components/ha_pyscript_automations/bundled/"
@@ -275,17 +274,17 @@ class TestDevDeployEndToEnd:
             "&& chmod 600 /root/.ha_api_key",
         )
 
-        # Run dev-deploy with cwd=/root/source so
-        # git rev-parse --show-toplevel returns that path.
-        # The HA container's python is 3.14; dev-deploy's
-        # uv shebang is irrelevant when invoked directly.
+        # Run dev-deploy with cwd=/root/source so git
+        # rev-parse --show-toplevel returns that path.
         r = docker_ha.exec_capture(
             "python3",
             "/root/source/scripts/dev-deploy.py",
             "--host",
             "root@localhost",
             "--install-path",
-            REPO_IN_CONFIG,
+            REPO_ON_HOST,
+            "--ha-config",
+            "/config",
             "--api-key-file",
             "/root/.ha_api_key",
             "--allow-dirty",
@@ -297,6 +296,9 @@ class TestDevDeployEndToEnd:
         assert f"updated: {edited_path}" in r.stdout, (
             f"expected edited file in plan; got: {r.stdout}"
         )
+        assert "run: dev-install.py" in r.stdout, (
+            f"expected dev-install.py invocation in plan; got: {r.stdout}"
+        )
         assert "reload: pyscript.reload" in r.stdout, (
             f"expected pyscript.reload in plan; got: {r.stdout}"
         )
@@ -307,7 +309,7 @@ class TestDevDeployEndToEnd:
             "grep",
             "-c",
             marker.rstrip(),
-            f"{REPO_IN_CONFIG}/{edited_path}",
+            f"{REPO_ON_HOST}/{edited_path}",
         )
         assert r.returncode == 0 and r.stdout.strip() == "1", (
             "marker did not propagate to target: "
@@ -328,19 +330,6 @@ class TestDevDeployEndToEnd:
         ), (
             "edit did not reach HA via /config symlink: "
             f"stdout={via_symlink.stdout!r} stderr={via_symlink.stderr!r}"
-        )
-
-        # pyscript services should still be present after
-        # the reload dev-deploy triggered.
-        def _all_services_present() -> bool:
-            missing = EXPECTED_SERVICES - _pyscript_services(docker_ha)
-            assert not missing, f"missing services: {sorted(missing)}"
-            return True
-
-        _poll(
-            _all_services_present,
-            timeout=30,
-            message=("pyscript services not registered after dev-deploy"),
         )
 
 

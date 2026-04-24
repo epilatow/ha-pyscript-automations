@@ -54,9 +54,10 @@ runtime dependencies, making it fully testable with pytest.
 ## Scripts
 
 Standalone diagnostic and inspection tools that ship alongside
-the automations. Live in `scripts/` and run from the HA host.
+the automations. Live in the bundled payload and run from the
+HA host.
 
-- [Z-Wave Network Info](scripts/zwave_network_info.py) -
+- [Z-Wave Network Info](custom_components/ha_pyscript_automations/bundled/cli/zwave_network_info.py) -
   Tabular per-node view of the Z-Wave mesh: protocol (Mesh/LR),
   signal-strength quality, configured priority routes, and
   opt-in stat columns (RX/TX counts, drop counts, drop rates,
@@ -75,23 +76,33 @@ the automations. Live in `scripts/` and run from the HA host.
 
 ## Installation
 
-1. Clone the repo into your HA config directory:
+This repo is migrating toward a HACS-installable integration. In
+the meantime, a developer install path is supported.
+
+1. Clone the repo on your HA host somewhere outside `/config/`
+   (HACS reserves `/config/custom_components/`):
 
    ```bash
-   cd /config
+   cd /root
    git clone <repo-url> ha-pyscript-automations
    ```
 
-2. Run the install script:
+2. Run the developer installer:
 
    ```bash
-   /config/ha-pyscript-automations/scripts/install.sh /config
+   /root/ha-pyscript-automations/scripts/dev-install.py \
+       --repo-dir /root/ha-pyscript-automations \
+       --ha-config /config
    ```
 
-   This creates symlinks for the PyScript modules, services, and
-   blueprints into the correct HA directories.
+   The installer reconciles symlinks under `/config/blueprints/`,
+   `/config/pyscript/`, and `/config/www/ha_pyscript_automations/`
+   pointing into the cloned repo. Add `--cli-symlink-dir /root`
+   (or your preferred location) to also install the Z-Wave
+   Network Info CLI as a symlink there.
 
-3. Restart Home Assistant (or reload the PyScript integration).
+3. Restart Home Assistant (or reload the PyScript integration and
+   automation config).
 
 4. Go to **Settings > Automations & Scenes > Blueprints** to create
    automations from the installed blueprints.
