@@ -11,12 +11,7 @@ a configurable threshold).
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from helpers import (
-    DeviceEntry,
-    PersistentNotification,
-    matches_pattern,
-    md_escape,
-)
+import helpers
 
 # Check identifiers surfaced as blueprint options. Adding
 # a new check = one new constant, add it to ``CHECK_ALL``,
@@ -75,7 +70,7 @@ class RegistryEntry:
 class DeviceInfo:
     """Device with its entity state snapshots."""
 
-    de: DeviceEntry
+    de: helpers.DeviceEntry
     entities: list[EntityInfo] = field(
         default_factory=list,
     )
@@ -105,8 +100,8 @@ class DeviceResult:
     def to_notification(
         self,
         suppress: bool = False,
-    ) -> PersistentNotification:
-        return PersistentNotification(
+    ) -> helpers.PersistentNotification:
+        return helpers.PersistentNotification(
             active=self.has_issue and not suppress,
             notification_id=self.notification_id,
             title=self.notification_title,
@@ -165,7 +160,7 @@ def check_disabled_diagnostics(
 def evaluate_diagnostics(
     config: Config,
     devices: list[DeviceInfo],
-) -> list[PersistentNotification]:
+) -> list[helpers.PersistentNotification]:
     """Check all devices for disabled diagnostics.
 
     Uses device.de.integration_entities and
@@ -174,10 +169,10 @@ def evaluate_diagnostics(
 
     Skips devices with no integrations in
     RECOMMENDED_DIAGNOSTICS. Returns a
-    PersistentNotification per device that has at least
+    helpers.PersistentNotification per device that has at least
     one relevant integration.
     """
-    results: list[PersistentNotification] = []
+    results: list[helpers.PersistentNotification] = []
     for device in devices:
         integrations = sorted(
             device.de.integration_entities.keys(),
@@ -203,7 +198,7 @@ def evaluate_diagnostics(
                 " for better health monitoring."
             )
             results.append(
-                PersistentNotification(
+                helpers.PersistentNotification(
                     active=True,
                     notification_id=notification_id,
                     title=f"{device.de.name}: Disabled Diagnostics",
@@ -212,7 +207,7 @@ def evaluate_diagnostics(
             )
         else:
             results.append(
-                PersistentNotification(
+                helpers.PersistentNotification(
                     active=False,
                     notification_id=notification_id,
                     title="",
@@ -244,7 +239,7 @@ def _filter_entities(
             filtered_out.append(entity)
             continue
 
-        if matches_pattern(
+        if helpers.matches_pattern(
             eid,
             config.entity_id_exclude_regex,
         ):
@@ -302,7 +297,7 @@ def _build_notification_message(
     """Build the notification body for an unhealthy device."""
     lines: list[str] = []
     lines.append(
-        f"Device: [{md_escape(device.de.name)}]({device.de.url})",
+        f"Device: [{helpers.md_escape(device.de.name)}]({device.de.url})",
     )
     integrations = sorted(
         device.de.integration_entities.keys(),
@@ -348,7 +343,7 @@ def _evaluate_device(
     notification_id = f"{config.notification_prefix}device_{device.de.id}"
 
     # Skip excluded devices
-    device_excluded = matches_pattern(
+    device_excluded = helpers.matches_pattern(
         device.de.name,
         config.device_exclude_regex,
     )
@@ -468,7 +463,7 @@ class EvaluationResult:
     """Full evaluation result for the service wrapper."""
 
     results: list[DeviceResult]
-    notifications: list[PersistentNotification]
+    notifications: list[helpers.PersistentNotification]
     all_integrations_count: int
     stat_entities: int
     stat_devices_excluded: int
@@ -492,15 +487,13 @@ def run_evaluation(
     builds the device list on the main thread (requires
     HA registries), then hands it off here.
     """
-    from helpers import prepare_notifications
-
     results = evaluate_devices(config, devices, current_time)
 
-    diag_notifications: list[PersistentNotification] = []
+    diag_notifications: list[helpers.PersistentNotification] = []
     if CHECK_DISABLED_DIAGNOSTICS in config.enabled_checks:
         diag_notifications = evaluate_diagnostics(config, devices)
 
-    notifications = prepare_notifications(
+    notifications = helpers.prepare_notifications(
         results,
         max_notifications,
         f"{config.notification_prefix}cap",

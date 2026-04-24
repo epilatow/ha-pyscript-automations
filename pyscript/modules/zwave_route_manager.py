@@ -7,7 +7,7 @@ responsible for:
 
 - Reading the config file from disk
 - Building the entity->device resolution map from HA registries
-- Calling ``zwave_js_ui_bridge.ZwaveJsUiClient`` for I/O
+- Calling ``bridge.ZwaveJsUiClient`` for I/O
 - Persisting the pending map in the state entity
 
 This module owns:
@@ -31,12 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 
-from zwave_js_ui_bridge import (
-    NodeID,
-    NodeInfo,
-    RouteSpeed,
-    speed_from_bps,
-)
+import zwave_js_ui_bridge as bridge
 
 # -- Config dataclasses ------------------------------------------
 
@@ -51,7 +46,7 @@ class ClientSpec:
     """
 
     entity_id: str
-    route_speed: RouteSpeed | None = None
+    route_speed: "bridge.RouteSpeed | None" = None
 
 
 @dataclass
@@ -59,7 +54,7 @@ class RouteEntry:
     """One repeater + its clients, from the YAML config."""
 
     repeater_entity_id: str
-    route_speed: RouteSpeed | None = None
+    route_speed: "bridge.RouteSpeed | None" = None
     clients: list[ClientSpec] = field(default_factory=list)
 
 
@@ -102,7 +97,7 @@ class DeviceResolution:
     """Resolved Z-Wave device info.
 
     Built by the service wrapper from HA's entity/device
-    registries plus a single ``NodeInfo`` from the bridge's
+    registries plus a single ``bridge.NodeInfo`` from the bridge's
     ``get_nodes()`` call. Used only as an input to
     ``resolve_entities``.
 
@@ -113,7 +108,7 @@ class DeviceResolution:
 
     entity_id: str
     device_id: str
-    node_id: NodeID
+    node_id: bridge.NodeID
     is_routing: bool
     is_listening: bool
     is_frequent_listening: bool | str
@@ -142,9 +137,9 @@ class ResolvedRoute:
     """
 
     client_entity_id: str
-    client_node_id: NodeID
-    repeater_node_ids: list[NodeID]
-    route_speed: RouteSpeed
+    client_node_id: bridge.NodeID
+    repeater_node_ids: list[bridge.NodeID]
+    route_speed: bridge.RouteSpeed
     # Parallel to ``repeater_node_ids`` -- the YAML-configured
     # entity ID for each repeater hop. Carried through purely
     # so the service wrapper can annotate stored state with
@@ -211,6 +206,25 @@ MANAGED_ROUTE_TYPES: list[RouteType] = [
 ]
 
 
+# Lookup by the enum's ``.value`` string. Used by the wrapper's
+# ``_zrm_path_from_storage``: pyscript's AST evaluator wraps
+# imported modules in ``EvalLocalVar``, and iterating
+# ``zrm.RouteType`` from wrapper scope raises
+# ``TypeError: 'EvalLocalVar' object is not iterable``. The
+# wrapper calls this helper instead -- native-Python function
+# call through the module attribute works, and the iteration
+# happens inside the module's own scope where ``RouteType`` is
+# the raw enum class.
+_ROUTE_TYPE_BY_VALUE: "dict[str, RouteType]" = {
+    rt.value: rt for rt in RouteType
+}
+
+
+def route_type_by_value(value: str) -> "RouteType | None":
+    """Return the ``RouteType`` whose ``.value`` equals ``value``."""
+    return _ROUTE_TYPE_BY_VALUE.get(value)
+
+
 # -- Action + route-state dataclasses ---------------------------
 
 
@@ -246,9 +260,9 @@ class RouteAction:
     """
 
     kind: RouteActionKind
-    node_id: NodeID
-    repeaters: list[NodeID]
-    route_speed: RouteSpeed | None
+    node_id: bridge.NodeID
+    repeaters: list[bridge.NodeID]
+    route_speed: "bridge.RouteSpeed | None"
     client_entity_id: str
 
 
@@ -308,8 +322,8 @@ class RouteRequest:
     """
 
     type: RouteType
-    repeater_node_ids: list[NodeID]
-    speed: RouteSpeed | None
+    repeater_node_ids: list[bridge.NodeID]
+    speed: "bridge.RouteSpeed | None"
     requested_at: datetime | None = None
     confirmed_at: datetime | None = None
     timeout_count: int = 0
@@ -344,9 +358,13 @@ class ReconcileResult:
     """
 
     actions: list[RouteAction] = field(default_factory=list)
-    new_pending: dict[NodeID, list[RouteRequest]] = field(default_factory=dict)
-    new_applied: dict[NodeID, list[RouteRequest]] = field(default_factory=dict)
-    new_timeouts: list[tuple[NodeID, RouteType, datetime, int]] = field(
+    new_pending: dict[bridge.NodeID, list[RouteRequest]] = field(
+        default_factory=dict
+    )
+    new_applied: dict[bridge.NodeID, list[RouteRequest]] = field(
+        default_factory=dict
+    )
+    new_timeouts: list[tuple[bridge.NodeID, RouteType, datetime, int]] = field(
         default_factory=list,
     )
 
@@ -354,26 +372,26 @@ class ReconcileResult:
 # -- Parsing -----------------------------------------------------
 
 
-_ROUTE_SPEED_STRINGS: dict[str, RouteSpeed | None] = {
+_ROUTE_SPEED_STRINGS: "dict[str, bridge.RouteSpeed | None]" = {
     "auto": None,
-    "9600": RouteSpeed.RATE_9600,
-    "40k": RouteSpeed.RATE_40K,
-    "100k": RouteSpeed.RATE_100K,
+    "9600": bridge.RouteSpeed.RATE_9600,
+    "40k": bridge.RouteSpeed.RATE_40K,
+    "100k": bridge.RouteSpeed.RATE_100K,
 }
 
 # Accept bare-integer YAML values (``route_speed: 9600``) as an
-# alternative to the string form. Maps bps -> RouteSpeed.
-_ROUTE_SPEED_INTS: dict[int, RouteSpeed] = {
-    9600: RouteSpeed.RATE_9600,
-    40000: RouteSpeed.RATE_40K,
-    100000: RouteSpeed.RATE_100K,
+# alternative to the string form. Maps bps -> bridge.RouteSpeed.
+_ROUTE_SPEED_INTS: dict[int, bridge.RouteSpeed] = {
+    9600: bridge.RouteSpeed.RATE_9600,
+    40000: bridge.RouteSpeed.RATE_40K,
+    100000: bridge.RouteSpeed.RATE_100K,
 }
 
 
 def parse_route_speed_value(
     raw: object,
     location: str,
-) -> tuple[RouteSpeed | None, ConfigError | None]:
+) -> "tuple[bridge.RouteSpeed | None, ConfigError | None]":
     """Parse a ``route_speed`` value from the YAML.
 
     Returns (resolved_speed_or_none, error_or_none). A missing
@@ -689,21 +707,21 @@ def parse_config(yaml_text: str) -> tuple[Config, list[ConfigError]]:
 
 
 # Keyed by the enum's string ``.value`` rather than the enum
-# instance. PyScript's AST evaluator re-creates RouteSpeed
+# instance. PyScript's AST evaluator re-creates bridge.RouteSpeed
 # enum instances when values cross between AST-evaluated code
 # and native-Python (@pyscript_executor) code, which breaks
 # enum-identity-based dict lookups. String keys sidestep the
 # issue and hash identically regardless of import context.
 _SPEED_ORDINAL: dict[str, int] = {
-    RouteSpeed.RATE_9600.value: 0,
-    RouteSpeed.RATE_40K.value: 1,
-    RouteSpeed.RATE_100K.value: 2,
+    bridge.RouteSpeed.RATE_9600.value: 0,
+    bridge.RouteSpeed.RATE_40K.value: 1,
+    bridge.RouteSpeed.RATE_100K.value: 2,
 }
 
 
 def _min_speed(
-    speeds: list[RouteSpeed | None],
-) -> RouteSpeed | None:
+    speeds: "list[bridge.RouteSpeed | None]",
+) -> "bridge.RouteSpeed | None":
     """Slowest speed across ``speeds``, or None if indeterminate.
 
     Returns ``None`` if the list is empty OR if any entry is
@@ -719,7 +737,7 @@ def _min_speed(
         return None
     # All non-None by the check above. Help mypy: narrow via
     # explicit cast-by-reconstruction.
-    concrete: list[RouteSpeed] = [s for s in speeds if s is not None]
+    concrete: list[bridge.RouteSpeed] = [s for s in speeds if s is not None]
     best = concrete[0]
     for s in concrete[1:]:
         if _SPEED_ORDINAL[s.value] < _SPEED_ORDINAL[best.value]:
@@ -728,11 +746,11 @@ def _min_speed(
 
 
 def resolve_speed(
-    client_speed: RouteSpeed | None,
-    entry_speed: RouteSpeed | None,
-    default_speed: RouteSpeed | None,
-    auto_fallback: RouteSpeed | None,
-) -> RouteSpeed | None:
+    client_speed: "bridge.RouteSpeed | None",
+    entry_speed: "bridge.RouteSpeed | None",
+    default_speed: "bridge.RouteSpeed | None",
+    auto_fallback: "bridge.RouteSpeed | None",
+) -> "bridge.RouteSpeed | None":
     """Apply the route_speed precedence chain.
 
     Most-specific wins. If nothing is explicit, fall back to
@@ -748,7 +766,7 @@ def resolve_speed(
 
 def resolve_entities(
     config: Config,
-    default_route_speed: RouteSpeed | None,
+    default_route_speed: "bridge.RouteSpeed | None",
     entity_to_resolution: dict[str, DeviceResolution],
     controller: DeviceResolution,
 ) -> tuple[list[ResolvedRoute], list[ConfigError]]:
@@ -774,7 +792,7 @@ def resolve_entities(
     resolved: list[ResolvedRoute] = []
     errors: list[ConfigError] = []
 
-    controller_speed = speed_from_bps(controller.max_data_rate_bps)
+    controller_speed = bridge.speed_from_bps(controller.max_data_rate_bps)
 
     for i, entry in enumerate(config.routes):
         entry_loc = f"routes[{i}]"
@@ -843,7 +861,7 @@ def resolve_entities(
             )
             continue
 
-        repeater_speed = speed_from_bps(repeater.max_data_rate_bps)
+        repeater_speed = bridge.speed_from_bps(repeater.max_data_rate_bps)
 
         for j, client in enumerate(entry.clients):
             client_loc = f"{entry_loc}.clients[{j}]"
@@ -886,7 +904,7 @@ def resolve_entities(
                 )
                 continue
 
-            source_speed = speed_from_bps(source.max_data_rate_bps)
+            source_speed = bridge.speed_from_bps(source.max_data_rate_bps)
             auto_fallback = _min_speed(
                 [source_speed, repeater_speed, controller_speed],
             )
@@ -940,24 +958,24 @@ def resolve_entities(
 
 def _route_tuple(
     r: ResolvedRoute,
-) -> tuple[list[NodeID], RouteSpeed]:
+) -> tuple[list[bridge.NodeID], bridge.RouteSpeed]:
     """Return the comparable (repeaters, speed) tuple for diff."""
     return (list(r.repeater_node_ids), r.route_speed)
 
 
 def _routes_equal(
-    a: tuple[list[NodeID], RouteSpeed | None] | None,
-    b: tuple[list[NodeID], RouteSpeed | None] | None,
+    a: "tuple[list[bridge.NodeID], bridge.RouteSpeed | None] | None",
+    b: "tuple[list[bridge.NodeID], bridge.RouteSpeed | None] | None",
 ) -> bool:
     """Compare two route tuples by value.
 
     Accepts ``None`` as a speed (used for pending clears,
-    whose speed is meaningless). Avoids RouteSpeed enum-
-    identity comparison: PyScript's AST evaluator may produce
-    RouteSpeed instances that compare unequal by ``==`` across
-    the AST / native-Python boundary even when their ``.value``
-    strings match. Comparing by ``.value`` + the repeaters
-    list is stable.
+    whose speed is meaningless). Avoids ``RouteSpeed``
+    enum-identity comparison: PyScript's AST evaluator may
+    produce ``RouteSpeed`` instances that compare unequal
+    by ``==`` across the AST / native-Python boundary even
+    when their ``.value`` strings match. Comparing by
+    ``.value`` + the repeaters list is stable.
     """
     if a is None and b is None:
         return True
@@ -975,8 +993,8 @@ def _routes_equal(
 
 
 def _current_matches_desired(
-    current: tuple[list[NodeID], RouteSpeed] | None,
-    desired: tuple[list[NodeID], RouteSpeed],
+    current: tuple[list[bridge.NodeID], bridge.RouteSpeed] | None,
+    desired: tuple[list[bridge.NodeID], bridge.RouteSpeed],
     speed_is_auto: bool,
 ) -> bool:
     """Is the node's current state an acceptable match for desired?
@@ -1004,9 +1022,9 @@ def _current_matches_desired(
 
 
 def _current_route_for_type(
-    ni: NodeInfo,
+    ni: bridge.NodeInfo,
     route_type: RouteType,
-) -> tuple[list[NodeID], RouteSpeed] | None:
+) -> tuple[list[bridge.NodeID], bridge.RouteSpeed] | None:
     """Return the node's current route tuple for ``route_type``."""
     if route_type == RouteType.PRIORITY_APP:
         return ni.application_route
@@ -1056,9 +1074,9 @@ def _find_path(
 
 def diff_and_plan(
     desired: list[ResolvedRoute],
-    nodes: dict[NodeID, NodeInfo],
-    pending: dict[NodeID, list[RouteRequest]],
-    applied: dict[NodeID, list[RouteRequest]],
+    nodes: dict[bridge.NodeID, bridge.NodeInfo],
+    pending: dict[bridge.NodeID, list[RouteRequest]],
+    applied: dict[bridge.NodeID, list[RouteRequest]],
     now: datetime,
     pending_timeout: timedelta,
     clear_unmanaged: bool,
@@ -1087,7 +1105,7 @@ def diff_and_plan(
     the attempt that just timed out.
     """
     result = ReconcileResult()
-    desired_by_node: dict[NodeID, ResolvedRoute] = {
+    desired_by_node: dict[bridge.NodeID, ResolvedRoute] = {
         r.client_node_id: r for r in desired
     }
     desired_node_ids = set(desired_by_node.keys())

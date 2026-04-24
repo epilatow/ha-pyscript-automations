@@ -36,6 +36,7 @@ from zwave_route_manager import (  # noqa: E402
     parse_route_speed_value,
     resolve_entities,
     resolve_speed,
+    route_type_by_value,
     type_for_action_kind,
 )
 
@@ -1684,6 +1685,25 @@ class TestConfigError:
         assert e.location == "routes[0]"
         assert e.entity_id == "lock.a"
         assert e.reason == "not found"
+
+
+class TestRouteTypeByValue:
+    """``route_type_by_value`` exists so the wrapper can look up
+    a ``RouteType`` by its ``.value`` without iterating
+    ``zrm.RouteType`` from wrapper scope. Iteration over an
+    imported-module enum fails under pyscript's AST evaluator
+    (``TypeError: 'EvalLocalVar' object is not iterable``);
+    calling this helper moves the iteration into native-Python
+    scope.
+    """
+
+    def test_known_values(self) -> None:
+        assert route_type_by_value("priority_app") == RouteType.PRIORITY_APP
+        assert route_type_by_value("priority_suc") == RouteType.PRIORITY_SUC
+
+    def test_unknown_returns_none(self) -> None:
+        assert route_type_by_value("") is None
+        assert route_type_by_value("bogus") is None
 
 
 class TestCodeQuality(CodeQualityBase):

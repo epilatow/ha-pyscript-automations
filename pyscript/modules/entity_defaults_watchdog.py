@@ -12,12 +12,7 @@ old names.
 
 from dataclasses import dataclass, field
 
-from helpers import (
-    DeviceEntry,
-    PersistentNotification,
-    matches_pattern,
-    md_escape,
-)
+import helpers
 
 # Check identifiers surfaced as blueprint options. Adding
 # a new check = one new constant, add it to ``CHECK_ALL``,
@@ -98,7 +93,7 @@ class EntityDriftInfo:
 class DeviceInfo:
     """Device with its entity drift snapshots."""
 
-    de: DeviceEntry
+    de: helpers.DeviceEntry
     entities: list[EntityDriftInfo] = field(
         default_factory=list,
     )
@@ -197,8 +192,8 @@ class DeviceResult:
     def to_notification(
         self,
         suppress: bool = False,
-    ) -> PersistentNotification:
-        return PersistentNotification(
+    ) -> helpers.PersistentNotification:
+        return helpers.PersistentNotification(
             active=self.has_issue and not suppress,
             notification_id=self.notification_id,
             title=self.notification_title,
@@ -344,12 +339,12 @@ def _is_excluded(
     """True if entity matches any exclusion mechanism."""
     if entity_id in config.exclude_entity_ids:
         return True
-    if matches_pattern(
+    if helpers.matches_pattern(
         entity_id,
         config.entity_id_exclude_regex,
     ):
         return True
-    if matches_pattern(
+    if helpers.matches_pattern(
         friendly_name,
         config.entity_name_exclude_regex,
     ):
@@ -454,7 +449,7 @@ def _build_notification_message(
     """
     lines: list[str] = []
     lines.append(
-        f"Device: [{md_escape(device.de.name)}]({device.de.url})",
+        f"Device: [{helpers.md_escape(device.de.name)}]({device.de.url})",
     )
     integrations = sorted(
         device.de.integration_entities.keys(),
@@ -609,7 +604,7 @@ def _evaluate_device(
     notification_id = f"{config.notification_prefix}device_{device.de.id}"
 
     # Skip excluded devices
-    if matches_pattern(
+    if helpers.matches_pattern(
         device.de.name,
         config.device_exclude_regex,
     ):
@@ -700,7 +695,7 @@ def _deviceless_line_suffix(
     See docs/entity_defaults_watchdog.md for rationale.
     """
     dom, obj_id = entity_id.split(".", 1)
-    name = md_escape(friendly_name)
+    name = helpers.md_escape(friendly_name)
     if dom == "automation" and unique_id:
         return f"[{name}](/config/automation/edit/{unique_id})"
     if dom == "script":
@@ -786,8 +781,6 @@ def _evaluate_deviceless(
     suffix, then builds a single bucket notification
     covering all flagged entities.
     """
-    from helpers import slugify
-
     drift_items: list[DevicelessDriftDetail] = []
     stale_items: list[DevicelessDriftDetail] = []
     excluded = 0
@@ -804,7 +797,7 @@ def _evaluate_deviceless(
         if not entity.effective_name:
             continue
 
-        expected = slugify(entity.effective_name)
+        expected = helpers.slugify(entity.effective_name)
         if not expected:
             continue
 
@@ -896,7 +889,7 @@ class EvaluationResult:
     """Full evaluation result for the service wrapper."""
 
     results: list[DeviceResult]
-    notifications: list[PersistentNotification]
+    notifications: list[helpers.PersistentNotification]
     all_integrations_count: int
     stat_entities: int
     stat_devices_excluded: int
@@ -924,11 +917,9 @@ def run_evaluation(
     Called via ``@pyscript_executor`` trampoline so the
     event loop stays responsive.
     """
-    from helpers import prepare_notifications
-
     results = evaluate_devices(config, devices)
 
-    notifications = prepare_notifications(
+    notifications = helpers.prepare_notifications(
         results,
         max_notifications,
         f"{config.notification_prefix}cap",
@@ -953,7 +944,7 @@ def run_evaluation(
             entities_excluded=0,
         )
     notifications.append(
-        PersistentNotification(
+        helpers.PersistentNotification(
             active=deviceless.has_issue,
             notification_id=deviceless.notification_id,
             title=deviceless.notification_title,

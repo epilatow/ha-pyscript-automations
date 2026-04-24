@@ -999,7 +999,7 @@ class TestProcessPersistentNotifications:
         active: bool,
         message: str,
     ) -> Any:
-        pn_cls = env._ns["PersistentNotification"]
+        pn_cls = env._ns["helpers"].PersistentNotification
         return pn_cls(
             active=active,
             notification_id="nid",
@@ -1147,7 +1147,7 @@ class TestSweepOrphanNotifications:
         active: bool,
         nid: str,
     ) -> Any:
-        pn_cls = env._ns["PersistentNotification"]
+        pn_cls = env._ns["helpers"].PersistentNotification
         return pn_cls(
             active=active,
             notification_id=nid,
@@ -5783,6 +5783,83 @@ class TestRwIntInputValidation:
         assert "must be between 0 and 1000" in msg
 
 
+class TestImportBan:
+    """Ban ``from <our_module> import X`` in wrapper + logic modules.
+
+    The dispatcher's reload mechanism (``_maybe_reload_changed_modules``)
+    propagates edits by reloading module objects in place. Code that
+    binds individual symbols via ``from X import Y`` keeps a stale
+    reference to the pre-reload object after a reload, defeating the
+    refresh. ``import X`` + ``X.Y`` attribute access resolves through
+    the (mutated-in-place) module object on each call, so it stays
+    fresh.
+
+    Imports inside ``if TYPE_CHECKING:`` blocks are allowed -- they
+    never execute at runtime and have no staleness risk.
+    """
+
+    _RELOAD_MODULES = frozenset(
+        {
+            "helpers",
+            "device_watchdog",
+            "entity_defaults_watchdog",
+            "reference_watchdog",
+            "sensor_threshold_switch_controller",
+            "trigger_entity_controller",
+            "zwave_route_manager",
+            "zwave_js_ui_bridge",
+        }
+    )
+
+    def _scan_paths(self) -> list[Path]:
+        return [
+            REPO_ROOT / "pyscript" / "ha_pyscript_automations.py",
+            *sorted((REPO_ROOT / "pyscript" / "modules").glob("*.py")),
+        ]
+
+    def _is_under_type_checking(
+        self,
+        node: ast.AST,
+        ancestors: list[ast.AST],
+    ) -> bool:
+        for parent in ancestors:
+            if (
+                isinstance(parent, ast.If)
+                and isinstance(parent.test, ast.Name)
+                and parent.test.id == "TYPE_CHECKING"
+            ):
+                return True
+        return False
+
+    def test_no_from_imports_for_reloadable_modules(self) -> None:
+        offenders: list[str] = []
+        for path in self._scan_paths():
+            tree = ast.parse(path.read_text())
+            stack: list[tuple[ast.AST, list[ast.AST]]] = [
+                (tree, []),
+            ]
+            while stack:
+                node, ancestors = stack.pop()
+                if (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module in self._RELOAD_MODULES
+                    and not self._is_under_type_checking(node, ancestors)
+                ):
+                    rel = path.relative_to(REPO_ROOT)
+                    offenders.append(
+                        f"{rel}:{node.lineno} 'from {node.module}"
+                        f" import ...' (use 'import {node.module}'"
+                        " + attribute access instead)"
+                    )
+                next_ancestors = [*ancestors, node]
+                for child in ast.iter_child_nodes(node):
+                    stack.append((child, next_ancestors))
+        assert not offenders, (
+            "from-imports of reloadable modules block dispatcher-managed"
+            " reload from taking effect:\n  " + "\n  ".join(offenders)
+        )
+
+
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "pyscript/ha_pyscript_automations.py",
@@ -6265,6 +6342,171 @@ class TestPyScriptCompatibility:
                             " quote the annotation as a"
                             " string literal."
                         )
+
+    def test_no_module_attribute_iteration(self) -> None:
+        """Ban ``for X in <reloadable>.Attr:`` iteration.
+
+        Pyscript's AST evaluator wraps values pulled from an
+        imported-module attribute in ``EvalLocalVar``. The
+        resulting object supports ``getattr`` and ``()`` calls
+        but not the iterator protocol -- iterating it raises
+        ``TypeError: 'EvalLocalVar' object is not iterable``.
+
+        This pattern typically appears when the wrapper
+        iterates an enum defined in a logic module, e.g.::
+
+            for rt in zrm.RouteType:
+                if rt.value == wanted:
+                    return rt
+
+        The fix is to expose a lookup helper in the module
+        itself (``zrm.route_type_by_value(...)``) so the
+        iteration happens in the module's own native-Python
+        scope; the wrapper then calls the helper via module
+        attribute, which pyscript handles correctly.
+
+        Verified empirically 2026-04-24: the wrapper's
+        ``_zrm_path_from_storage`` raised this error on
+        every reconcile that tried to hydrate stored state.
+        """
+        # Reloadable modules whose attributes are unsafe to
+        # iterate from wrapper scope. Same set
+        # ``TestImportBan._RELOAD_MODULES`` covers for the
+        # ``from X import Y`` ban.
+        reloadable = frozenset(
+            {
+                "helpers",
+                "device_watchdog",
+                "entity_defaults_watchdog",
+                "reference_watchdog",
+                "sensor_threshold_switch_controller",
+                "trigger_entity_controller",
+                "zwave_route_manager",
+                "zwave_js_ui_bridge",
+            }
+        )
+
+        for path in self._pyscript_files():
+            src = path.read_text()
+            tree = ast.parse(src, str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.For):
+                    continue
+                tgt = node.iter
+                if not isinstance(tgt, ast.Attribute):
+                    continue
+                if not isinstance(tgt.value, ast.Name):
+                    continue
+                mod_name = tgt.value.id
+                if mod_name not in reloadable:
+                    continue
+                rel = path.relative_to(REPO_ROOT)
+                raise AssertionError(
+                    f"{rel}:{node.lineno} iterates"
+                    f" ``{mod_name}.{tgt.attr}`` -- PyScript's"
+                    " AST evaluator wraps imported-module"
+                    " attributes in EvalLocalVar, which raises"
+                    " ``TypeError: 'EvalLocalVar' object is not"
+                    " iterable``. Add a lookup helper in the"
+                    f" ``{mod_name}`` module and call it via"
+                    f" ``{mod_name}.<helper>(...)`` from the"
+                    " wrapper."
+                )
+
+    def test_no_enum_identity_comparison_against_module_member(
+        self,
+    ) -> None:
+        """Ban ``X == <reloadable>.Enum.MEMBER`` comparisons.
+
+        pyscript re-creates enum instances across the
+        AST / native-Python boundary (``@pyscript_executor``
+        workers). Two enum members with the same ``.value``
+        compare unequal because ``Enum.__eq__`` uses identity,
+        and the instances are from different module loads.
+        Accessing the class attribute (``zrm.RouteActionKind``)
+        also routes through pyscript's EvalLocalVar wrapping,
+        compounding the identity mismatch.
+
+        Compare by ``.value`` string instead (or build a
+        ``{value: member}`` dict inside the module and look up
+        via a helper).
+
+        Verified empirically 2026-04-24: the ZRM apply
+        dispatcher's
+        ``if kind == zrm.RouteActionKind.CLEAR_PRIORITY_SUC_RETURN_ROUTES:``
+        always fell through to the "unknown RouteActionKind"
+        branch, so every CLEAR / SET action landed as an
+        apply-failure notification instead of actually being
+        sent to the bridge.
+        """
+        reloadable = frozenset(
+            {
+                "helpers",
+                "device_watchdog",
+                "entity_defaults_watchdog",
+                "reference_watchdog",
+                "sensor_threshold_switch_controller",
+                "trigger_entity_controller",
+                "zwave_route_manager",
+                "zwave_js_ui_bridge",
+            }
+        )
+
+        def _deep_attr_module(node: ast.AST) -> str | None:
+            """If ``node`` is ``<name>.<attr>.<attr>`` rooted
+            at a reloadable module, return the module name.
+            """
+            if not isinstance(node, ast.Attribute):
+                return None
+            inner = node.value
+            # Walk outward through Attribute chains (class.member,
+            # or deeper).
+            while isinstance(inner, ast.Attribute):
+                inner = inner.value
+            if not isinstance(inner, ast.Name):
+                return None
+            return inner.id
+
+        for path in self._pyscript_files():
+            src = path.read_text()
+            tree = ast.parse(src, str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                if not any(isinstance(op, ast.Eq) for op in node.ops):
+                    continue
+                # Check every side of the comparison for a
+                # ``module.Class.MEMBER`` reference.
+                sides: list[ast.AST] = [node.left, *node.comparators]
+                for side in sides:
+                    mod_name = _deep_attr_module(side)
+                    if mod_name is None or mod_name not in reloadable:
+                        continue
+                    # Require at least two levels deep
+                    # (``module.Class.MEMBER``) to avoid false
+                    # positives on plain ``module.constant``
+                    # comparisons. Enum-member access always
+                    # has that shape.
+                    depth = 0
+                    cur: ast.AST = side
+                    while isinstance(cur, ast.Attribute):
+                        depth += 1
+                        cur = cur.value
+                    if depth < 2:
+                        continue
+                    rel = path.relative_to(REPO_ROOT)
+                    raise AssertionError(
+                        f"{rel}:{node.lineno} compares against"
+                        f" ``{ast.unparse(side)}`` -- pyscript"
+                        " re-creates enum instances across the"
+                        " AST / native-Python boundary and the"
+                        " class attribute goes through"
+                        " EvalLocalVar, so enum-identity"
+                        " comparisons always return False."
+                        " Compare by ``.value`` string instead"
+                        " (e.g. ``kind.value =="
+                        ' "set_application_route"``).'
+                    )
 
 
 if __name__ == "__main__":

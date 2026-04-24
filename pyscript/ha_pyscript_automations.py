@@ -22,13 +22,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from helpers import (  # noqa: F821
-    DeviceEntry,
-    EntityRegistryInfo,
-    PersistentNotification,
-    md_escape,
-    on_interval,
-)
+import helpers  # noqa: F821
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -185,7 +179,7 @@ def _notification_prefix(
 def _sweep_orphan_notifications(
     prefix: str,
     active_ids: "set[str] | None",
-    notifications: "list[PersistentNotification]",
+    notifications: "list[helpers.PersistentNotification]",
     keep_pattern: str | None = None,
 ) -> None:
     """Append dismissals for orphaned per-instance notifications.
@@ -226,7 +220,7 @@ def _sweep_orphan_notifications(
         if keep_pattern is not None and keep_pattern in nid:
             continue
         notifications.append(
-            PersistentNotification(  # noqa: F821
+            helpers.PersistentNotification(  # noqa: F821
                 active=False,
                 notification_id=nid,
                 title="",
@@ -237,7 +231,7 @@ def _sweep_orphan_notifications(
 
 def _sweep_and_process_notifications(
     hass_obj: Any,
-    notifications: "list[PersistentNotification]",
+    notifications: "list[helpers.PersistentNotification]",
     instance_id: str,
     notif_prefix: str,
     keep_pattern: str | None = None,
@@ -269,7 +263,7 @@ def _sweep_and_process_notifications(
 
 
 def _process_persistent_notifications(
-    notifications: "list[PersistentNotification]",
+    notifications: "list[helpers.PersistentNotification]",
     instance_id: str,
     active_ids: set[str] | None = None,
 ) -> None:
@@ -295,7 +289,7 @@ def _process_persistent_notifications(
     link_prefix = ""
     if auto_id:
         link_prefix = (
-            f"Automation: [{md_escape(auto_name)}]"
+            f"Automation: [{helpers.md_escape(auto_name)}]"
             f"(/config/automation/edit/{auto_id})\n"
         )
 
@@ -539,7 +533,7 @@ def _get_all_integration_ids(
 def _discover_devices(
     hass_obj: object,
     integrations: list[str] | None = None,
-) -> "dict[str, DeviceEntry]":
+) -> "dict[str, helpers.DeviceEntry]":
     """Discover devices across all integrations.
 
     Always scans every integration for accurate
@@ -550,7 +544,7 @@ def _discover_devices(
     """
     all_ids = _get_all_integration_ids(hass_obj)
     populate = set(integrations) if integrations is not None else None
-    device_map: dict[str, DeviceEntry] = {}
+    device_map: dict[str, helpers.DeviceEntry] = {}
     for integration_id in all_ids:
         try:
             entities = _get_integration_entities(
@@ -574,7 +568,7 @@ def _discover_devices(
             dev_id = info["id"]
             if dev_id not in device_map:
                 url = f"/config/devices/device/{dev_id}"
-                device_map[dev_id] = DeviceEntry(
+                device_map[dev_id] = helpers.DeviceEntry(
                     id=dev_id,
                     url=url,
                     name=info["name"],
@@ -738,10 +732,10 @@ def _build_config_error_notification(
     service_label: str,
     debug_logging: bool,
     tag: str,
-) -> PersistentNotification:
+) -> helpers.PersistentNotification:
     """Build a config-error persistent notification.
 
-    Returns a PersistentNotification the caller dispatches.
+    Returns a helpers.PersistentNotification the caller dispatches.
     ``active=True`` when errors is non-empty; otherwise
     ``active=False`` so any prior config_error notif gets
     dismissed. ``errors`` entries become bullet points
@@ -770,7 +764,7 @@ def _build_config_error_notification(
                 errors,
             )
 
-    return PersistentNotification(
+    return helpers.PersistentNotification(
         active=bool(errors),
         notification_id=notif_id,
         title=f"{name}: Invalid Configuration",
@@ -1046,13 +1040,13 @@ def _build_blueprint_mismatch_notification(
     blueprint_basename: str,
     missing: list[str],
     extras: list[str],
-) -> PersistentNotification:
+) -> helpers.PersistentNotification:
     """Build the blueprint-vs-pyscript mismatch notification."""
     notif_id = f"{notif_prefix}blueprint_mismatch"
     if not missing and not extras:
         # Empty input returns an inactive notification
         # so any stale one gets dismissed by the sweep.
-        return PersistentNotification(
+        return helpers.PersistentNotification(
             active=False,
             notification_id=notif_id,
             title="",
@@ -1087,7 +1081,7 @@ def _build_blueprint_mismatch_notification(
         " ha-pyscript-automations repository is installed"
         " correctly and restart Home Assistant.",
     )
-    return PersistentNotification(
+    return helpers.PersistentNotification(
         active=True,
         notification_id=notif_id,
         title=f"{service_label}: blueprint vs pyscript mismatch",
@@ -1177,10 +1171,7 @@ def sensor_threshold_switch_controller(
     debug_logging: bool,
 ) -> None:
     """Evaluate sensor threshold switch controller."""
-    from sensor_threshold_switch_controller import (  # noqa: F821
-        Action,
-        handle_service_call,
-    )
+    import sensor_threshold_switch_controller as stsc  # noqa: F821
 
     now = datetime.now()
     auto_name = _automation_name(instance_id)
@@ -1212,7 +1203,7 @@ def sensor_threshold_switch_controller(
         pass
 
     # Evaluate
-    result = handle_service_call(
+    result = stsc.handle_service_call(
         state_data=state_data,
         switch_name=switch_name,
         current_time=now,
@@ -1230,11 +1221,11 @@ def sensor_threshold_switch_controller(
     )
 
     # Execute action
-    if result.action == Action.TURN_ON:
+    if result.action == stsc.Action.TURN_ON:
         homeassistant.turn_on(  # noqa: F821
             entity_id=target_switch_entity,
         )
-    elif result.action == Action.TURN_OFF:
+    elif result.action == stsc.Action.TURN_OFF:
         homeassistant.turn_off(  # noqa: F821
             entity_id=target_switch_entity,
         )
@@ -1419,8 +1410,9 @@ def _run_in_executor(
 ) -> object:
     """Import and call a logic module function in a worker thread.
 
-    Compiled to native Python by ``@pyscript_executor``.
-    ``func_name`` is ``"module_name.function_name"``.
+    Compiled to native Python by ``@pyscript_executor`` and
+    dispatched into a thread pool. ``func_name`` is
+    ``"module_name.function_name"``.
     """
     import importlib
 
@@ -1458,13 +1450,7 @@ def device_watchdog(
     debug_logging: bool,
 ) -> None:
     """Evaluate device health across integrations."""
-    from device_watchdog import (  # noqa: F821
-        CHECK_DISABLED_DIAGNOSTICS,
-        Config,
-        DeviceInfo,
-        EntityInfo,
-        RegistryEntry,
-    )
+    import device_watchdog as dw  # noqa: F821
 
     start_time = time.monotonic()
     now = datetime.now(tz=UTC)
@@ -1474,10 +1460,10 @@ def device_watchdog(
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
     if trigger_platform == "time_pattern":
-        if not on_interval(check_interval_minutes, now, instance_id):
+        if not helpers.on_interval(check_interval_minutes, now, instance_id):
             return
 
-    config = Config(
+    config = dw.Config(
         device_exclude_regex=device_exclude_regex,
         entity_id_exclude_regex=entity_id_exclude_regex,
         monitored_entity_domains=monitored_entity_domains,
@@ -1503,7 +1489,7 @@ def device_watchdog(
     # Discover devices (scans all integrations for
     # accurate multi-integration detection; only
     # populates entity IDs for target integrations).
-    if CHECK_DISABLED_DIAGNOSTICS in enabled_checks:
+    if dw.CHECK_DISABLED_DIAGNOSTICS in enabled_checks:
         import homeassistant.helpers.entity_registry as er  # noqa: F821
 
         ent_reg = er.async_get(hass)  # noqa: F821
@@ -1513,20 +1499,20 @@ def device_watchdog(
         list(target_integrations),
     )
 
-    # Build DeviceInfo with state + registry data.
+    # Build dw.DeviceInfo with state + registry data.
     devices = []
     for dev_entry in device_map.values():
         # Build registry entries if diagnostic check
         # is enabled (requires entity registry access)
-        registry_entries: list[RegistryEntry] = []
-        if CHECK_DISABLED_DIAGNOSTICS in enabled_checks:
+        registry_entries: list[dw.RegistryEntry] = []
+        if dw.CHECK_DISABLED_DIAGNOSTICS in enabled_checks:
             all_reg_entries = er.async_entries_for_device(
                 ent_reg,
                 dev_entry.id,
                 include_disabled_entities=True,
             )
             registry_entries = [
-                RegistryEntry(
+                dw.RegistryEntry(
                     entity_id=e.entity_id,
                     original_name=(e.original_name or ""),
                     platform=e.platform or "",
@@ -1548,7 +1534,7 @@ def device_watchdog(
                     ent_state, last_reported = _read_entity_state(eid)
                     if ent_state is not None:
                         entity_infos.append(
-                            EntityInfo(
+                            dw.EntityInfo(
                                 entity_id=eid,
                                 state=str(ent_state),
                                 last_reported=last_reported,
@@ -1559,7 +1545,7 @@ def device_watchdog(
                     continue
 
         devices.append(
-            DeviceInfo(
+            dw.DeviceInfo(
                 de=dev_entry,
                 entities=entity_infos,
                 registry_entries=registry_entries,
@@ -1635,7 +1621,7 @@ def device_watchdog_blueprint_argparse(
     debug_logging_raw: str,
 ) -> None:
     """Parse and validate DW blueprint inputs."""
-    from device_watchdog import CHECK_ALL  # noqa: F821
+    import device_watchdog as dw  # noqa: F821
 
     include_integrations = _normalize_list(include_integrations_raw)
     exclude_integrations = _normalize_list(exclude_integrations_raw)
@@ -1684,10 +1670,10 @@ def device_watchdog_blueprint_argparse(
         "entity_id_exclude_regex",
         errors,
     )
-    unknown_checks = [c for c in enabled_checks if c not in CHECK_ALL]
+    unknown_checks = [c for c in enabled_checks if c not in dw.CHECK_ALL]
     if unknown_checks:
         bad = ", ".join(sorted(unknown_checks))
-        valid = ", ".join(sorted(CHECK_ALL))
+        valid = ", ".join(sorted(dw.CHECK_ALL))
         errors.append(
             f"enabled_checks: unknown value(s) {bad}. Valid values: {valid}.",
         )
@@ -1695,7 +1681,7 @@ def device_watchdog_blueprint_argparse(
     # is also all three; this just mirrors the
     # include_integrations convention of empty == all).
     if not enabled_checks:
-        enabled_checks = CHECK_ALL
+        enabled_checks = dw.CHECK_ALL
 
     config_error = _build_config_error_notification(
         errors,
@@ -1782,13 +1768,7 @@ def trigger_entity_controller(
     debug_logging: bool,
 ) -> None:
     """Control entities with trigger-based activation."""
-    from trigger_entity_controller import (  # noqa: F821
-        ActionType,
-        Config,
-        Inputs,
-        determine_event_type,
-        evaluate,
-    )
+    import trigger_entity_controller as tec  # noqa: F821
 
     now = datetime.now()
     auto_name = _automation_name(instance_id)
@@ -1796,7 +1776,7 @@ def trigger_entity_controller(
 
     # Determine event type
     all_disabling = trigger_disabling_entities + auto_off_disabling_entities
-    event_type = determine_event_type(
+    event_type = tec.determine_event_type(
         trigger_entity_id,
         trigger_to_state,
         trigger_entities,
@@ -1856,8 +1836,8 @@ def trigger_entity_controller(
     except Exception:
         pass
 
-    # Build config and inputs, evaluate
-    config = Config(
+    # Build config and inputs, tec.evaluate
+    config = tec.Config(
         controlled_entities=controlled_entities,
         auto_off_minutes=auto_off_minutes,
         auto_off_disabling_entities=auto_off_disabling_entities,
@@ -1870,7 +1850,7 @@ def trigger_entity_controller(
         notification_suffix=notification_suffix,
         notification_events=notification_events,
     )
-    inputs = Inputs(
+    inputs = tec.Inputs(
         current_time=now,
         event_type=event_type,
         changed_entity=trigger_entity_id,
@@ -1882,15 +1862,15 @@ def trigger_entity_controller(
         auto_off_at=auto_off_at,
         friendly_names=friendly_names,
     )
-    result = evaluate(config, inputs)
+    result = tec.evaluate(config, inputs)
 
     # Execute action
-    if result.action == ActionType.TURN_ON:
+    if result.action == tec.ActionType.TURN_ON:
         for eid in result.target_entities:
             homeassistant.turn_on(  # noqa: F821
                 entity_id=eid,
             )
-    elif result.action == ActionType.TURN_OFF:
+    elif result.action == tec.ActionType.TURN_OFF:
         for eid in result.target_entities:
             homeassistant.turn_off(  # noqa: F821
                 entity_id=eid,
@@ -1967,10 +1947,7 @@ def trigger_entity_controller_blueprint_argparse(
     debug_logging_raw: str,
 ) -> None:
     """Parse and validate TEC blueprint inputs."""
-    from trigger_entity_controller import (  # noqa: F821
-        parse_notification_events,
-        parse_period,
-    )
+    import trigger_entity_controller as tec  # noqa: F821
 
     debug_logging = _parse_bool(debug_logging_raw)
     auto_name = _automation_name(instance_id)
@@ -1987,12 +1964,14 @@ def trigger_entity_controller_blueprint_argparse(
     auto_off_disabling_entities = _normalize_list(
         auto_off_disabling_entities_raw,
     )
-    notification_events = parse_notification_events(
+    notification_events = tec.parse_notification_events(
         _normalize_list(notification_events_raw),
     )
-    trigger_period = parse_period(str(trigger_period_raw))
+    trigger_period = tec.parse_period(
+        str(trigger_period_raw),
+    )
     trigger_forces_on = _parse_bool(trigger_forces_on_raw)
-    trigger_disabling_period = parse_period(
+    trigger_disabling_period = tec.parse_period(
         str(trigger_disabling_period_raw),
     )
     notification_prefix = str(notification_prefix_raw or "")
@@ -2115,7 +2094,7 @@ async def trigger_entity_controller_blueprint_entrypoint(
 def _get_entity_info(
     hass_obj: object,
     entity_id: str,
-) -> "EntityRegistryInfo | None":
+) -> "helpers.EntityRegistryInfo | None":
     """Return registry fields for an entity.
 
     Returns None if the entity is not in the registry.
@@ -2126,7 +2105,7 @@ def _get_entity_info(
     entry = ent_reg.async_get(entity_id)
     if not entry:
         return None
-    return EntityRegistryInfo(
+    return helpers.EntityRegistryInfo(
         entity_id=entry.entity_id,
         name=entry.name,
         original_name=entry.original_name,
@@ -2203,12 +2182,10 @@ def _discover_deviceless_entities(
     logic module's collision-suffix classifier still sees
     every peer that could justify a ``_N`` suffix.
     """
+    import entity_defaults_watchdog as edw  # noqa: F821
     import homeassistant.helpers.entity_registry as er  # noqa: F821
-    from entity_defaults_watchdog import (  # noqa: F821
-        DevicelessEntityInfo,
-    )
 
-    entities: list[DevicelessEntityInfo] = []
+    entities: list[edw.DevicelessEntityInfo] = []
     peers: dict[str, set[str]] = {}
     # Track every registry entity_id (including device-
     # attached and disabled entries) so the state-list
@@ -2246,7 +2223,7 @@ def _discover_deviceless_entities(
             entry.name or entry.original_name or _default_friendly_name(obj),
         )
         entities.append(
-            DevicelessEntityInfo(
+            edw.DevicelessEntityInfo(
                 entity_id=entry.entity_id,
                 effective_name=effective,
                 platform=entry.platform,
@@ -2280,7 +2257,7 @@ def _discover_deviceless_entities(
         if not fn:
             fn = _default_friendly_name(obj)
         entities.append(
-            DevicelessEntityInfo(
+            edw.DevicelessEntityInfo(
                 entity_id=eid,
                 effective_name=fn,
                 platform=None,
@@ -2313,12 +2290,7 @@ def entity_defaults_watchdog(
     debug_logging: bool,
 ) -> None:
     """Detect entity ID and name drift."""
-    from entity_defaults_watchdog import (  # noqa: F821
-        DEVICELESS_DOMAINS,
-        Config,
-        DeviceInfo,
-        EntityDriftInfo,
-    )
+    import entity_defaults_watchdog as edw  # noqa: F821
 
     start_time = time.monotonic()
     now = datetime.now(tz=UTC)
@@ -2328,10 +2300,10 @@ def entity_defaults_watchdog(
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
     if trigger_platform == "time_pattern":
-        if not on_interval(check_interval_minutes, now, instance_id):
+        if not helpers.on_interval(check_interval_minutes, now, instance_id):
             return
 
-    config = Config(
+    config = edw.Config(
         drift_checks=drift_checks,
         device_exclude_regex=device_exclude_regex,
         exclude_entity_ids=exclude_entities,
@@ -2365,7 +2337,7 @@ def entity_defaults_watchdog(
     # Compute drift data.
     devices = []
     for dev_entry in device_map.values():
-        entity_infos: list[EntityDriftInfo] = []
+        entity_infos: list[edw.EntityDriftInfo] = []
         for eids in dev_entry.integration_entities.values():
             for eid in eids:
                 reg_info = _get_entity_info(
@@ -2394,7 +2366,7 @@ def entity_defaults_watchdog(
                     )
 
                 entity_infos.append(
-                    EntityDriftInfo(
+                    edw.EntityDriftInfo(
                         entity_id=eid,
                         has_entity_name=(reg_info.has_entity_name),
                         has_name_override=has_name_override,
@@ -2405,7 +2377,7 @@ def entity_defaults_watchdog(
                 )
 
         devices.append(
-            DeviceInfo(
+            edw.DeviceInfo(
                 de=dev_entry,
                 entities=entity_infos,
             ),
@@ -2419,7 +2391,7 @@ def entity_defaults_watchdog(
     # integration-filtered).
     deviceless_entities, peers_by_domain = _discover_deviceless_entities(
         hass,  # noqa: F821
-        DEVICELESS_DOMAINS,
+        edw.DEVICELESS_DOMAINS,
         target_integrations,
     )
 
@@ -2498,7 +2470,7 @@ def entity_defaults_watchdog_blueprint_argparse(
     debug_logging_raw: str,
 ) -> None:
     """Parse and validate EDW blueprint inputs."""
-    from entity_defaults_watchdog import CHECK_ALL  # noqa: F821
+    import entity_defaults_watchdog as edw  # noqa: F821
 
     drift_checks = _normalize_frozenset(drift_checks_raw)
     include_integrations = _normalize_list(include_integrations_raw)
@@ -2525,10 +2497,10 @@ def entity_defaults_watchdog_blueprint_argparse(
         errors.append(f"blueprint input: max_device_notifications: {err}")
     if hass_err := _check_hass_available():
         errors.append(hass_err)
-    unknown_checks = [c for c in drift_checks if c not in CHECK_ALL]
+    unknown_checks = [c for c in drift_checks if c not in edw.CHECK_ALL]
     if unknown_checks:
         bad = ", ".join(sorted(unknown_checks))
-        valid = ", ".join(sorted(CHECK_ALL))
+        valid = ", ".join(sorted(edw.CHECK_ALL))
         errors.append(
             f"drift_checks: unknown value(s) {bad}. Valid values: {valid}.",
         )
@@ -2536,7 +2508,7 @@ def entity_defaults_watchdog_blueprint_argparse(
     # device_watchdog and the include_integrations
     # convention of empty == all).
     if not drift_checks:
-        drift_checks = CHECK_ALL
+        drift_checks = edw.CHECK_ALL
     device_exclude_regex = _validate_and_join_patterns(
         device_exclude_regex_raw,
         "device_exclude_regex",
@@ -2629,19 +2601,15 @@ def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
     """
     import homeassistant.helpers.device_registry as dr  # noqa: F821
     import homeassistant.helpers.entity_registry as er  # noqa: F821
-    from reference_watchdog import (  # noqa: F821
-        SEED_DOMAINS,
-        RegistryEntry,
-        TruthSet,
-    )
+    import reference_watchdog as rw  # noqa: F821
 
     entity_ids: set[str] = set()
     disabled_entity_ids: set[str] = set()
     device_ids: set[str] = set()
     service_names: set[str] = set()
     label_ids: set[str] = set()
-    domains: set[str] = set(SEED_DOMAINS)
-    registry: dict[str, RegistryEntry] = {}
+    domains: set[str] = set(rw.SEED_DOMAINS)
+    registry: dict[str, rw.RegistryEntry] = {}
     entity_by_unique_id: dict[tuple[str, str], str] = {}
     config_entries_with_entities: set[str] = set()
 
@@ -2655,7 +2623,7 @@ def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
             disabled_entity_ids.add(eid)
         platform = entry.platform or ""
         unique_id = str(entry.unique_id or "")
-        reg_entry = RegistryEntry(
+        reg_entry = rw.RegistryEntry(
             entity_id=eid,
             platform=platform,
             unique_id=unique_id,
@@ -2710,7 +2678,7 @@ def _rw_build_truth_set(hass_obj: Any) -> "TruthSet":
     except (ImportError, AttributeError):
         pass
 
-    return TruthSet(
+    return rw.TruthSet(
         entity_ids=frozenset(entity_ids),
         disabled_entity_ids=frozenset(disabled_entity_ids),
         device_ids=frozenset(device_ids),
@@ -2741,7 +2709,7 @@ def reference_watchdog(
     debug_logging: bool,
 ) -> None:
     """Scan HA config for broken entity and device references."""
-    from reference_watchdog import Config  # noqa: F821
+    import reference_watchdog as rw  # noqa: F821
 
     start_time = time.monotonic()
     now = datetime.now(tz=UTC)
@@ -2751,10 +2719,10 @@ def reference_watchdog(
     # Interval gating (skip for timed triggers only;
     # manual UI runs always execute)
     if trigger_platform == "time_pattern":
-        if not on_interval(check_interval_minutes, now, instance_id):
+        if not helpers.on_interval(check_interval_minutes, now, instance_id):
             return
 
-    config = Config(
+    config = rw.Config(
         exclude_paths=exclude_paths,
         exclude_integrations=exclude_integrations,
         exclude_entities=exclude_entities,
@@ -2776,10 +2744,7 @@ def reference_watchdog(
     except AttributeError:
         return
 
-    # Run the heavy work in a worker thread so the event
-    # loop stays responsive. _run_in_executor is compiled
-    # to native Python via @pyscript_executor and dispatches
-    # the call into a thread pool.
+    # Run evaluation in a worker thread.
     ev = _run_in_executor(
         "reference_watchdog.run_evaluation",
         config_dir,
@@ -3056,31 +3021,37 @@ def _zrm_bridge_apply_actions(
     import asyncio
 
     import zwave_js_ui_bridge as bridge
-    import zwave_route_manager as zrm
 
     results: list[tuple[Any, Any]] = []
 
+    # Avoid ``kind == zrm.RouteActionKind.X`` identity checks:
+    # pyscript re-creates enum instances across the AST /
+    # native-Python boundary, so the ``action.kind`` passed
+    # into this ``@pyscript_executor`` from AST-evaluated
+    # code is *not* the same instance as the native-imported
+    # module's enum member. Comparing by ``.value`` string
+    # sidesteps the identity mismatch.
     async def _dispatch(client: Any, action: Any) -> Any:
-        kind = action.kind
-        if kind == zrm.RouteActionKind.SET_APPLICATION_ROUTE:
+        kind_value = action.kind.value
+        if kind_value == "set_application_route":
             return await client.set_application_route(
                 action.node_id,
                 action.repeaters,
                 action.route_speed,
             )
-        if kind == zrm.RouteActionKind.CLEAR_APPLICATION_ROUTE:
+        if kind_value == "clear_application_route":
             return await client.remove_application_route(action.node_id)
-        if kind == zrm.RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE:
+        if kind_value == "set_priority_suc_return_route":
             return await client.assign_priority_suc_return_route(
                 action.node_id,
                 action.repeaters,
                 action.route_speed,
             )
-        if kind == zrm.RouteActionKind.CLEAR_PRIORITY_SUC_RETURN_ROUTES:
+        if kind_value == "clear_priority_suc_return_routes":
             return await client.delete_suc_return_routes(action.node_id)
         return bridge.ApiResult(
             success=False,
-            message=f"unknown RouteActionKind: {kind}",
+            message=f"unknown RouteActionKind: {action.kind!r}",
             api_echo=None,
             result=None,
         )
@@ -3278,7 +3249,7 @@ def _zrm_entity_bullet_ref(
     """
     if not entity_id:
         return ""
-    escaped = md_escape(entity_id)
+    escaped = helpers.md_escape(entity_id)
     if device_id:
         return f"[`{escaped}`](/config/devices/device/{device_id})"
     return f"`{escaped}`"
@@ -3305,15 +3276,16 @@ def _zrm_error_bullets(errors: list[Any]) -> list[str]:
 def _zrm_api_notification(
     notif_prefix: str,
     error: str,
-) -> PersistentNotification:
+) -> helpers.PersistentNotification:
     """Single API-availability notification."""
     title = "Z-Wave Route Manager: API unavailable"
+    escaped = helpers.md_escape(error)
     body = (
-        f"Could not reach or use the Z-Wave JS UI API: {md_escape(error)}"
+        f"Could not reach or use the Z-Wave JS UI API: {escaped}"
         "\n\nCheck that the Z-Wave JS addon is running and "
         "that the blueprint's host/port inputs match the addon."
     )
-    return PersistentNotification(
+    return helpers.PersistentNotification(
         active=bool(error),
         notification_id=f"{notif_prefix}api",
         title=title,
@@ -3325,7 +3297,7 @@ def _zrm_apply_notification(
     notif_prefix: str,
     action: Any,
     api_result: Any,
-) -> PersistentNotification:
+) -> helpers.PersistentNotification:
     """Per-node apply-failure notification."""
     title = f"Z-Wave Route Manager: apply failed for node {action.node_id}"
     message_lines = [
@@ -3337,10 +3309,9 @@ def _zrm_apply_notification(
     if action.repeaters:
         reps = ", ".join([str(r) for r in action.repeaters])
         message_lines.append(f"Repeaters: {reps}")
-    message_lines.append(
-        f"Server response: {md_escape(api_result.message or '(empty)')}",
-    )
-    return PersistentNotification(
+    response = helpers.md_escape(api_result.message or "(empty)")
+    message_lines.append(f"Server response: {response}")
+    return helpers.PersistentNotification(
         active=True,
         notification_id=f"{notif_prefix}apply_{action.node_id}",
         title=title,
@@ -3355,7 +3326,7 @@ def _zrm_timeout_notification(
     old_requested_at: datetime,
     timeout_count: int,
     pending_timeout_hours: int,
-) -> PersistentNotification:
+) -> helpers.PersistentNotification:
     """One-shot notification for a timed-out route attempt.
 
     The notification ID is keyed to the attempt that just
@@ -3378,7 +3349,7 @@ def _zrm_timeout_notification(
         " device from the YAML config to stop further retries."
     )
     safe_ts = old_requested_at.isoformat().replace(":", "_").replace(".", "_")
-    return PersistentNotification(
+    return helpers.PersistentNotification(
         active=True,
         notification_id=(
             f"{notif_prefix}timeout_{node_id}_{route_type.value}_{safe_ts}"
@@ -3396,17 +3367,23 @@ def _zrm_expected_api_for_kind(kind: Any) -> str:
     clear-app actions dispatch ``setPriorityRoute`` under the
     hood; clearing is just a ``setPriorityRoute`` with empty
     repeaters.
+
+    Compares ``kind.value`` strings rather than enum identity:
+    the ``kind`` argument often arrives across the pyscript
+    AST / native-Python boundary, where enum instances are
+    re-created and fail identity comparison against the
+    module's own members.
     """
     import zwave_js_ui_bridge as bridge
-    import zwave_route_manager as zrm
 
     # Module attributes are typed ``Any`` -- cast to str so
     # this function's declared return type is honoured.
-    if kind == zrm.RouteActionKind.SET_APPLICATION_ROUTE:
+    kind_value = kind.value
+    if kind_value == "set_application_route":
         return str(bridge.API_SET_APPLICATION_ROUTE)
-    if kind == zrm.RouteActionKind.CLEAR_APPLICATION_ROUTE:
+    if kind_value == "clear_application_route":
         return str(bridge.API_SET_APPLICATION_ROUTE)
-    if kind == zrm.RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE:
+    if kind_value == "set_priority_suc_return_route":
         return str(bridge.API_ASSIGN_PRIORITY_SUC_RETURN_ROUTE)
     return str(bridge.API_DELETE_SUC_RETURN_ROUTES)
 
@@ -3517,15 +3494,19 @@ def _zrm_repeaters_from_storage(raw: Any) -> list[int]:
 
 
 def _zrm_speed_from_storage(raw: Any) -> Any:
-    """Look up the ``RouteSpeed`` matching a stored speed string."""
+    """Look up the ``RouteSpeed`` matching a stored speed string.
+
+    Iteration over ``bridge.RouteSpeed`` from wrapper scope fails
+    with ``TypeError: 'EvalLocalVar' object is not iterable``
+    because pyscript's AST evaluator wraps imported-module
+    attribute values. Delegate the lookup to a helper inside
+    the module so iteration happens in native-Python scope.
+    """
     import zwave_js_ui_bridge as bridge
 
     if not isinstance(raw, str):
         return None
-    for rs in bridge.RouteSpeed:
-        if rs.value == raw:
-            return rs
-    return None
+    return bridge.speed_by_value(raw)
 
 
 def _zrm_ts_to_storage(ts: Any) -> str:
@@ -3579,11 +3560,10 @@ def _zrm_path_from_storage(raw: Any) -> Any:
     type_str = raw.get("type")
     if not isinstance(type_str, str):
         return None
-    route_type = None
-    for rt in zrm.RouteType:
-        if rt.value == type_str:
-            route_type = rt
-            break
+    # Use the module-scope helper; iterating ``zrm.RouteType``
+    # directly from here fails under pyscript AST eval (see the
+    # comment on ``zrm.route_type_by_value``).
+    route_type = zrm.route_type_by_value(type_str)
     if route_type is None:
         return None
     reps = _zrm_repeaters_from_storage(raw.get("repeaters"))
@@ -3847,7 +3827,7 @@ def zwave_route_manager(
         return
 
     # Clear any stale config-error notification.
-    inactive_config_notif = PersistentNotification(
+    inactive_config_notif = helpers.PersistentNotification(
         active=False,
         notification_id=f"{notif_prefix}config",
         title="",
@@ -4000,7 +3980,7 @@ def zwave_route_manager(
     )
 
     # Apply actions via bridge (worker thread).
-    apply_notifications: list[PersistentNotification] = []
+    apply_notifications: list[helpers.PersistentNotification] = []
     applied_actions_by_node: dict[int, list[Any]] = {}
     failed_actions_by_node: dict[int, list[Any]] = {}
 
@@ -4132,7 +4112,7 @@ def zwave_route_manager(
     # (node, route_type, old_requested_at) tuple so each
     # retry gets its own persistent notification -- see the
     # ``keep_pattern`` arg passed to the orphan sweep below.
-    timeout_notifications: list[PersistentNotification] = []
+    timeout_notifications: list[helpers.PersistentNotification] = []
     for node_id, route_type, old_requested_at, count in reconcile.new_timeouts:
         timeout_notifications.append(
             _zrm_timeout_notification(
@@ -4150,7 +4130,7 @@ def zwave_route_manager(
     if max_notifications > 0 and len(issue_notifications) > max_notifications:
         # Keep the first N (deterministic) + a cap summary.
         kept = issue_notifications[:max_notifications]
-        cap_summary = PersistentNotification(
+        cap_summary = helpers.PersistentNotification(
             active=True,
             notification_id=f"{notif_prefix}cap",
             title="Z-Wave Route Manager: notification cap reached",
@@ -4165,7 +4145,7 @@ def zwave_route_manager(
     else:
         # Clear any stale cap notification.
         issue_notifications.append(
-            PersistentNotification(
+            helpers.PersistentNotification(
                 active=False,
                 notification_id=f"{notif_prefix}cap",
                 title="",
@@ -4180,7 +4160,7 @@ def zwave_route_manager(
     # re-emit -- covers nodes whose apply or pending issues
     # have cleared, and nodes that have been removed from
     # the Z-Wave network entirely.
-    inactive_api_notif = PersistentNotification(
+    inactive_api_notif = helpers.PersistentNotification(
         active=False,
         notification_id=f"{notif_prefix}api",
         title="",

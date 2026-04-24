@@ -120,9 +120,9 @@ from collections.abc import Callable, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 
+import helpers
 import jinja2
 import jinja2.nodes
-from helpers import PersistentNotification, matches_pattern, md_escape
 
 _JINJA_ENV = jinja2.Environment(autoescape=False)
 
@@ -495,8 +495,8 @@ class OwnerResult:
     def to_notification(
         self,
         suppress: bool = False,
-    ) -> PersistentNotification:
-        return PersistentNotification(
+    ) -> helpers.PersistentNotification:
+        return helpers.PersistentNotification(
             active=self.has_issue and not suppress,
             notification_id=self.notification_id,
             title=self.notification_title,
@@ -757,7 +757,7 @@ def _is_entity_excluded(
     """
     if value in exclude_list:
         return True
-    if exclude_regex and matches_pattern(value, exclude_regex):
+    if exclude_regex and helpers.matches_pattern(value, exclude_regex):
         return True
     return False
 
@@ -1439,7 +1439,7 @@ def _build_notification_body(
     actively misleading.
     """
     lines: list[str] = []
-    header_label = md_escape(_owner_header_label(owner))
+    header_label = helpers.md_escape(_owner_header_label(owner))
     if owner.url_path:
         header = f"Owner: [{header_label}]({owner.url_path})"
     else:
@@ -2185,7 +2185,7 @@ def _orphan_url(platform: str) -> str:
 def _build_source_orphans_notification(
     config: Config,
     orphans: list[SourceOrphan],
-) -> PersistentNotification:
+) -> helpers.PersistentNotification:
     """One summary notification listing every orphan.
 
     Grouped by platform, each entity ID rendered as a
@@ -2198,7 +2198,7 @@ def _build_source_orphans_notification(
     """
     nid = _source_orphans_notification_id(config)
     if not orphans:
-        return PersistentNotification(
+        return helpers.PersistentNotification(
             active=False,
             notification_id=nid,
             title="",
@@ -2242,13 +2242,13 @@ def _build_source_orphans_notification(
         ]
         plat_label = platform or "(no platform)"
         url = _orphan_url(platform)
-        lines.append(f"**{md_escape(plat_label)}** ({len(entries)}):")
+        lines.append(f"**{helpers.md_escape(plat_label)}** ({len(entries)}):")
         for o in entries:
             tag = " *(disabled)*" if o.disabled else ""
             lines.append(f"- [`{o.entity_id}`]({url}){tag}")
         lines.append("")
 
-    return PersistentNotification(
+    return helpers.PersistentNotification(
         active=True,
         notification_id=nid,
         title=f"Reference watchdog: source orphans ({len(orphans)})",
@@ -2355,7 +2355,7 @@ class EvaluationResult:
     """
 
     results: list[OwnerResult]
-    notifications: list[PersistentNotification]
+    notifications: list[helpers.PersistentNotification]
     paths_included: int
     paths_excluded: int
     owners_total: int
@@ -2396,8 +2396,6 @@ def run_evaluation(
       service calls, must run on the main thread)
     - Saving state attributes
     """
-    from helpers import prepare_notifications
-
     yaml_sources = _discover_yaml_sources(config_dir)
     json_sources = _enumerate_json_sources(config_dir)
     all_sources: list[SourceInput] = []
@@ -2447,7 +2445,7 @@ def run_evaluation(
     )
 
     # Build notifications
-    notifications = prepare_notifications(
+    notifications = helpers.prepare_notifications(
         results,
         max_notifications,
         f"{config.notification_prefix}cap",

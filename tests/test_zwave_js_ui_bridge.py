@@ -44,6 +44,7 @@ from zwave_js_ui_bridge import (  # noqa: E402
     ZwaveJsUiClient,
     parse_node_info,
     parse_node_route,
+    speed_by_value,
     speed_from_bps,
     speed_from_wire,
     speed_to_wire,
@@ -79,6 +80,27 @@ class TestSpeedConversion:
     def test_wire_roundtrip(self) -> None:
         for s in list(RouteSpeed):
             assert speed_from_wire(speed_to_wire(s)) == s
+
+
+class TestSpeedByValue:
+    """``speed_by_value`` exists so the wrapper can look up a
+    ``RouteSpeed`` by its ``.value`` without iterating
+    ``bridge.RouteSpeed`` from wrapper scope. Iteration over an
+    imported-module enum fails under pyscript's AST evaluator
+    (``TypeError: 'EvalLocalVar' object is not iterable``);
+    calling this helper moves the iteration into native-Python
+    scope.
+    """
+
+    def test_known_values(self) -> None:
+        assert speed_by_value("9600") == RouteSpeed.RATE_9600
+        assert speed_by_value("40k") == RouteSpeed.RATE_40K
+        assert speed_by_value("100k") == RouteSpeed.RATE_100K
+
+    def test_unknown_returns_none(self) -> None:
+        assert speed_by_value("") is None
+        assert speed_by_value("12345") is None
+        assert speed_by_value("fast") is None
 
 
 class TestParseNodeRoute:

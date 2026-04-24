@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, auto
 
-from helpers import format_notification
+import helpers
 
 
 class EventType(Enum):
@@ -213,7 +213,7 @@ def _format_notification(
     """
     if config.notification_events and event not in config.notification_events:
         return ""
-    return format_notification(
+    return helpers.format_notification(
         message,
         config.notification_prefix,
         config.notification_suffix,

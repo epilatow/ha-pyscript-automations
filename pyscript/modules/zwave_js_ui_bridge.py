@@ -71,6 +71,23 @@ _BPS_TO_SPEED: dict[int, RouteSpeed] = {
 }
 
 
+# Lookup by the enum's ``.value`` string. Used by the wrapper's
+# ``_zrm_speed_from_storage``: pyscript's AST evaluator wraps
+# imported modules in ``EvalLocalVar``, and iterating
+# ``bridge.RouteSpeed`` from wrapper scope raises
+# ``TypeError: 'EvalLocalVar' object is not iterable``. The
+# wrapper calls this helper instead -- native-Python function
+# call through the module attribute works, and the iteration
+# happens inside the module's own scope where ``RouteSpeed`` is
+# the raw enum class.
+_SPEED_BY_VALUE: "dict[str, RouteSpeed]" = {s.value: s for s in RouteSpeed}
+
+
+def speed_by_value(value: str) -> "RouteSpeed | None":
+    """Return the ``RouteSpeed`` whose ``.value`` equals ``value``."""
+    return _SPEED_BY_VALUE.get(value)
+
+
 def speed_to_wire(speed: RouteSpeed) -> int:
     """Convert RouteSpeed to the 1/2/3 wire integer."""
     return _SPEED_TO_WIRE[speed.value]

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Any
 
-from helpers import format_notification
+import helpers
 
 
 class EventType(Enum):
@@ -558,7 +558,7 @@ def evaluate(
     result = _ctrl_evaluate(config, state, inputs)
 
     if result.notification:
-        result.notification = format_notification(
+        result.notification = helpers.format_notification(
             result.notification,
             notification_prefix,
             notification_suffix,
