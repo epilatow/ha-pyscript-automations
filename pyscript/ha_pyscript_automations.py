@@ -63,10 +63,13 @@ if TYPE_CHECKING:
         ) -> None: ...
 
     class _Service:
+        # PyScript's @service decorator accepts both sync
+        # ``def`` and ``async def`` entrypoints. The stub
+        # uses ``Callable[..., Any]`` so mypy accepts either.
         def __call__(
             self,
-            fn: Callable[..., None],
-        ) -> Callable[..., None]: ...
+            fn: Callable[..., Any],
+        ) -> Callable[..., Any]: ...
         def call(
             self,
             domain: str,
@@ -815,6 +818,227 @@ _PYSCRIPT_TRIGGER_KWARGS: frozenset[str] = frozenset(
 )
 
 
+# -- Module reload coordination ----------------------
+#
+# pyscript.reload re-parses AST-evaluated files in
+# pyscript/ but does not refresh entries in sys.modules
+# loaded via importlib.import_module (i.e. every file in
+# pyscript/modules/). Without help, logic modules and
+# helpers.py would keep running their pre-edit bytecode
+# forever.
+#
+# The dispatcher owns reload: _maybe_reload_changed_modules
+# is called at the top of every blueprint dispatch and
+# reloads any tracked module whose file mtime advanced since
+# the last check. A reader-writer lock keeps in-flight
+# service calls (readers) from racing reloads (writers) --
+# the writer drains existing readers, excludes other
+# writers, and holds off new readers while sys.modules is
+# being mutated.
+#
+# The lock is built from asyncio primitives (not threading)
+# because HA's event loop is single-threaded and every
+# @service entrypoint runs on it as a task. argparse and
+# service layers await ``@pyscript_executor`` calls, so a
+# read lock can be held across awaits; a threading-based
+# ``wait()`` would stall the whole event loop, preventing
+# the task that owns the read lock from ever running to
+# completion -- a self-deadlock on the first reload that
+# catches two concurrent dispatches. asyncio's ``wait()``
+# yields control cooperatively so the holder of the read
+# lock can still make progress.
+#
+# Mtimes are pre-seeded to 0.0 at wrapper-load time so the
+# first dispatch after every pyscript.reload force-reloads
+# every tracked module (sys.modules state may be stale
+# relative to edits the user made before triggering the
+# reload).
+
+_RELOAD_MODULES: tuple[str, ...] = (
+    "helpers",
+    "device_watchdog",
+    "entity_defaults_watchdog",
+    "reference_watchdog",
+    "sensor_threshold_switch_controller",
+    "trigger_entity_controller",
+    "zwave_route_manager",
+    "zwave_js_ui_bridge",
+)
+
+
+_MODULE_MTIMES: dict[str, float] = {name: 0.0 for name in _RELOAD_MODULES}
+
+
+# Single-element lists so mutation is visible across nested
+# helper functions without ``global`` declarations (which
+# pyscript's AST evaluator handles awkwardly). Protected by
+# the condition returned by ``_get_lock_cond()``.
+_MODULE_READER_COUNT: list[int] = [0]
+_MODULE_WRITERS_WAITING: list[int] = [0]
+_MODULE_WRITER_ACTIVE: list[bool] = [False]
+_MODULE_LOCK_COND_REF: list[Any] = [None]
+
+
+def _get_lock_cond() -> Any:
+    """Return the shared ``asyncio.Condition``, creating on first call.
+
+    Lazy construction avoids module-load-time loop binding
+    under pyscript's AST evaluator. The first dispatch fires
+    inside the HA event loop, which is the loop the
+    condition then binds to for the life of this wrapper
+    module (pyscript.reload reinstantiates the module, which
+    resets this ref to None and rebuilds the condition).
+    """
+    if _MODULE_LOCK_COND_REF[0] is None:
+        import asyncio  # noqa: PLC0415 - keep async imports local
+
+        _MODULE_LOCK_COND_REF[0] = asyncio.Condition()
+    return _MODULE_LOCK_COND_REF[0]
+
+
+async def _acquire_read_lock() -> None:
+    """Register as reader; wait out any pending or active writer."""
+    cond = _get_lock_cond()
+    async with cond:
+        while _MODULE_WRITERS_WAITING[0] > 0 or _MODULE_WRITER_ACTIVE[0]:
+            await cond.wait()
+        _MODULE_READER_COUNT[0] += 1
+
+
+async def _release_read_lock() -> None:
+    """Deregister reader; wake waiters if we were last out."""
+    cond = _get_lock_cond()
+    async with cond:
+        _MODULE_READER_COUNT[0] -= 1
+        if _MODULE_READER_COUNT[0] == 0:
+            cond.notify_all()
+
+
+async def _acquire_write_lock() -> None:
+    """Drain readers and any active writer; hold off new readers.
+
+    Increments ``_MODULE_WRITERS_WAITING`` before blocking so
+    new readers see a pending writer and wait in turn --
+    prevents a continuous trickle of reader dispatches from
+    starving the reload. Only flips ``_MODULE_WRITER_ACTIVE``
+    true once the wait condition clears, giving proper
+    writer-vs-writer exclusion.
+    """
+    cond = _get_lock_cond()
+    async with cond:
+        _MODULE_WRITERS_WAITING[0] += 1
+        try:
+            while _MODULE_READER_COUNT[0] > 0 or _MODULE_WRITER_ACTIVE[0]:
+                await cond.wait()
+            _MODULE_WRITER_ACTIVE[0] = True
+        finally:
+            _MODULE_WRITERS_WAITING[0] -= 1
+
+
+async def _release_write_lock() -> None:
+    """Clear writer-active flag and wake everyone blocked on it."""
+    cond = _get_lock_cond()
+    async with cond:
+        _MODULE_WRITER_ACTIVE[0] = False
+        cond.notify_all()
+
+
+def _module_file_mtime(name: str) -> float | None:
+    """Current file mtime of a loaded module, None if unavailable."""
+    import sys
+
+    mod = sys.modules.get(name)
+    if mod is None:
+        return None
+    path = getattr(mod, "__file__", "") or ""
+    if not path:
+        return None
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return None
+
+
+def _ensure_modules_on_sys_path() -> None:
+    """Ensure ``/config/pyscript/modules/`` is on sys.path.
+
+    ``@pyscript_executor`` functions are compiled to native
+    Python by pyscript and resolve their own ``import``
+    statements via standard ``importlib``, which doesn't
+    know about pyscript's modules directory unless it's on
+    sys.path. Without this, any executor function that
+    imports a logic module (``zwave_route_manager``,
+    ``device_watchdog``, ``zwave_js_ui_bridge``, etc.)
+    fails with ``ModuleNotFoundError``.
+
+    Called from ``_dispatch_blueprint_service`` before any
+    executor-path import in a dispatch. Idempotent.
+    Silently no-ops if ``hass`` isn't available (running
+    under test) -- real dispatch paths hit
+    ``_check_hass_available`` further in and error out
+    with a clear notification.
+    """
+    import sys
+
+    hass_obj = _hass_or_none()
+    if hass_obj is None:
+        return
+    modules_dir = os.path.join(
+        hass_obj.config.config_dir,
+        "pyscript",
+        "modules",
+    )
+    if modules_dir not in sys.path:
+        sys.path.insert(0, modules_dir)
+
+
+async def _maybe_reload_changed_modules() -> None:
+    """Reload any tracked module whose file mtime has advanced.
+
+    Walks ``_RELOAD_MODULES`` in order (helpers first so
+    dependencies see fresh symbols when their own bodies
+    re-execute). The mtime check is outside the write lock;
+    if any module looks stale we take the lock and re-check
+    inside to avoid redundant reloads when two dispatches
+    race here.
+    """
+    import importlib
+
+    pending: list[str] = []
+    for name in _RELOAD_MODULES:
+        mtime = _module_file_mtime(name)
+        if mtime is None:
+            continue
+        if mtime > _MODULE_MTIMES.get(name, 0.0):
+            pending.append(name)
+    if not pending:
+        return
+
+    await _acquire_write_lock()
+    try:
+        import sys
+
+        for name in _RELOAD_MODULES:
+            if name not in pending:
+                continue
+            mtime = _module_file_mtime(name)
+            if mtime is None:
+                continue
+            if mtime <= _MODULE_MTIMES.get(name, 0.0):
+                continue
+            mod = sys.modules.get(name)
+            if mod is None:
+                continue
+            importlib.reload(mod)
+            # Re-read mtime post-reload -- the reload itself
+            # does not bump the file's mtime, so this is
+            # normally a no-op, but a concurrent edit mid-
+            # reload would be captured here.
+            _MODULE_MTIMES[name] = _module_file_mtime(name) or mtime
+    finally:
+        await _release_write_lock()
+
+
 def _build_blueprint_mismatch_notification(
     service_label: str,
     instance_id: str,
@@ -871,7 +1095,7 @@ def _build_blueprint_mismatch_notification(
     )
 
 
-def _dispatch_blueprint_service(
+async def _dispatch_blueprint_service(
     service_label: str,
     kwargs: dict[str, object],
 ) -> None:
@@ -903,7 +1127,13 @@ def _dispatch_blueprint_service(
     )
     if missing or extras:
         return
-    argparse_fn(**blueprint_kwargs)
+    _ensure_modules_on_sys_path()
+    await _maybe_reload_changed_modules()
+    await _acquire_read_lock()
+    try:
+        argparse_fn(**blueprint_kwargs)
+    finally:
+        await _release_read_lock()
 
 
 # -- Sensor Threshold Switch Controller --------------
@@ -1172,11 +1402,11 @@ _BLUEPRINT_SERVICES[_STSC_SERVICE_LABEL] = (
 
 
 @service  # noqa: F821
-def sensor_threshold_switch_controller_blueprint_entrypoint(
+async def sensor_threshold_switch_controller_blueprint_entrypoint(
     **kwargs: object,
 ) -> None:
     """Blueprint-facing entrypoint for STSC."""
-    _dispatch_blueprint_service(_STSC_SERVICE_LABEL, kwargs)
+    await _dispatch_blueprint_service(_STSC_SERVICE_LABEL, kwargs)
 
 
 # -- Worker thread executor --------------------------
@@ -1184,53 +1414,23 @@ def sensor_threshold_switch_controller_blueprint_entrypoint(
 
 @pyscript_executor  # type: ignore[name-defined,untyped-decorator]  # noqa: F821
 def _run_in_executor(
-    modules_dir: str,
     func_name: str,
     *args: object,
 ) -> object:
     """Import and call a logic module function in a worker thread.
 
     Compiled to native Python by ``@pyscript_executor``.
-    PyScript's modules aren't in ``sys.modules``, so we
-    add the modules directory to ``sys.path`` and import
-    via standard Python's ``importlib``.
-
     ``func_name`` is ``"module_name.function_name"``.
-
-    A pyscript reload refreshes the AST-evaluated code
-    but leaves the executor thread's ``sys.modules``
-    cache alone, so subsequent calls would otherwise
-    keep running the pre-reload module object. Force a
-    reload when the module is already cached so edits
-    on disk take effect on the next tick.  We reload the
-    shared ``helpers`` module first (every logic module
-    imports from it), then the target logic module,
-    because ``importlib.reload`` re-executes the target
-    body and its ``from helpers import ...`` statements
-    would otherwise pick up stale names from a cached
-    pre-deploy ``helpers``.
     """
     import importlib
-    import sys
 
     if "." not in func_name:
         raise ValueError(
             f"func_name must be 'module.function', got {func_name!r}"
         )
-    if modules_dir not in sys.path:
-        sys.path.insert(0, modules_dir)
-
-    helpers_mod = sys.modules.get("helpers")
-    if helpers_mod is not None:
-        helpers_origin = getattr(helpers_mod, "__file__", "") or ""
-        if helpers_origin.startswith(modules_dir):
-            importlib.reload(helpers_mod)
 
     mod_name, attr_name = func_name.rsplit(".", 1)
-    if mod_name in sys.modules:
-        mod = importlib.reload(sys.modules[mod_name])
-    else:
-        mod = importlib.import_module(mod_name)
+    mod = importlib.import_module(mod_name)
     func = getattr(mod, attr_name)
     return func(*args)
 
@@ -1367,13 +1567,7 @@ def device_watchdog(
         )
 
     # Run evaluation in a worker thread.
-    modules_dir = os.path.join(
-        hass.config.config_dir,  # noqa: F821
-        "pyscript",
-        "modules",
-    )
     ev = _run_in_executor(
-        modules_dir,
         "device_watchdog.run_evaluation",
         config,
         devices,
@@ -1556,9 +1750,9 @@ _BLUEPRINT_SERVICES[_DW_SERVICE_LABEL] = (
 
 
 @service  # noqa: F821
-def device_watchdog_blueprint_entrypoint(**kwargs: object) -> None:
+async def device_watchdog_blueprint_entrypoint(**kwargs: object) -> None:
     """Blueprint-facing entrypoint for Device Watchdog."""
-    _dispatch_blueprint_service(_DW_SERVICE_LABEL, kwargs)
+    await _dispatch_blueprint_service(_DW_SERVICE_LABEL, kwargs)
 
 
 # -- Trigger Entity Controller --------------------
@@ -1908,11 +2102,11 @@ _BLUEPRINT_SERVICES[_TEC_SERVICE_LABEL] = (
 
 
 @service  # noqa: F821
-def trigger_entity_controller_blueprint_entrypoint(
+async def trigger_entity_controller_blueprint_entrypoint(
     **kwargs: object,
 ) -> None:
     """Blueprint-facing entrypoint for TEC."""
-    _dispatch_blueprint_service(_TEC_SERVICE_LABEL, kwargs)
+    await _dispatch_blueprint_service(_TEC_SERVICE_LABEL, kwargs)
 
 
 # -- Entity Defaults Watchdog ----------------------
@@ -2230,13 +2424,7 @@ def entity_defaults_watchdog(
     )
 
     # Run evaluation in a worker thread.
-    modules_dir = os.path.join(
-        hass.config.config_dir,  # noqa: F821
-        "pyscript",
-        "modules",
-    )
     ev = _run_in_executor(
-        modules_dir,
         "entity_defaults_watchdog.run_evaluation",
         config,
         devices,
@@ -2418,11 +2606,11 @@ _BLUEPRINT_SERVICES[_EDW_SERVICE_LABEL] = (
 
 
 @service  # noqa: F821
-def entity_defaults_watchdog_blueprint_entrypoint(
+async def entity_defaults_watchdog_blueprint_entrypoint(
     **kwargs: object,
 ) -> None:
     """Blueprint-facing entrypoint for Entity Defaults Watchdog."""
-    _dispatch_blueprint_service(_EDW_SERVICE_LABEL, kwargs)
+    await _dispatch_blueprint_service(_EDW_SERVICE_LABEL, kwargs)
 
 
 # -- Reference Watchdog ----------------------------
@@ -2590,12 +2778,9 @@ def reference_watchdog(
 
     # Run the heavy work in a worker thread so the event
     # loop stays responsive. _run_in_executor is compiled
-    # to native Python via @pyscript_executor; it imports
-    # the logic module via standard Python importlib and
-    # calls run_evaluation in a thread pool.
-    modules_dir = os.path.join(config_dir, "pyscript", "modules")
+    # to native Python via @pyscript_executor and dispatches
+    # the call into a thread pool.
     ev = _run_in_executor(
-        modules_dir,
         "reference_watchdog.run_evaluation",
         config_dir,
         config,
@@ -2758,9 +2943,9 @@ _BLUEPRINT_SERVICES[_RW_SERVICE_LABEL] = (
 
 
 @service  # noqa: F821
-def reference_watchdog_blueprint_entrypoint(**kwargs: object) -> None:
+async def reference_watchdog_blueprint_entrypoint(**kwargs: object) -> None:
     """Blueprint-facing entrypoint for Reference Watchdog."""
-    _dispatch_blueprint_service(_RW_SERVICE_LABEL, kwargs)
+    await _dispatch_blueprint_service(_RW_SERVICE_LABEL, kwargs)
 
 
 # -- Z-Wave Route Manager --------------------------
@@ -2768,7 +2953,6 @@ def reference_watchdog_blueprint_entrypoint(**kwargs: object) -> None:
 
 @pyscript_executor  # type: ignore[name-defined,untyped-decorator]  # noqa: F821
 def _zrm_bridge_get_nodes(
-    modules_dir: str,
     host: str,
     port: int,
     token: str,
@@ -2793,15 +2977,8 @@ def _zrm_bridge_get_nodes(
     interfering with HA's event loop.
     """
     import asyncio
-    import importlib
-    import sys
 
-    if modules_dir not in sys.path:
-        sys.path.insert(0, modules_dir)
-    if "zwave_js_ui_bridge" in sys.modules:
-        bridge = importlib.reload(sys.modules["zwave_js_ui_bridge"])
-    else:
-        bridge = importlib.import_module("zwave_js_ui_bridge")
+    import zwave_js_ui_bridge as bridge
 
     result: dict[str, Any] = {
         "ok": False,
@@ -2856,7 +3033,6 @@ _ZRM_AWAKE_APPLY_TIMEOUT = 15.0
 
 @pyscript_executor  # type: ignore[name-defined,untyped-decorator]  # noqa: F821
 def _zrm_bridge_apply_actions(
-    modules_dir: str,
     host: str,
     port: int,
     token: str,
@@ -2878,33 +3054,29 @@ def _zrm_bridge_apply_actions(
     (the user sees an apply-error notification for that node).
     """
     import asyncio
-    import importlib
-    import sys
 
-    if modules_dir not in sys.path:
-        sys.path.insert(0, modules_dir)
-    bridge = importlib.import_module("zwave_js_ui_bridge")
-    logic = importlib.import_module("zwave_route_manager")
+    import zwave_js_ui_bridge as bridge
+    import zwave_route_manager as zrm
 
     results: list[tuple[Any, Any]] = []
 
     async def _dispatch(client: Any, action: Any) -> Any:
         kind = action.kind
-        if kind == logic.RouteActionKind.SET_APPLICATION_ROUTE:
+        if kind == zrm.RouteActionKind.SET_APPLICATION_ROUTE:
             return await client.set_application_route(
                 action.node_id,
                 action.repeaters,
                 action.route_speed,
             )
-        if kind == logic.RouteActionKind.CLEAR_APPLICATION_ROUTE:
+        if kind == zrm.RouteActionKind.CLEAR_APPLICATION_ROUTE:
             return await client.remove_application_route(action.node_id)
-        if kind == logic.RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE:
+        if kind == zrm.RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE:
             return await client.assign_priority_suc_return_route(
                 action.node_id,
                 action.repeaters,
                 action.route_speed,
             )
-        if kind == logic.RouteActionKind.CLEAR_PRIORITY_SUC_RETURN_ROUTES:
+        if kind == zrm.RouteActionKind.CLEAR_PRIORITY_SUC_RETURN_ROUTES:
             return await client.delete_suc_return_routes(action.node_id)
         return bridge.ApiResult(
             success=False,
@@ -3008,19 +3180,16 @@ def _zrm_read_config_text(path: str) -> tuple[str, str | None]:
 def _zrm_build_entity_to_resolution(
     hass_obj: Any,
     nodes: list[Any],
-) -> tuple[dict[str, Any], object | None]:
+) -> tuple[dict[str, Any], Any]:
     """Build entity_id -> DeviceResolution from HA registries + nodes.
 
     Returns (map, controller_resolution_or_None).
     controller_resolution is None if we couldn't find node_id=1
     in ``nodes``, which should never happen on a healthy setup.
     """
-    import importlib
-
-    logic = importlib.import_module("zwave_route_manager")
-
     import homeassistant.helpers.device_registry as dr  # noqa: F821
     import homeassistant.helpers.entity_registry as er  # noqa: F821
+    import zwave_route_manager as zrm
 
     dev_reg = dr.async_get(hass_obj)
     ent_reg = er.async_get(hass_obj)
@@ -3066,7 +3235,7 @@ def _zrm_build_entity_to_resolution(
         ni = nodes_by_id.get(node_id)
         if ni is None:
             continue
-        entity_to_resolution[entry.entity_id] = logic.DeviceResolution(
+        entity_to_resolution[entry.entity_id] = zrm.DeviceResolution(
             entity_id=entry.entity_id,
             device_id=entry.device_id or "",
             node_id=node_id,
@@ -3081,7 +3250,7 @@ def _zrm_build_entity_to_resolution(
     controller_node = nodes_by_id.get(1)
     controller_resolution = None
     if controller_node is not None:
-        controller_resolution = logic.DeviceResolution(
+        controller_resolution = zrm.DeviceResolution(
             entity_id="",
             device_id="",
             node_id=1,
@@ -3228,17 +3397,16 @@ def _zrm_expected_api_for_kind(kind: Any) -> str:
     hood; clearing is just a ``setPriorityRoute`` with empty
     repeaters.
     """
-    import importlib  # noqa: PLC0415
+    import zwave_js_ui_bridge as bridge
+    import zwave_route_manager as zrm
 
-    logic = importlib.import_module("zwave_route_manager")
-    bridge = importlib.import_module("zwave_js_ui_bridge")
-    # importlib attributes are typed ``Any`` -- cast to str
-    # so this function's declared return type is honoured.
-    if kind == logic.RouteActionKind.SET_APPLICATION_ROUTE:
+    # Module attributes are typed ``Any`` -- cast to str so
+    # this function's declared return type is honoured.
+    if kind == zrm.RouteActionKind.SET_APPLICATION_ROUTE:
         return str(bridge.API_SET_APPLICATION_ROUTE)
-    if kind == logic.RouteActionKind.CLEAR_APPLICATION_ROUTE:
+    if kind == zrm.RouteActionKind.CLEAR_APPLICATION_ROUTE:
         return str(bridge.API_SET_APPLICATION_ROUTE)
-    if kind == logic.RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE:
+    if kind == zrm.RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE:
         return str(bridge.API_ASSIGN_PRIORITY_SUC_RETURN_ROUTE)
     return str(bridge.API_DELETE_SUC_RETURN_ROUTES)
 
@@ -3350,9 +3518,8 @@ def _zrm_repeaters_from_storage(raw: Any) -> list[int]:
 
 def _zrm_speed_from_storage(raw: Any) -> Any:
     """Look up the ``RouteSpeed`` matching a stored speed string."""
-    import importlib
+    import zwave_js_ui_bridge as bridge
 
-    bridge = importlib.import_module("zwave_js_ui_bridge")
     if not isinstance(raw, str):
         return None
     for rs in bridge.RouteSpeed:
@@ -3405,9 +3572,7 @@ def _zrm_path_to_storage(
 
 def _zrm_path_from_storage(raw: Any) -> Any:
     """Inverse of _zrm_path_to_storage. Returns ``None`` on junk."""
-    import importlib
-
-    logic = importlib.import_module("zwave_route_manager")
+    import zwave_route_manager as zrm
 
     if not isinstance(raw, dict):
         return None
@@ -3415,7 +3580,7 @@ def _zrm_path_from_storage(raw: Any) -> Any:
     if not isinstance(type_str, str):
         return None
     route_type = None
-    for rt in logic.RouteType:
+    for rt in zrm.RouteType:
         if rt.value == type_str:
             route_type = rt
             break
@@ -3434,7 +3599,7 @@ def _zrm_path_from_storage(raw: Any) -> Any:
             return None
     raw_count = raw.get("timeout_count")
     timeout_count = raw_count if isinstance(raw_count, int) else 0
-    return logic.RouteRequest(
+    return zrm.RouteRequest(
         type=route_type,
         repeater_node_ids=reps,
         speed=speed,
@@ -3544,8 +3709,10 @@ def zwave_route_manager(
     debug_logging: bool,
 ) -> None:
     """Reconcile Z-Wave priority routes against a YAML config."""
-    import importlib
     from datetime import timedelta
+
+    import zwave_js_ui_bridge as bridge
+    import zwave_route_manager as zrm
 
     start_time = time.monotonic()
     now = datetime.now(tz=UTC)
@@ -3555,13 +3722,6 @@ def zwave_route_manager(
         _ZRM_SERVICE_LABEL,
         instance_id,
     )
-
-    modules_dir = os.path.join(
-        hass.config.config_dir,  # noqa: F821
-        "pyscript",
-        "modules",
-    )
-    logic = importlib.import_module("zwave_route_manager")
 
     # Load state: reconcile_pending, last_reconcile,
     # last_config_mtime, pending, applied.
@@ -3649,15 +3809,15 @@ def zwave_route_manager(
     config_errors: list[Any] = []
     if read_err is not None:
         config_errors.append(
-            logic.ConfigError(
+            zrm.ConfigError(
                 location="(file)",
                 entity_id=None,
                 reason=read_err,
             ),
         )
-        config = logic.Config()
+        config = zrm.Config()
     else:
-        config, config_errors = logic.parse_config(text)
+        config, config_errors = zrm.parse_config(text)
 
     # If parse errors, halt -- don't proceed to resolve/diff.
     if config_errors:
@@ -3699,7 +3859,6 @@ def zwave_route_manager(
     # for the api_echo/success check -- the same lazy
     # allow-list detection we apply to the write APIs.
     bridge_result = _zrm_bridge_get_nodes(
-        modules_dir,
         host,
         port,
         token,
@@ -3724,9 +3883,6 @@ def zwave_route_manager(
             )
         return
 
-    import importlib as _importlib_for_bridge  # noqa: PLC0415
-
-    _bridge_mod = _importlib_for_bridge.import_module("zwave_js_ui_bridge")
     getnodes_result = bridge_result.get("api_result")
     err_msg = None
     if getnodes_result is None:
@@ -3734,7 +3890,7 @@ def zwave_route_manager(
     else:
         err_msg = _zrm_api_unavailable_message(
             getnodes_result,
-            str(_bridge_mod.API_GET_NODES),
+            str(bridge.API_GET_NODES),
         )
     if err_msg is not None:
         notif = _zrm_api_notification(notif_prefix, err_msg)
@@ -3799,7 +3955,7 @@ def zwave_route_manager(
         return
 
     # Resolve entities -> concrete ResolvedRoutes.
-    resolved, resolve_errors = logic.resolve_entities(
+    resolved, resolve_errors = zrm.resolve_entities(
         config,
         default_route_speed,
         entity_map,
@@ -3833,7 +3989,7 @@ def zwave_route_manager(
         return
 
     # Diff + plan (pure, on main thread).
-    reconcile = logic.diff_and_plan(
+    reconcile = zrm.diff_and_plan(
         resolved,
         nodes_by_id,
         pending,
@@ -3850,7 +4006,6 @@ def zwave_route_manager(
 
     if reconcile.actions:
         apply_results = _zrm_bridge_apply_actions(
-            modules_dir,
             host,
             port,
             token,
@@ -3923,7 +4078,7 @@ def zwave_route_manager(
     failed_route_types_by_node: dict[int, set[Any]] = {}
     for node_id, failures in failed_actions_by_node.items():
         for action, _api_result in failures:
-            route_type = logic.type_for_action_kind(action.kind)
+            route_type = zrm.type_for_action_kind(action.kind)
             failed_route_types_by_node.setdefault(node_id, set()).add(
                 route_type,
             )
@@ -3956,7 +4111,7 @@ def zwave_route_manager(
                 # carries through from the just-issued
                 # command).
                 promote_to_applied.append(
-                    logic.RouteRequest(
+                    zrm.RouteRequest(
                         type=path.type,
                         repeater_node_ids=list(path.repeater_node_ids),
                         speed=path.speed,
@@ -4065,7 +4220,7 @@ def zwave_route_manager(
             "last_reconcile": now.isoformat(),
             "last_config_mtime": current_mtime,
             "last_trigger": str(trigger_id or ""),
-            "routes_in_config": len(resolved) * len(logic.MANAGED_ROUTE_TYPES),
+            "routes_in_config": len(resolved) * len(zrm.MANAGED_ROUTE_TYPES),
             "routes_applied": routes_applied,
             "routes_pending": routes_pending,
             "routes_errored": routes_errored,
@@ -4085,7 +4240,7 @@ def zwave_route_manager(
             "%s configured=%d applied=%d pending=%d errored=%d"
             " new_timeouts=%d actions_executed=%d",
             tag,
-            len(resolved) * len(logic.MANAGED_ROUTE_TYPES),
+            len(resolved) * len(zrm.MANAGED_ROUTE_TYPES),
             routes_applied,
             routes_pending,
             routes_errored,
@@ -4109,8 +4264,7 @@ def zwave_route_manager_blueprint_argparse(
     debug_logging_raw: object,
 ) -> None:
     """Parse and validate ZRM blueprint inputs."""
-    import importlib
-    import sys as _sys
+    import zwave_route_manager as zrm
 
     host = str(zwave_js_ui_host_raw).strip() or "core-zwave-js"
     token = str(zwave_js_ui_token_raw or "").strip()
@@ -4118,11 +4272,10 @@ def zwave_route_manager_blueprint_argparse(
     debug_logging = _parse_bool(debug_logging_raw)
     tag = f"[ZRM: {_automation_name(instance_id)}]"
 
-    # Hass must be reachable before we can touch sys.path or
-    # import the logic module (which owns ConfigError). Bail
-    # with a plain-string config_error and return; a later
-    # tick with hass back up dismisses this via the full
-    # pipeline's empty-errors path (same notification_id).
+    # No hass means the service function below will crash
+    # on its first state read; bail with a plain-string
+    # config_error. A later tick with hass back up dismisses
+    # it via the empty-errors path (same notification_id).
     hass_err = _check_hass_available()
     if hass_err is not None:
         config_error = _build_config_error_notification(
@@ -4138,35 +4291,15 @@ def zwave_route_manager_blueprint_argparse(
         )
         return
 
-    # Reload the logic + bridge modules so user edits on
-    # either take effect at the next tick. PyScript reload
-    # refreshes AST-evaluated code but leaves importlib-
-    # loaded modules cached in sys.modules. Reload bridge
-    # first -- logic imports symbols from it, and reloading
-    # in the wrong order can leave logic holding stale bridge
-    # references.
-    modules_dir = os.path.join(
-        hass.config.config_dir,  # noqa: F821
-        "pyscript",
-        "modules",
-    )
-    if modules_dir not in _sys.path:
-        _sys.path.insert(0, modules_dir)
-    for mod_name in ("zwave_js_ui_bridge", "zwave_route_manager"):
-        cached = _sys.modules.get(mod_name)
-        if cached is not None:
-            importlib.reload(cached)
-    logic = importlib.import_module("zwave_route_manager")
-
     # Blueprint selectors enforce types in the UI but direct
     # service calls can still hand us garbage. Collect errors
-    # as logic.ConfigError so they flow through the same
-    # bullet formatter as YAML config errors.
+    # as zrm.ConfigError so they flow through the same bullet
+    # formatter as YAML config errors.
     typed_errors: list[Any] = []
     port, _err = _parse_int_input(zwave_js_ui_port_raw, 1, 65535)
     if _err is not None:
         typed_errors.append(
-            logic.ConfigError(
+            zrm.ConfigError(
                 location="blueprint input: zwave_js_ui_port",
                 entity_id=None,
                 reason=_err,
@@ -4179,7 +4312,7 @@ def zwave_route_manager_blueprint_argparse(
     )
     if _err is not None:
         typed_errors.append(
-            logic.ConfigError(
+            zrm.ConfigError(
                 location="blueprint input: reconcile_interval_minutes",
                 entity_id=None,
                 reason=_err,
@@ -4192,7 +4325,7 @@ def zwave_route_manager_blueprint_argparse(
     )
     if _err is not None:
         typed_errors.append(
-            logic.ConfigError(
+            zrm.ConfigError(
                 location="blueprint input: pending_timeout_hours",
                 entity_id=None,
                 reason=_err,
@@ -4205,7 +4338,7 @@ def zwave_route_manager_blueprint_argparse(
     )
     if _err is not None:
         typed_errors.append(
-            logic.ConfigError(
+            zrm.ConfigError(
                 location="blueprint input: max_notifications",
                 entity_id=None,
                 reason=_err,
@@ -4218,7 +4351,7 @@ def zwave_route_manager_blueprint_argparse(
     default_speed_str = str(default_route_speed_raw or "auto").strip()
     default_route_speed = None
     if default_speed_str != "auto":
-        resolved, speed_err = logic.parse_route_speed_value(
+        resolved, speed_err = zrm.parse_route_speed_value(
             default_speed_str,
             "blueprint input: default_route_speed",
         )
@@ -4284,6 +4417,6 @@ _BLUEPRINT_SERVICES[_ZRM_SERVICE_LABEL] = (
 
 
 @service  # noqa: F821
-def zwave_route_manager_blueprint_entrypoint(**kwargs: object) -> None:
+async def zwave_route_manager_blueprint_entrypoint(**kwargs: object) -> None:
     """Blueprint-facing entrypoint for Z-Wave Route Manager."""
-    _dispatch_blueprint_service(_ZRM_SERVICE_LABEL, kwargs)
+    await _dispatch_blueprint_service(_ZRM_SERVICE_LABEL, kwargs)

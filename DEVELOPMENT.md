@@ -256,9 +256,13 @@ _BLUEPRINT_SERVICES[_TEC_SERVICE_LABEL] = (
 
 
 @service
-def trigger_entity_controller_blueprint_entrypoint(**kwargs):
-    _dispatch_blueprint_service(_TEC_SERVICE_LABEL, kwargs)
+async def trigger_entity_controller_blueprint_entrypoint(**kwargs):
+    await _dispatch_blueprint_service(_TEC_SERVICE_LABEL, kwargs)
 ```
+
+The entrypoint is ``async def`` because ``_dispatch_blueprint_service``
+awaits the module-reload read lock. See "Module reload coordination" in
+``pyscript/ha_pyscript_automations.py`` for why the lock is async.
 
 The registry is the single source of truth wired by
 both the dispatcher and the `TestBlueprintExpectedKeys`

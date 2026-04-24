@@ -115,8 +115,6 @@ for the full list. The headline cases:
   ``exclude_paths`` for those cases.
 """
 
-from __future__ import annotations
-
 import re
 from collections.abc import Callable, Sequence
 from collections.abc import Set as AbstractSet

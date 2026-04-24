@@ -28,6 +28,7 @@ the function will see our controllable replacement.
 
 import ast
 import json
+import os
 import re
 import sys
 import types
@@ -290,7 +291,9 @@ class _ServiceEnv:
 
     def call(self, **kwargs: Any) -> None:
         """Call the service with defaults."""
-        self.service_fn(**_default_kwargs(**kwargs))
+        import asyncio
+
+        asyncio.run(self.service_fn(**_default_kwargs(**kwargs)))
 
 
 def _default_kwargs(**overrides: Any) -> dict[str, Any]:
@@ -1359,7 +1362,9 @@ class TestDispatchBlueprintService:
             argparse_fn,
         )
         fn = env._ns["_dispatch_blueprint_service"]
-        fn(service_label=service_label, kwargs=kwargs)
+        import asyncio
+
+        asyncio.run(fn(service_label=service_label, kwargs=kwargs))
 
     def test_forwards_on_exact_match(self) -> None:
         env = _ServiceEnv()
@@ -1603,6 +1608,293 @@ class TestBlueprintYamlMatchesRegistry:
                 f" {action_name!r} does not match the registered"
                 f" entrypoint {expected_action!r}"
             )
+
+
+class TestModuleReloadLock:
+    """Reader-writer lock for dispatcher-managed module reload.
+
+    Readers are in-flight blueprint dispatches; writers are
+    reload passes over ``_RELOAD_MODULES``. Writers must
+    drain existing readers, exclude other writers, and hold
+    off new readers; readers must coexist freely when no
+    writer is pending or active.
+
+    The primitives are async (``asyncio.Condition`` under the
+    hood) because the production caller is a ``@service``
+    entrypoint running as a task on HA's event loop. Each
+    test drives them inside its own ``asyncio.run`` so the
+    condition has a live loop to bind to.
+    """
+
+    def test_multiple_readers_coexist(self) -> None:
+        import asyncio
+
+        env = _ServiceEnv()
+        acquire_read = env._ns["_acquire_read_lock"]
+        release_read = env._ns["_release_read_lock"]
+        reader_count = env._ns["_MODULE_READER_COUNT"]
+
+        async def _body() -> None:
+            await acquire_read()
+            await acquire_read()
+            assert reader_count[0] == 2
+            await release_read()
+            await release_read()
+            assert reader_count[0] == 0
+
+        asyncio.run(_body())
+
+    def test_writer_waits_for_readers(self) -> None:
+        import asyncio
+
+        env = _ServiceEnv()
+        acquire_read = env._ns["_acquire_read_lock"]
+        release_read = env._ns["_release_read_lock"]
+        acquire_write = env._ns["_acquire_write_lock"]
+        release_write = env._ns["_release_write_lock"]
+        writers_waiting = env._ns["_MODULE_WRITERS_WAITING"]
+
+        async def _body() -> None:
+            await acquire_read()
+
+            writer_done = asyncio.Event()
+
+            async def _writer() -> None:
+                await acquire_write()
+                writer_done.set()
+                await release_write()
+
+            writer = asyncio.create_task(_writer())
+            # Yield enough times for the writer to land in
+            # its ``cond.wait()`` call. One yield isn't enough
+            # because the writer acquires the condition lock
+            # first, bumps WRITERS_WAITING, then waits.
+            for _ in range(10):
+                await asyncio.sleep(0)
+            assert not writer_done.is_set()
+            assert writers_waiting[0] == 1
+
+            await release_read()
+            await asyncio.wait_for(writer_done.wait(), timeout=1.0)
+            await writer
+
+        asyncio.run(_body())
+
+    def test_new_reader_blocks_while_writer_pending(self) -> None:
+        import asyncio
+
+        env = _ServiceEnv()
+        acquire_read = env._ns["_acquire_read_lock"]
+        release_read = env._ns["_release_read_lock"]
+        acquire_write = env._ns["_acquire_write_lock"]
+        release_write = env._ns["_release_write_lock"]
+        writer_active = env._ns["_MODULE_WRITER_ACTIVE"]
+
+        async def _body() -> None:
+            await acquire_read()  # reader 1 holds the lock
+
+            write_started = asyncio.Event()
+            write_done = asyncio.Event()
+
+            async def _writer() -> None:
+                await acquire_write()
+                write_started.set()
+                # Yield a few times so reader 2 has a chance
+                # to run and observe the active writer.
+                for _ in range(5):
+                    await asyncio.sleep(0)
+                await release_write()
+                write_done.set()
+
+            writer = asyncio.create_task(_writer())
+            # Let the writer flip WRITERS_WAITING before
+            # reader 2 joins the queue.
+            for _ in range(5):
+                await asyncio.sleep(0)
+
+            read2_done = asyncio.Event()
+
+            async def _reader2() -> None:
+                await acquire_read()
+                read2_done.set()
+                await release_read()
+
+            reader2 = asyncio.create_task(_reader2())
+            for _ in range(5):
+                await asyncio.sleep(0)
+            assert not read2_done.is_set()
+
+            await release_read()  # drain reader 1
+            await asyncio.wait_for(write_started.wait(), timeout=1.0)
+            # While the writer is still active reader 2 must
+            # stay blocked -- writer exclusion, not just
+            # waiting-flag exclusion.
+            assert not read2_done.is_set()
+            assert writer_active[0] is True
+            await asyncio.wait_for(write_done.wait(), timeout=1.0)
+            await asyncio.wait_for(read2_done.wait(), timeout=1.0)
+            await writer
+            await reader2
+
+        asyncio.run(_body())
+
+    def test_two_writers_are_mutually_exclusive(self) -> None:
+        """Writer-vs-writer exclusion.
+
+        With only WRITER_WAITING (the pre-fix version of this
+        lock), two concurrent writers both saw the flag as
+        already-set, both proceeded past their wait condition,
+        and mutated ``sys.modules`` concurrently -- and a
+        reader woken by the first writer's release could run
+        alongside the second still-active writer.
+
+        The fixed lock tracks WRITER_ACTIVE separately so
+        writers fully exclude each other.
+        """
+        import asyncio
+
+        env = _ServiceEnv()
+        acquire_write = env._ns["_acquire_write_lock"]
+        release_write = env._ns["_release_write_lock"]
+        writer_active = env._ns["_MODULE_WRITER_ACTIVE"]
+
+        async def _body() -> None:
+            entered: list[int] = []
+            concurrent_seen: list[bool] = [False]
+
+            async def _writer(tag: int) -> None:
+                await acquire_write()
+                entered.append(tag)
+                # If two writers coexist here at any moment,
+                # we'd see len(entered) > 1 before either
+                # releases. Yield control a few times to give
+                # any racing writer a chance to land.
+                for _ in range(5):
+                    if len(entered) > 1:
+                        concurrent_seen[0] = True
+                        break
+                    await asyncio.sleep(0)
+                # Pop so the next arrival starts from a
+                # clean slate; otherwise a slow test could
+                # misread the final list as two coexisting
+                # writers when really they were sequential.
+                entered.remove(tag)
+                await release_write()
+
+            w1 = asyncio.create_task(_writer(1))
+            w2 = asyncio.create_task(_writer(2))
+            await asyncio.wait_for(
+                asyncio.gather(w1, w2),
+                timeout=1.0,
+            )
+            assert concurrent_seen[0] is False
+            assert writer_active[0] is False
+
+        asyncio.run(_body())
+
+
+class TestMaybeReloadChangedModules:
+    """mtime-gated reload of tracked modules.
+
+    Tests load a real stub module via ``importlib.import_module``
+    so ``sys.modules`` has the correct spec/name entry that
+    ``importlib.reload`` looks up. ``_RELOAD_MODULES`` is
+    extended for the duration of each test to include the
+    stub name.
+    """
+
+    def _make_stub(
+        self,
+        env: _ServiceEnv,
+        tmp_path: Path,
+        mod_name: str,
+        body: str,
+    ) -> Path:
+        """Write ``body`` to a module file, import it, and
+        register it in the env's ``_RELOAD_MODULES``."""
+        fake = tmp_path / f"{mod_name}.py"
+        fake.write_text(body)
+        if str(tmp_path) not in sys.path:
+            sys.path.insert(0, str(tmp_path))
+        import importlib  # noqa: PLC0415
+
+        importlib.import_module(mod_name)
+        env._ns["_RELOAD_MODULES"] = (
+            *env._ns["_RELOAD_MODULES"],
+            mod_name,
+        )
+        return fake
+
+    def _cleanup_stub(self, tmp_path: Path, mod_name: str) -> None:
+        sys.modules.pop(mod_name, None)
+        tp = str(tmp_path)
+        if tp in sys.path:
+            sys.path.remove(tp)
+
+    def test_no_change_is_noop(self, tmp_path: Path) -> None:
+        import asyncio
+
+        env = _ServiceEnv()
+        cache = env._ns["_MODULE_MTIMES"]
+        maybe_reload = env._ns["_maybe_reload_changed_modules"]
+        mod_name = "stub_noop_mod"
+
+        fake = self._make_stub(env, tmp_path, mod_name, "VALUE = 1\n")
+        try:
+            pre_mod = sys.modules[mod_name]
+            cache[mod_name] = os.stat(fake).st_mtime
+            asyncio.run(maybe_reload())
+            # Same module object (not reloaded) and same value.
+            assert sys.modules[mod_name] is pre_mod
+            assert sys.modules[mod_name].VALUE == 1
+        finally:
+            self._cleanup_stub(tmp_path, mod_name)
+
+    def test_mtime_advance_triggers_reload(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        import asyncio
+
+        env = _ServiceEnv()
+        cache = env._ns["_MODULE_MTIMES"]
+        maybe_reload = env._ns["_maybe_reload_changed_modules"]
+        mod_name = "stub_bump_mod"
+
+        fake = self._make_stub(env, tmp_path, mod_name, "VALUE = 1\n")
+        try:
+            cache[mod_name] = os.stat(fake).st_mtime
+            fake.write_text("VALUE = 2\n")
+            # Bump mtime well past the cached value so the
+            # filesystem's 1-second mtime granularity can't
+            # mask the advance on a fast test run.
+            os.utime(
+                fake,
+                (os.stat(fake).st_atime, cache[mod_name] + 10),
+            )
+            asyncio.run(maybe_reload())
+            assert sys.modules[mod_name].VALUE == 2
+            assert cache[mod_name] >= os.stat(fake).st_mtime
+        finally:
+            self._cleanup_stub(tmp_path, mod_name)
+
+    def test_module_missing_from_sys_modules_is_skipped(self) -> None:
+        import asyncio
+
+        env = _ServiceEnv()
+        cache = env._ns["_MODULE_MTIMES"]
+        maybe_reload = env._ns["_maybe_reload_changed_modules"]
+        reload_modules = env._ns["_RELOAD_MODULES"]
+
+        # Pick a tracked name that's not in sys.modules for
+        # this test run and confirm maybe_reload is a no-op.
+        probe = "stub_not_in_sys_modules"
+        assert probe not in sys.modules
+        env._ns["_RELOAD_MODULES"] = (*reload_modules, probe)
+        cache[probe] = 0.0
+        asyncio.run(maybe_reload())  # must not raise
+        # Entry stays at 0.0 since there was no module to stat.
+        assert cache[probe] == 0.0
 
 
 class TestStscEntityValidation:
@@ -2210,7 +2502,9 @@ class _WatchdogEnv:
         return self._ns["device_watchdog_blueprint_entrypoint"]
 
     def call(self, **kwargs: Any) -> None:
-        self.watchdog_fn(**_dw_default_kwargs(**kwargs))
+        import asyncio
+
+        asyncio.run(self.watchdog_fn(**_dw_default_kwargs(**kwargs)))
 
 
 def _dw_default_kwargs(**overrides: Any) -> dict[str, Any]:
@@ -3067,7 +3361,9 @@ class _TecEnv:
         return self._ns["_state_key"]
 
     def call(self, **kwargs: Any) -> None:
-        self.tec_fn(**_tec_defaults(**kwargs))
+        import asyncio
+
+        asyncio.run(self.tec_fn(**_tec_defaults(**kwargs)))
 
 
 def _tec_defaults(**overrides: Any) -> dict[str, Any]:
@@ -3772,7 +4068,9 @@ class _EdwEnv:
         return self._ns["entity_defaults_watchdog_blueprint_entrypoint"]
 
     def call(self, **kwargs: Any) -> None:
-        self.edw_fn(**_edw_default_kwargs(**kwargs))
+        import asyncio
+
+        asyncio.run(self.edw_fn(**_edw_default_kwargs(**kwargs)))
 
 
 def _edw_default_kwargs(
@@ -5448,7 +5746,11 @@ def _rw_call(env: _WatchdogEnv, **overrides: Any) -> None:
         "debug_logging_raw": "false",
     }
     defaults.update(overrides)
-    env._ns["reference_watchdog_blueprint_entrypoint"](**defaults)
+    import asyncio
+
+    asyncio.run(
+        env._ns["reference_watchdog_blueprint_entrypoint"](**defaults),
+    )
 
 
 class TestRwIntInputValidation:
@@ -5825,6 +6127,144 @@ class TestPyScriptCompatibility:
                                 f" runtime. Remove the"
                                 f" annotation or quote it."
                             )
+
+    def test_no_future_annotations_import(self) -> None:
+        """``from __future__ import annotations`` is a silent no-op.
+
+        Standard Python 3.7+ treats this future import as a
+        directive to make all annotations strings (PEP 563),
+        deferring evaluation. PyScript's AST evaluator does
+        not implement that behaviour -- the import parses
+        cleanly but annotations are still evaluated at
+        class-body / module-level / function-definition
+        time. Including the import masks the real
+        requirement (explicit string quotes around
+        otherwise-unevaluable annotations), and creates
+        false confidence that a broken annotation is safe.
+
+        Verified empirically 2026-04-23: adding
+        ``from __future__ import annotations`` to a
+        pyscript module with ``bridge.X | None`` class-body
+        annotations did not prevent the
+        ``EvalLocalVar | NoneType`` failure on HA.
+        """
+        for path in self._pyscript_files():
+            src = path.read_text()
+            tree = ast.parse(src, str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ImportFrom):
+                    continue
+                if node.module != "__future__":
+                    continue
+                for alias in node.names:
+                    assert alias.name != "annotations", (
+                        f"{path.name}:{node.lineno}"
+                        " 'from __future__ import"
+                        " annotations' -- PyScript does"
+                        " not implement PEP 563, so this"
+                        " is a no-op that masks real"
+                        " annotation failures. Quote the"
+                        " offending annotations"
+                        " individually instead."
+                    )
+
+    def test_no_attribute_union_annotation_in_modules(self) -> None:
+        """Ban ``name.Attr | X`` annotations in logic modules.
+
+        Logic modules (``pyscript/modules/*.py``) are loaded
+        by pyscript's own module loader, which wraps the
+        imported module in an ``EvalLocalVar``. At class-
+        body / module-level / function-definition time,
+        pyscript evaluates annotation expressions. A
+        ``name.Attr | Other`` annotation where ``name`` is
+        an imported module evaluates
+        ``EvalLocalVar.__or__(Other)`` -- which raises
+        ``TypeError: unsupported operand type(s) for |:
+        'EvalLocalVar' and ...``.
+
+        Workaround: write the annotation as a string
+        literal, e.g. ``"bridge.X | None"``. PyScript's
+        AST evaluator passes string annotations through
+        without evaluation (same behaviour as
+        PEP 563 when honoured).
+
+        Bare-name annotations (``RouteSpeed | None``
+        imported via ``from zwave_js_ui_bridge import
+        RouteSpeed``) hit the same failure because the
+        imported name is also an ``EvalLocalVar``; but
+        that pattern is already blocked by
+        ``test_no_from_imports_for_reloadable_modules``.
+        This ban specifically catches the
+        ``module.Attr | X`` form that survives that
+        earlier ban.
+
+        Verified empirically 2026-04-23:
+        ``bridge.RouteSpeed | None`` at line 50 of
+        ``pyscript/modules/zwave_route_manager.py`` raised
+        ``TypeError`` on every HA load attempt,
+        cascading to saturate HA core's event loop.
+        """
+        modules_dir = _PYSCRIPT_DIR / "modules"
+
+        def _annotation_violates(ann: ast.AST | None) -> ast.BinOp | None:
+            """Find a ``X.Y | Z`` BinOp inside an annotation, or None."""
+            if ann is None:
+                return None
+            for sub in ast.walk(ann):
+                if not isinstance(sub, ast.BinOp):
+                    continue
+                if not isinstance(sub.op, ast.BitOr):
+                    continue
+                for operand in (sub.left, sub.right):
+                    if isinstance(operand, ast.Attribute) and isinstance(
+                        operand.value,
+                        ast.Name,
+                    ):
+                        return sub
+            return None
+
+        for path in sorted(modules_dir.glob("*.py")):
+            src = path.read_text()
+            tree = ast.parse(src, str(path))
+            # Every AnnAssign (class body / module level)
+            # plus function signature annotations
+            # (parameters, return type) get scanned.
+            for node in ast.walk(tree):
+                if isinstance(node, ast.AnnAssign):
+                    offender = _annotation_violates(node.annotation)
+                    if offender is not None:
+                        raise AssertionError(
+                            f"{path.name}:{node.lineno}"
+                            " annotation uses"
+                            " ``module.Attr | X`` form --"
+                            " PyScript's AST evaluator"
+                            " wraps imported modules in"
+                            " EvalLocalVar, which does"
+                            " not implement ``|``. Quote"
+                            " the annotation as a string"
+                            " literal instead (e.g."
+                            ' ``"bridge.X | None"``).'
+                        )
+                if isinstance(node, ast.FunctionDef):
+                    for arg in node.args.args:
+                        offender = _annotation_violates(arg.annotation)
+                        if offender is not None:
+                            raise AssertionError(
+                                f"{path.name}:{arg.lineno}"
+                                f" parameter '{arg.arg}' uses"
+                                " ``module.Attr | X`` -- quote"
+                                " the annotation as a string"
+                                " literal."
+                            )
+                    ret_offender = _annotation_violates(node.returns)
+                    if ret_offender is not None:
+                        raise AssertionError(
+                            f"{path.name}:{node.lineno}"
+                            f" return type of '{node.name}()'"
+                            " uses ``module.Attr | X`` --"
+                            " quote the annotation as a"
+                            " string literal."
+                        )
 
 
 if __name__ == "__main__":
