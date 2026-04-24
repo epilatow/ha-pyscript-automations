@@ -6,6 +6,13 @@ requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "docker: full-stack docker integration tests (slow, opt-in; run with 'pytest -m docker')",
+]
+# Exclude docker tests from the default run. tests/run_all.py
+# uses tests_dir.glob('test_*.py'), which is non-recursive, so
+# it never discovers tests/docker/test_*.py either way.
+addopts = "-m 'not docker'"
 
 [tool.ruff]
 line-length = 80

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# This is AI generated code
+# s6 long-run service for sshd. -D keeps sshd in the
+# foreground so s6 can supervise it; -e sends logs to
+# stderr so they land in `docker logs`.
+exec /usr/sbin/sshd -D -e

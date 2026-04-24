@@ -370,7 +370,7 @@ automatically by `uv`. Run tools via `uvx <tool> [args]`.
 ### Running tests
 
 ```bash
-# All tests
+# All tests (fast, mock-based)
 ./tests/run_all.py
 ./tests/run_all.py --verbose
 ./tests/run_all.py --coverage
@@ -379,6 +379,16 @@ automatically by `uv`. Run tools via `uvx <tool> [args]`.
 ./tests/test_sensor_threshold_switch_controller.py
 ./tests/test_sensor_threshold_switch_controller.py --verbose
 ```
+
+### Docker test harness (opt-in, slow)
+
+`tests/docker/` spins up a real HA container with pyscript
+pre-installed and exercises `scripts/install.sh` and
+`scripts/dev-deploy.py` end-to-end. Not run by
+`tests/run_all.py`; opt in with `pytest -m docker
+tests/docker`. See `tests/docker/README.md` for details
+and for how to bring the same environment up for
+interactive browser-based development.
 
 ### Code quality
 

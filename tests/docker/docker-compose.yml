@@ -1,0 +1,37 @@
+# This is AI generated code
+# docker-compose for the ha-pyscript-automations docker
+# test harness. The pytest fixture at
+# tests/docker/conftest.py brings this up and tears it
+# down per-session. See tests/docker/README.md for manual
+# invocation during interactive development.
+
+services:
+  homeassistant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ha-pyscript-automations-test:latest
+    container_name: ha-pyscript-automations-test
+    # Map HA to 8123 and sshd to 2222 on localhost. The
+    # pytest fixture connects via these ports.
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:2222:22"
+    volumes:
+      # Per-session HA config directory, provisioned by
+      # the pytest fixture. Binding by path keeps state
+      # inspectable and lets fixtures set up repo clones
+      # or pre-seeded files before HA starts.
+      - ${HAPA_CONFIG_DIR:?set by fixture}:/config
+      # Test key authorization: /test/authorized_keys is
+      # read by cont-init.d/00-sshd-setup.sh on startup.
+      - ${HAPA_TEST_DIR:?set by fixture}:/test:ro
+    environment:
+      # Skip HA's jemalloc preload; not needed in tests
+      # and it surfaces no-op warnings under docker on
+      # macOS.
+      DISABLE_JEMALLOC: "1"
+    # HA is ready when /api responds; pytest waits on a
+    # curl-based healthcheck via its fixture rather than
+    # docker's builtin so failures surface as test errors.
+    restart: "no"
