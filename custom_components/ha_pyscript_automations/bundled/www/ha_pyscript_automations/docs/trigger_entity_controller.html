@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trigger Entity Controller</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  max-width: 760px;
+  margin: 2em auto;
+  padding: 0 1em;
+  line-height: 1.55;
+  color: #222;
+}
+h1, h2, h3, h4 { line-height: 1.25; }
+h1 { border-bottom: 1px solid #ddd; padding-bottom: .2em; }
+h2 { border-bottom: 1px solid #eee; padding-bottom: .15em; }
+code {
+  background: #f2f2f2;
+  padding: .1em .3em;
+  border-radius: 3px;
+  font-size: .92em;
+}
+pre {
+  background: #f6f6f6;
+  padding: .8em 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+pre code { background: none; padding: 0; font-size: .9em; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td {
+  border: 1px solid #ccc;
+  padding: .4em .7em;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #f2f2f2; }
+blockquote {
+  border-left: 3px solid #ccc;
+  margin: 1em 0;
+  padding: .2em 1em;
+  color: #555;
+}
+a { color: #0366d6; }
+</style>
+</head>
+<body>
+<h1>Trigger Entity Controller</h1>
+<h2>Summary</h2>
+<p>Controls entities (lights, switches, fans, etc.) with optional
+trigger-based activation and auto-off timer. Supports
+time-of-day restrictions, disabling entities, force-on behavior,
+and configurable notifications.</p>
+<h2>Features</h2>
+<ul>
+<li>Control any entity type (lights, switches, input_booleans, etc.)</li>
+<li>Optional trigger activation from any binary sensor (motion,
+door, occupancy, etc.)</li>
+<li>Auto-off timer that starts when triggers clear (or immediately
+for manual turn-on)</li>
+<li>Time-of-day gating: restrict triggers to day or night only</li>
+<li>Trigger disabling: suppress triggers when a boolean entity is
+on (e.g., &quot;bedroom occupied&quot;)</li>
+<li>Auto-off disabling: suppress auto-off for full manual control
+(e.g., when a room is occupied)</li>
+<li>Force-on: re-enable controlled entities if turned off while
+triggers are active</li>
+<li>Configurable notifications for turn-on, force-on, and auto-off
+events</li>
+<li>Entity validation: alerts via persistent notification if
+configured entities are missing or renamed</li>
+<li>Optional debug logging</li>
+</ul>
+<h2>Requirements</h2>
+<p>PyScript must be configured with:</p>
+<pre><code class="language-yaml">pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+</code></pre>
+<h2>Usage</h2>
+<ol>
+<li>Install the automation (see main README)</li>
+<li>Go to <strong>Settings &gt; Automations &amp; Scenes &gt; Blueprints</strong></li>
+<li>Click <strong>Trigger Entity Controller</strong></li>
+<li>Configure controlled entities and desired options</li>
+<li>Save and enable</li>
+</ol>
+<h2>Configuration</h2>
+<h3>Required</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Controlled entities</td>
+<td>Entities to turn on and off</td>
+</tr>
+</tbody>
+</table>
+<h3>Optional</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Auto-off delay</td>
+<td>Minutes after triggers clear to turn off. Resets on new trigger.</td>
+</tr>
+<tr>
+<td>Auto-off disabling entities</td>
+<td>When any is &quot;on&quot;, suppresses auto-off for full manual control</td>
+</tr>
+<tr>
+<td>Trigger entities</td>
+<td>Binary sensors that trigger activation</td>
+</tr>
+<tr>
+<td>Trigger period</td>
+<td>When triggers activate: always, night-time, day-time</td>
+</tr>
+<tr>
+<td>Trigger forces on</td>
+<td>Re-enable if turned off while trigger active</td>
+</tr>
+<tr>
+<td>Trigger disabling entities</td>
+<td>When any is &quot;on&quot;, suppresses triggers</td>
+</tr>
+<tr>
+<td>Trigger disabling period</td>
+<td>When disabling entities are checked</td>
+</tr>
+<tr>
+<td>Notification service</td>
+<td>e.g., &quot;notify.mobile_app_phone&quot;</td>
+</tr>
+<tr>
+<td>Notification prefix</td>
+<td>Prepended to messages (supports timestamp tokens)</td>
+</tr>
+<tr>
+<td>Notification suffix</td>
+<td>Appended to messages (supports timestamp tokens)</td>
+</tr>
+<tr>
+<td>Notification events</td>
+<td>Which actions notify: triggered-on, forced-on, auto-off</td>
+</tr>
+<tr>
+<td>Debug logging</td>
+<td>Log debug info to HA logs</td>
+</tr>
+</tbody>
+</table>
+<p>See the blueprint UI for default values.</p>
+<h2>Usage notes</h2>
+<h3>Example: Hallway Motion Light</h3>
+<p>A hallway light that always turns on with motion, except at
+night when the bedroom is occupied:</p>
+<ul>
+<li><strong>Controlled entities</strong>: <code>light.hallway</code></li>
+<li><strong>Auto-off delay</strong>: 2 minutes</li>
+<li><strong>Trigger entities</strong>: <code>binary_sensor.hallway_motion</code></li>
+<li><strong>Trigger period</strong>: always</li>
+<li><strong>Trigger disabling entities</strong>: <code>input_boolean.bedroom_occupied</code></li>
+<li><strong>Trigger disabling period</strong>: night-time</li>
+</ul>
+<p>Result:</p>
+<ul>
+<li>Daytime: motion always turns on the light</li>
+<li>Night + bedroom not occupied: motion turns on the light</li>
+<li>Night + bedroom occupied: motion is suppressed</li>
+</ul>
+<h3>Example: Motion Keep-Alive (no auto turn-on)</h3>
+<p>A device you turn on manually, but you want auto-off to
+pause while a room is occupied and resume its countdown
+after motion clears. Configure the motion sensor as an
+auto-off disabling entity (not a trigger entity), so it
+resets the timer without also turning the device on:</p>
+<ul>
+<li><strong>Controlled entities</strong>: <code>switch.office_fan</code></li>
+<li><strong>Auto-off delay</strong>: 10 minutes</li>
+<li><strong>Auto-off disabling entities</strong>: <code>binary_sensor.office_motion</code></li>
+<li>(No trigger entities)</li>
+</ul>
+<p>Result:</p>
+<ul>
+<li>Manual on while motion is active: timer stays paused</li>
+<li>Manual on while motion is inactive: timer starts
+immediately</li>
+<li>Motion becomes active mid-countdown: timer is cleared</li>
+<li>Motion clears: fresh 10-minute countdown starts</li>
+<li>Motion returns mid-countdown: timer is cleared again,
+then restarts when motion next clears</li>
+</ul>
+<p>This pattern uses <code>auto_off_disabling_entities</code> as a
+keep-alive: while any listed entity is &quot;on&quot;, auto-off is
+held off; the timer (re)starts when they all return to
+&quot;off&quot;.</p>
+<h2>Developer notes</h2>
+<h3>Entity attributes</h3>
+<p>After each evaluation, attributes are written to
+<code>pyscript.&lt;instance_id&gt;_state</code>:</p>
+<ul>
+<li><code>last_run</code>: ISO timestamp of last evaluation</li>
+<li><code>last_action</code>: NONE, TURN_ON, or TURN_OFF</li>
+<li><code>last_reason</code>: Human-readable reason for the decision</li>
+<li><code>last_event</code>: TRIGGER_ON, TRIGGER_OFF, CONTROLLED_ON,
+CONTROLLED_OFF, DISABLING_CHANGED, or TIMER</li>
+<li><code>auto_off_at</code>: ISO timestamp of pending auto-off, or empty</li>
+</ul>
+<p>View in <strong>Developer Tools &gt; States</strong>.</p>
+<h3>Debug logging</h3>
+<p>Enable the <strong>Debug Logging</strong> toggle in the blueprint. Debug
+output appears in <strong>Settings &gt; System &gt; Logs</strong>. Uses
+<code>log.warning</code> level (HA's default for custom components).</p>
+<p>Example output for an automation named &quot;Hallway Motion Light&quot;:</p>
+<pre><code>[TEC: Hallway Motion Light] event=TRIGGER_ON action=TURN_ON
+  reason='trigger activated' auto_off_at=none
+  trigger_on=True controlled_on=False is_day_time=True
+</code></pre>
+</body>
+</html>

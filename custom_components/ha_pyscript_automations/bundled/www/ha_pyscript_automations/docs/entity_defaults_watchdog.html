@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entity Defaults Watchdog</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  max-width: 760px;
+  margin: 2em auto;
+  padding: 0 1em;
+  line-height: 1.55;
+  color: #222;
+}
+h1, h2, h3, h4 { line-height: 1.25; }
+h1 { border-bottom: 1px solid #ddd; padding-bottom: .2em; }
+h2 { border-bottom: 1px solid #eee; padding-bottom: .15em; }
+code {
+  background: #f2f2f2;
+  padding: .1em .3em;
+  border-radius: 3px;
+  font-size: .92em;
+}
+pre {
+  background: #f6f6f6;
+  padding: .8em 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+pre code { background: none; padding: 0; font-size: .9em; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td {
+  border: 1px solid #ccc;
+  padding: .4em .7em;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #f2f2f2; }
+blockquote {
+  border-left: 3px solid #ccc;
+  margin: 1em 0;
+  padding: .2em 1em;
+  color: #555;
+}
+a { color: #0366d6; }
+</style>
+</head>
+<body>
+<h1>Entity Defaults Watchdog</h1>
+<h2>Summary</h2>
+<p>Detects entity IDs and names that have drifted from their
+defaults. Covers both device-attached entities (one
+notification per drifted device) and deviceless entities
+like automations, scripts, helpers, and template sensors
+(one aggregate notification).  Clears notifications
+automatically when drift is resolved.</p>
+<h2>Features</h2>
+<ul>
+<li>Detect device entity ID drift (when a device is renamed
+after its entities already exist)</li>
+<li>Detect device name-override drift (stale name overrides
+left behind when an integration's naming conventions
+change)</li>
+<li>Detect deviceless entity ID drift -- automations,
+scripts, helpers, template sensors, scenes, groups, and
+other user-named entities whose IDs no longer match
+their current names</li>
+<li>Detect stale HA collision suffixes (<code>_2</code>, <code>_3</code>, ...) left
+over from naming conflicts whose original peers were
+removed</li>
+<li>Detect redundant name prefixes (overrides that include
+the device name when HA would add it automatically)</li>
+<li>Per-device persistent notifications with auto-clear on
+drift resolution; single aggregate notification for
+deviceless entities</li>
+<li>Selectable drift checks (device entity ID, device
+entity name, deviceless ID, or any combination)</li>
+<li>Include/exclude integration filtering</li>
+<li>Regex-based device and entity exclusion filters</li>
+<li>Notification cap to limit per-device notifications</li>
+<li>Repair instructions tailored to the drift combination
+(two-cycle fix for device name + ID drift)</li>
+<li>Optional debug logging</li>
+</ul>
+<h2>Requirements</h2>
+<p>PyScript must be configured with:</p>
+<pre><code class="language-yaml">pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+</code></pre>
+<h2>Usage</h2>
+<ol>
+<li>Install the automation (see main README)</li>
+<li>Go to <strong>Settings &gt; Automations &amp; Scenes &gt; Blueprints</strong></li>
+<li>Click <strong>Entity Defaults Watchdog</strong></li>
+<li>Configure integrations and exclusions</li>
+<li>Save and enable</li>
+</ol>
+<h2>Configuration</h2>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Drift checks</td>
+<td>Which checks to run: <code>device-entity-id</code>, <code>device-entity-name</code>, <code>entity-id</code> (deviceless), or any combination. Empty means all.</td>
+</tr>
+<tr>
+<td>Include integrations</td>
+<td>Integration IDs to check. Empty means all integrations. Applies to device-backed entities and to registry-backed deviceless entries (e.g. <code>template</code>, <code>rachio</code>). State-only entities have no platform to filter on.</td>
+</tr>
+<tr>
+<td>Exclude integrations</td>
+<td>Integration IDs to skip even if included. Same scope as Include integrations.</td>
+</tr>
+<tr>
+<td>Device exclude regex</td>
+<td>Skip devices whose name matches. One pattern per line.</td>
+</tr>
+<tr>
+<td>Exclude entities</td>
+<td>Specific entities to exclude from all checks.</td>
+</tr>
+<tr>
+<td>Entity ID exclude regex</td>
+<td>Skip entities whose ID matches. One pattern per line.</td>
+</tr>
+<tr>
+<td>Entity name exclude regex</td>
+<td>Skip entities whose name matches. One pattern per line.</td>
+</tr>
+<tr>
+<td>Check interval (minutes)</td>
+<td>Minutes between drift evaluations.</td>
+</tr>
+<tr>
+<td>Debug Logging</td>
+<td>Log debug info to HA logs.</td>
+</tr>
+</tbody>
+</table>
+<p>See the blueprint UI for default values.</p>
+<h2>Usage notes</h2>
+<h3>What is entity drift?</h3>
+<p>Home Assistant assigns entity IDs and names when entities
+are first created. These can drift from their expected
+values over time:</p>
+<ul>
+<li><strong>Device entity ID drift</strong> -- when a device is renamed
+after its entities already exist, the entity IDs still
+reflect the original device name. For example,
+renaming &quot;Kitchen Multisensor&quot; to &quot;Kitchen Sensor&quot;
+leaves <code>sensor.kitchen_multisensor_temperature</code> instead
+of <code>sensor.kitchen_sensor_temperature</code>.</li>
+<li><strong>Device entity name drift</strong> -- when an integration
+changes its naming conventions (e.g., during an
+upgrade), HA preserves the old name as a &quot;name
+override&quot; to avoid breaking automations. The override
+becomes stale when the integration's new name is what
+you actually want.</li>
+<li><strong>Deviceless ID drift</strong> -- automations, scripts,
+helpers, template sensors, and similar user-named
+entities have entity IDs derived from their name at
+creation. Renaming the entity later doesn't update the
+entity ID, leaving (for example) <code>automation.foo</code>
+still running after you renamed its alias to &quot;Bar&quot;.</li>
+</ul>
+<h3>How drift is detected</h3>
+<p>The watchdog uses Home Assistant's entity and device
+registries to compare current values against expected
+defaults:</p>
+<ul>
+<li><strong>Device entity ID drift</strong>: compares each device-
+attached entity's current ID against the value returned
+by <code>async_regenerate_entity_id</code>, which computes the ID
+that HA would assign today based on the current device
+name and entity name.</li>
+<li><strong>Device entity name drift</strong>: checks whether
+<code>entry.name</code> (a name override) differs from
+<code>entry.original_name</code> (the integration-provided
+default). A name override exists only when someone (or
+HA's migration logic) has explicitly set a custom name.</li>
+<li><strong>Redundant prefix</strong>: for entities with
+<code>has_entity_name=True</code>, HA automatically prepends the
+device name to the entity name. A name override that
+starts with the device name is redundant.</li>
+<li><strong>Deviceless entity ID drift</strong>: for registry entries
+whose <code>device_id</code> is null and whose domain is a
+user-named one (automation, script, scene, group,
+schedule, timer, counter, input helpers,
+sensor/binary_sensor/switch/light), compares
+<code>slugify(entry.name or entry.original_name)</code> to the
+entity ID's object part.  Also walks the state list
+for entities in those domains that don't have a
+registry entry (YAML-defined without <code>unique_id:</code>) as
+a safety net -- those are caught only when the user has
+set an explicit <code>name:</code> whose slug differs from the
+entity ID.  HA's collision-suffix convention (<code>_2</code>,
+<code>_3</code>, ...) is accepted when at least one peer with the
+un-suffixed (or lower-<code>_N</code>) object ID exists;
+otherwise the suffix is classified as stale and
+reported in a dedicated section with a &quot;rename to&quot;
+suggestion.</li>
+</ul>
+<h3>Two-cycle fix sequence</h3>
+<p>When a device has both name overrides and non-default
+entity IDs, the fix must happen in two steps:</p>
+<ol>
+<li><strong>First cycle</strong>: clear or edit name overrides in each
+entity's settings. The watchdog re-evaluates and may
+surface new non-default entity IDs (because clearing
+the name override changes the expected ID).</li>
+<li><strong>Second cycle</strong>: use <strong>Recreate entity IDs</strong> on the
+device page repeatedly until no more changes occur.
+Collisions between entity IDs can cause temporary
+numeric suffixes (e.g., <code>_2</code>) that resolve on
+subsequent passes as other entities free up their IDs.</li>
+</ol>
+<p>The watchdog notification explains this sequence when
+both types of drift are present, and will continue to
+flag non-default IDs until all collisions are resolved.</p>
+<h3>Disabled entities</h3>
+<p>The watchdog only checks enabled entities. Disabled
+entities (e.g., diagnostic entities disabled by their
+integration) may also have drifted IDs or names but
+are not flagged. When you use <strong>Recreate entity IDs</strong>
+on a device page, HA will also rename disabled entities,
+so the number of renames shown may be higher than what
+the watchdog reported.</p>
+<h3>Notification format</h3>
+<p>Device-attached drift creates one persistent notification
+per device.  The notification body contains up to three
+sections depending on what kind of drift was found:</p>
+<p><strong>Name overrides to clear</strong> -- entities where the name
+override should be removed:</p>
+<pre><code>- `sensor.kitchen_temp`: &quot;Old Temp&quot;
+</code></pre>
+<p><strong>Name overrides with redundant device name</strong> -- the
+override includes the device name, which HA already
+adds automatically:</p>
+<pre><code>- `sensor.kitchen_co2`: &quot;Kitchen Sensor CO2&quot; -&gt; &quot;CO2&quot;
+</code></pre>
+<p><strong>Non-default entity IDs</strong> -- entities whose ID does
+not match what HA would assign today:</p>
+<pre><code>- `sensor.old_kitchen_temperature`
+</code></pre>
+<p>Deviceless drift is reported as a single aggregate
+notification with up to two sections:</p>
+<p><strong>Entity IDs do not match their names</strong> -- one bullet per
+drifted entity, with a pointer to the most useful edit
+surface:</p>
+<pre><code>- `automation.driveway_lights_on_at_sunset` -&gt; expected `automation.auto_on_sunset_lights_sunset_to_8pm`
+  [Auto-On: Sunset Lights: Sunset to 8pm](/config/automation/edit/1669687974816)
+- `sensor.template_sensor` -&gt; expected `sensor.grid_import_power`
+  Grid Import Power  -  integration [template](/config/integrations/integration/template)
+- `sensor.old_yaml_thing` -&gt; expected `sensor.grid_import_power`
+  Grid Import Power  -  add `unique_id:` to make this entity manageable
+</code></pre>
+<p>For automations and scripts the friendly name itself is
+the link to that entity's editor.  Registry-backed
+entries from other integrations show the friendly name in
+plain text followed by the owning integration's name as a
+link to its config page -- scan the integration column to
+see when several flagged entities share a single source
+(e.g. five rows all tagged <code> -  integration rachio</code>) and
+can be suppressed together via <code>exclude_integrations</code>.
+State-only entities (YAML blocks without <code>unique_id:</code>)
+have no owning integration, so they show a nudge to add
+one instead.</p>
+<p><strong>Stale collision suffixes</strong> -- entities whose ID ends
+in <code>_N</code> (N &gt;= 2) but no un-suffixed or lower-<code>_N</code> peer
+exists:</p>
+<pre><code>- `automation.front_porch_light_2` -&gt; rename to `automation.front_porch_light`
+  [Front Porch Light](/config/automation/edit/1234567890)
+</code></pre>
+<h3>Recommendation: add <code>unique_id:</code> to YAML entities</h3>
+<p>The deviceless check only catches YAML-defined entities
+that have an <code>entry.name</code> + entity registry entry, which
+only exists when the block has a <code>unique_id:</code> set.  For
+<code>template:</code>, <code>rest:</code>, <code>mqtt:</code>, <code>command_line:</code>, etc.,
+adding <code>unique_id:</code> on every block has two benefits:</p>
+<ul>
+<li>The entity is persisted in the registry, so renames,
+customizations, and cross-restart stability just work.</li>
+<li>The watchdog can compare names to entity IDs and flag
+drift -- without a registry entry, it has no authoritative
+name to compare against.</li>
+</ul>
+<h3>Notification panel ordering</h3>
+<p>The order of notifications in the HA notification panel
+may change between evaluation runs. This is because each
+run re-creates all active notifications (to update
+content if drift changed), which updates their
+timestamps. Since all creates happen within milliseconds,
+the panel's display order is effectively random. The
+same devices are shown -- only the panel ordering varies.</p>
+<h3>Exclusion configuration</h3>
+<p>Use exclusion settings to suppress drift notifications
+for entities with intentionally customized names or IDs:</p>
+<ul>
+<li><strong>Exclude entities</strong>: pick specific entity IDs from
+a list.</li>
+<li><strong>Entity ID exclude regex</strong>: match entity IDs by
+pattern (e.g., <code>battery</code> to skip all battery
+entities).</li>
+<li><strong>Entity name exclude regex</strong>: match entity names by
+pattern.</li>
+<li><strong>Device exclude regex</strong>: skip entire devices by
+name.</li>
+</ul>
+<h2>Developer notes</h2>
+<h3>Entity attributes</h3>
+<p>After each evaluation, attributes are written to
+<code>pyscript.&lt;automation-name&gt;_state</code> (e.g.,
+<code>pyscript.automation_entity_defaults_watchdog_state</code>).
+Search for <code>pyscript.*_state</code> in Developer Tools &gt;
+States to find it.</p>
+<ul>
+<li><code>last_run</code>: ISO timestamp of last evaluation</li>
+<li><code>runtime</code>: Evaluation time in seconds</li>
+<li><code>integrations</code>: Total integrations discovered</li>
+<li><code>devices</code>: Total devices discovered</li>
+<li><code>entities</code>: Total entities discovered for included devices</li>
+<li><code>integrations_excluded</code>: Integrations excluded by filters</li>
+<li><code>devices_excluded</code>: Devices excluded by device filters</li>
+<li><code>entities_excluded</code>: Entities excluded by entity filters</li>
+<li><code>device_issues</code>: Devices with issues</li>
+<li><code>entity_issues</code>: Entities with issues</li>
+<li><code>entity_name_issues</code>: Entities with name drift</li>
+<li><code>entity_id_issues</code>: Entities with ID drift</li>
+<li><code>deviceless_entities</code>: Deviceless entities scanned</li>
+<li><code>deviceless_excluded</code>: Deviceless entities skipped by
+exclusion filters</li>
+<li><code>deviceless_drift</code>: Deviceless entities flagged as
+drifted (excludes stale-suffix cases)</li>
+<li><code>deviceless_stale</code>: Deviceless entities with stale
+collision suffixes</li>
+</ul>
+<h3>Debug logging</h3>
+<p>Enable the <strong>Debug Logging</strong> toggle in the blueprint.
+Debug output appears in <strong>Settings &gt; System &gt; Logs</strong>.
+Uses <code>log.warning</code> level (HA's default for custom
+components).</p>
+<p>Example output for an automation named
+&quot;Entity Defaults Watchdog&quot;:</p>
+<pre><code>[EDW: Entity Defaults Watchdog] integrations=12
+  devices=45 entities=320 device_issues=2
+  entity_issues=5
+</code></pre>
+</body>
+</html>

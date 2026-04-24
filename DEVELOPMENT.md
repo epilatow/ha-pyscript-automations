@@ -388,6 +388,38 @@ doesn't fit an existing bucket goes under "Usage notes"
 (if user-facing) or "Developer notes" (if internal) as a
 sub-heading.
 
+### Rendered HTML
+
+The markdown sources under `docs/` are rendered to HTML
+that ships alongside the integration so HACS users can
+click a "Full documentation" link from each blueprint
+directly to a local page.
+
+- Source: `custom_components/ha_pyscript_automations/bundled/docs/*.md`
+  (also reachable via the `docs/` symlink at the repo
+  root).
+- Rendered:
+  `custom_components/ha_pyscript_automations/bundled/www/ha_pyscript_automations/docs/*.html`.
+  Committed alongside the source.
+- Renderer: `scripts/render_docs.py` (CommonMark +
+  tables, minimal inline-CSS template, `markdown-it-py`
+  pinned for deterministic output). Idempotent -- it
+  only writes files whose content changed.
+
+After editing any `*.md`, **re-run the renderer and
+commit the regenerated HTML in the same commit**:
+
+```bash
+scripts/render_docs.py
+```
+
+A drift test (`tests/test_docs_rendered.py`) runs
+`scripts/render_docs.py --check` and fails if the
+committed HTML is out of date, if a markdown source is
+missing its HTML counterpart, or if an orphan HTML has
+no matching source. The test's failure message points
+at the render command.
+
 ## Comments
 
 Do not number steps in comments (e.g., `# 1. Parse state`).

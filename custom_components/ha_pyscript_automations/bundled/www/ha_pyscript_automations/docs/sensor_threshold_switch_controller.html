@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sensor Threshold Switch Controller</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  max-width: 760px;
+  margin: 2em auto;
+  padding: 0 1em;
+  line-height: 1.55;
+  color: #222;
+}
+h1, h2, h3, h4 { line-height: 1.25; }
+h1 { border-bottom: 1px solid #ddd; padding-bottom: .2em; }
+h2 { border-bottom: 1px solid #eee; padding-bottom: .15em; }
+code {
+  background: #f2f2f2;
+  padding: .1em .3em;
+  border-radius: 3px;
+  font-size: .92em;
+}
+pre {
+  background: #f6f6f6;
+  padding: .8em 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+pre code { background: none; padding: 0; font-size: .9em; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td {
+  border: 1px solid #ccc;
+  padding: .4em .7em;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #f2f2f2; }
+blockquote {
+  border-left: 3px solid #ccc;
+  margin: 1em 0;
+  padding: .2em 1em;
+  color: #555;
+}
+a { color: #0366d6; }
+</style>
+</head>
+<body>
+<h1>Sensor Threshold Switch Controller</h1>
+<h2>Summary</h2>
+<p>Controls a switch-like entity based on sensor value spikes, with manual
+override protection, auto-off functionality, and notification support.</p>
+<h2>Features</h2>
+<ul>
+<li><strong>Threshold-based Control</strong>: Turns a switch ON when sensor values
+spike above a trigger threshold, OFF when they drop below a release
+threshold.</li>
+<li><strong>Manual Override Protection</strong>: Re-activates the switch if it is
+manually turned off while sensor thresholds are still exceeded.
+Turning the switch off twice within a configurable window disables
+this behavior.</li>
+<li><strong>Auto-Off Timer</strong>: Automatically turns the switch off after a
+configurable duration when manually activated.</li>
+<li><strong>Startup Recovery</strong>: If Home Assistant restarts with the switch
+already ON, starts the auto-off timer.</li>
+<li><strong>Notifications</strong>: Optionally sends notifications for all actions via
+a configurable notification service.</li>
+</ul>
+<h2>Requirements</h2>
+<p>PyScript must be configured with:</p>
+<pre><code class="language-yaml">pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+</code></pre>
+<h2>Usage</h2>
+<ol>
+<li>Go to <strong>Settings &gt; Automations &amp; Scenes &gt; Blueprints</strong>.</li>
+<li>Find <strong>Sensor Threshold Switch Controller</strong> and click <strong>Create
+Automation</strong>.</li>
+<li>Configure the required and optional parameters.</li>
+<li>Save.</li>
+</ol>
+<p>The automation will appear in the <strong>Used By</strong> list for all sensor
+and switch entities.</p>
+<h2>Configuration</h2>
+<h3>Required</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Target Switch Entity</strong></td>
+<td>The switch, fan, light, or input_boolean entity to control (e.g., <code>switch.bathroom_fan</code>).</td>
+</tr>
+<tr>
+<td><strong>Sensor Entities</strong></td>
+<td>One or more sensors to monitor (e.g., <code>sensor.bathroom_humidity</code>). All sensors feed into a shared sampling window. Any sensor spike triggers the switch; all must settle to release.</td>
+</tr>
+<tr>
+<td><strong>Trigger Threshold</strong></td>
+<td>Spike amount (max - min in sampling window) to turn the switch ON. Must be positive.</td>
+</tr>
+<tr>
+<td><strong>Release Threshold</strong></td>
+<td>Amount above baseline to keep the switch ON. Must be &lt;= trigger threshold.</td>
+</tr>
+</tbody>
+</table>
+<h3>Optional</h3>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Sampling Window</strong></td>
+<td>300s</td>
+<td>Rolling window (in seconds) for min/max calculation.</td>
+</tr>
+<tr>
+<td><strong>Disable Window</strong></td>
+<td>10s</td>
+<td>Time window for double-off detection. Two manual switch-off operations within this window disable the sensor override. Set to 0 to disable.</td>
+</tr>
+<tr>
+<td><strong>Auto-Off Timeout</strong></td>
+<td>30m</td>
+<td>Minutes before auto-off after manual switch activation. Set to 0 to disable.</td>
+</tr>
+<tr>
+<td><strong>Notification Service</strong></td>
+<td><em>(empty)</em></td>
+<td>Service name for notifications (e.g., <code>notify</code> or <code>notify.mobile_app_phone</code>). Leave empty to disable.</td>
+</tr>
+<tr>
+<td><strong>Notification Prefix</strong></td>
+<td><code>STSC: </code></td>
+<td>Text prepended to notifications. Supports timestamp tokens (see below).</td>
+</tr>
+<tr>
+<td><strong>Notification Suffix</strong></td>
+<td><code> at YYYY-MM-DD HH:mm:ss</code></td>
+<td>Text appended to notifications. Supports timestamp tokens (see below).</td>
+</tr>
+</tbody>
+</table>
+<h3>Timestamp Tokens</h3>
+<p>The notification prefix and suffix support these tokens, which are
+replaced with the current time when the notification is sent:</p>
+<p><code>YYYY</code>, <code>YY</code>, <code>MM</code>, <code>DD</code>, <code>HH</code>, <code>mm</code>, <code>ss</code></p>
+<h2>Usage notes</h2>
+<h3>Example: Bathroom Fan Control</h3>
+<pre><code>Target Switch Entity:  switch.bathroom_fan
+Sensor Entities:       sensor.bathroom_humidity
+                       sensor.bathroom_vent_humidity
+Trigger Threshold:     10
+Release Threshold:     5
+Sampling Window:       300 seconds (5 minutes)
+Auto-Off Timeout:      30 minutes
+</code></pre>
+<p>When someone showers, humidity spikes on one or both sensors and the
+fan turns ON. When humidity returns to normal across all sensors, the
+fan turns OFF. If someone manually turns off the fan while humidity is
+still high, it turns back on. If they manually turn off the fan twice
+in a row (within 10 seconds), the sensor override is disabled. If
+they turn the fan on manually (with no humidity spike), it turns off
+automatically after 30 minutes.</p>
+<h2>Developer notes</h2>
+<p>Three complementary layers provide visibility into the automation's
+decisions without requiring ad-hoc instrumentation.</p>
+<h3>Entity attributes (always on)</h3>
+<p>After every invocation, the automation writes decision metadata to the
+<code>pyscript.*_state</code> entity as attributes. These are visible in
+<strong>Developer Tools &gt; States</strong> with no configuration.</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>last_action</code></td>
+<td><code>TURN_ON</code>, <code>TURN_OFF</code>, or <code>NONE</code></td>
+</tr>
+<tr>
+<td><code>last_reason</code></td>
+<td>Human-readable reason for the action (or <code>n/a</code>)</td>
+</tr>
+<tr>
+<td><code>last_event</code></td>
+<td><code>SENSOR</code>, <code>SWITCH</code>, or <code>TIMER</code></td>
+</tr>
+<tr>
+<td><code>last_run</code></td>
+<td>ISO timestamp of the invocation</td>
+</tr>
+<tr>
+<td><code>last_sensor</code></td>
+<td>Parsed sensor value (or <code>n/a</code> for non-sensor events)</td>
+</tr>
+</tbody>
+</table>
+<p>To view:</p>
+<ol>
+<li>Go to <strong>Developer Tools &gt; States</strong>.</li>
+<li>Search for <code>pyscript.</code> and find your <code>*_state</code> entity.</li>
+<li>Expand the attributes to see the latest decision context.</li>
+</ol>
+<h3>Debug logging (opt-in)</h3>
+<p>The blueprint includes a <strong>Debug Logging</strong> toggle (default: off). When
+enabled, the service emits a <code>log.warning</code> message with full decision
+context on every invocation.</p>
+<p>To enable:</p>
+<ol>
+<li>Go to <strong>Settings &gt; Automations &amp; Scenes</strong>.</li>
+<li>Open the automation using this blueprint.</li>
+<li>Set <strong>Debug Logging</strong> to on.</li>
+<li>Save.</li>
+</ol>
+<p>To view logs:</p>
+<ul>
+<li><strong>Settings &gt; System &gt; Logs</strong> -- search for
+<code>sensor_threshold_switch_controller</code>.</li>
+<li>Or via SSH: <code>ha core logs 2&gt;&amp;1 | grep sensor_threshold</code>.</li>
+</ul>
+<p>Example output for an automation named &quot;Main Bath Fan Controller&quot;:</p>
+<pre><code>[STSC: Main Bath Fan Controller] event=TIMER sw=on baseline=None
+  auto_off=2026-02-21T15:19:00 samples=5 -&gt; TURN_OFF
+  &quot;Auto-off after 1 minute(s)&quot;
+</code></pre>
+<p>Uses <code>log.warning</code> (not <code>log.info</code>) because HA's default log level
+for custom components is WARNING. Toggling the flag produces immediate
+output without editing <code>configuration.yaml</code>.</p>
+<h3>Logger configuration (optional)</h3>
+<p>For more verbose PyScript output without the debug flag, add the
+following to <code>configuration.yaml</code>:</p>
+<pre><code class="language-yaml">logger:
+  default: warning
+  logs:
+    custom_components.pyscript: info
+</code></pre>
+<p>This enables <code>log.info</code> level messages from all PyScript scripts.</p>
+</body>
+</html>

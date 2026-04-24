@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device Watchdog</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  max-width: 760px;
+  margin: 2em auto;
+  padding: 0 1em;
+  line-height: 1.55;
+  color: #222;
+}
+h1, h2, h3, h4 { line-height: 1.25; }
+h1 { border-bottom: 1px solid #ddd; padding-bottom: .2em; }
+h2 { border-bottom: 1px solid #eee; padding-bottom: .15em; }
+code {
+  background: #f2f2f2;
+  padding: .1em .3em;
+  border-radius: 3px;
+  font-size: .92em;
+}
+pre {
+  background: #f6f6f6;
+  padding: .8em 1em;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+pre code { background: none; padding: 0; font-size: .9em; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td {
+  border: 1px solid #ccc;
+  padding: .4em .7em;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #f2f2f2; }
+blockquote {
+  border-left: 3px solid #ccc;
+  margin: 1em 0;
+  padding: .2em 1em;
+  color: #555;
+}
+a { color: #0366d6; }
+</style>
+</head>
+<body>
+<h1>Device Watchdog</h1>
+<h2>Summary</h2>
+<p>Monitors device health across Home Assistant integrations. Raises
+a persistent notification whenever monitored devices have
+unavailable entities or stop reporting state within a
+configurable window. Clears notifications automatically when
+devices recover.</p>
+<h2>Features</h2>
+<ul>
+<li>Monitor devices across multiple integrations (Z-Wave,
+Matter, BLE, Shelly, etc.)</li>
+<li>Detect unavailable or unknown entity states</li>
+<li>Detect stale devices (no state report within threshold)</li>
+<li>Per-device persistent notifications with auto-clear
+on recovery</li>
+<li>Include/exclude integration filtering (empty include
+means all integrations)</li>
+<li>Regex-based device and entity exclusion filters</li>
+<li>Configurable entity domain filtering</li>
+<li>Configurable check interval and staleness threshold</li>
+<li>Notification cap to limit per-device notifications</li>
+<li>Diagnostic entity check: notifies when recommended
+diagnostic entities (e.g., Last seen, Node status)
+are disabled</li>
+<li>Per-check selection so exclusion lists can be scoped
+per check (instantiate the blueprint once per check)</li>
+<li>Optional debug logging</li>
+</ul>
+<h2>Requirements</h2>
+<p>PyScript must be configured with:</p>
+<pre><code class="language-yaml">pyscript:
+  allow_all_imports: true
+  hass_is_global: true
+</code></pre>
+<h2>Usage</h2>
+<ol>
+<li>Install the automation (see main README)</li>
+<li>Go to <strong>Settings &gt; Automations &amp; Scenes &gt; Blueprints</strong></li>
+<li>Click <strong>Device Watchdog</strong></li>
+<li>Configure integrations and thresholds</li>
+<li>Save and enable</li>
+</ol>
+<h2>Configuration</h2>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Include integrations</td>
+<td>Integration IDs to monitor. Empty means all.</td>
+</tr>
+<tr>
+<td>Exclude integrations</td>
+<td>Integration IDs to skip even if included.</td>
+</tr>
+<tr>
+<td>Device exclude regex</td>
+<td>Skip devices whose name matches. One pattern per line.</td>
+</tr>
+<tr>
+<td>Entity ID exclude regex</td>
+<td>Skip entities whose ID matches. One pattern per line.</td>
+</tr>
+<tr>
+<td>Entity domains to monitor</td>
+<td>Only check entities in these domains</td>
+</tr>
+<tr>
+<td>Check interval (minutes)</td>
+<td>Minutes between watchdog evaluations</td>
+</tr>
+<tr>
+<td>Dead device threshold (minutes)</td>
+<td>Staleness threshold for state reports</td>
+</tr>
+<tr>
+<td>Enabled checks</td>
+<td>Which checks to run (<code>unavailable-entities</code>, <code>device-updates</code>, <code>disabled-diagnostics</code>). Empty means all.</td>
+</tr>
+<tr>
+<td>Max device notifications</td>
+<td>Cap on per-device notifications. 0 = unlimited.</td>
+</tr>
+<tr>
+<td>Debug logging</td>
+<td>Log debug info to HA logs</td>
+</tr>
+</tbody>
+</table>
+<p>See the blueprint UI for default values.</p>
+<h2>Usage notes</h2>
+<h3>Notifications</h3>
+<p>Each device with health issues gets its own persistent
+notification. Notifications are automatically dismissed
+when devices recover.</p>
+<h3>Notification panel ordering</h3>
+<p>The order of notifications in the HA notification panel
+may change between evaluation runs. This is because each
+run re-creates all active notifications (to update
+content if health changed), which updates their
+timestamps. Since all creates happen within milliseconds,
+the panel's display order is effectively random. The
+same devices are shown -- only the panel ordering varies.</p>
+<h2>Developer notes</h2>
+<h3>Entity attributes</h3>
+<p>After each evaluation, attributes are written to
+<code>pyscript.&lt;automation-name&gt;_state</code> (e.g.,
+<code>pyscript.automation_device_watchdog_state</code>). Search
+for <code>pyscript.*_state</code> in Developer Tools &gt; States
+to find it.</p>
+<ul>
+<li><code>last_run</code>: ISO timestamp of last evaluation</li>
+<li><code>runtime</code>: Evaluation time in seconds</li>
+<li><code>integrations</code>: Total integrations discovered</li>
+<li><code>devices</code>: Total devices discovered</li>
+<li><code>entities</code>: Total entities discovered for included devices</li>
+<li><code>integrations_excluded</code>: Integrations excluded by filters</li>
+<li><code>devices_excluded</code>: Devices excluded by device filters</li>
+<li><code>entities_excluded</code>: Entities excluded by entity filters</li>
+<li><code>device_issues</code>: Devices with issues</li>
+<li><code>entity_issues</code>: Entities with issues</li>
+<li><code>device_stale_issues</code>: Devices flagged as stale</li>
+</ul>
+<h3>Debug logging</h3>
+<p>Enable the <strong>Debug Logging</strong> toggle in the blueprint. Debug
+output appears in <strong>Settings &gt; System &gt; Logs</strong>. Uses
+<code>log.warning</code> level (HA's default for custom components).</p>
+<p>Example output for an automation named &quot;Device Watchdog&quot;:</p>
+<pre><code>[DW: Device Watchdog] integrations=12 devices=45
+  entities=320 device_issues=2 entity_issues=5
+</code></pre>
+</body>
+</html>
