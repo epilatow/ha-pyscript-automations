@@ -22,5 +22,31 @@
         }
       }
     }
+  },
+  "issues": {
+    "install_conflicts": {
+      "title": "Install conflicts",
+      "description": "The integration found existing files or symlinks at one or more destinations it wants to install to. Click Submit to remove and replace them, or Ignore if you'd like to keep what's there.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Overwrite conflicting paths?",
+            "description": "The following paths will be removed and replaced with symlinks pointing into the integration's bundled payload:\n\n{conflicts}\n\nDirectories listed above will not be removed automatically; move them aside before retrying."
+          }
+        }
+      }
+    },
+    "install_failure": {
+      "title": "Install failure",
+      "description": "The integration could not complete its install. Fix the underlying problem on disk, then click Submit to retry.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Retry install?",
+            "description": "The previous install reported these errors:\n\n{errors}\n\nClick Submit to re-run the install."
+          }
+        }
+      }
+    }
   }
 }

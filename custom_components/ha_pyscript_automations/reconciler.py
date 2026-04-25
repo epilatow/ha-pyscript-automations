@@ -151,6 +151,8 @@ def _classify_destination(
     expected_target: Path,
     prior_manifest: frozenset[Path],
     mode: Mode,
+    *,
+    force_overwrite: bool = False,
 ) -> tuple[ActionKind | None, Conflict | None]:
     """Inspect the current state of ``destination`` and decide.
 
@@ -162,6 +164,15 @@ def _classify_destination(
     REMOVE actions are not produced here; they're synthesized
     by ``plan`` from ``prior_manifest`` entries that fall out
     of the current bundled set.
+
+    ``force_overwrite=True`` (used by the Repairs Overwrite
+    flow) treats any existing destination as ours-to-replace:
+    same-target symlinks are still KEEP, anything else
+    (wrong-target symlink, regular file, dir, special) gets
+    an UPDATE action. The installer's UPDATE handler unlinks
+    + recreates; on a directory destination the unlink raises
+    IsADirectoryError, which surfaces as an install_failure
+    repair issue rather than silently destroying the dir.
     """
     # Missing destination (including a broken dangling symlink
     # target) counts as absent for install purposes. But a
@@ -173,6 +184,9 @@ def _classify_destination(
         expected_target_str = str(expected_target)
         if current_target == expected_target_str:
             return ActionKind.KEEP, None
+
+        if force_overwrite:
+            return ActionKind.UPDATE, None
 
         recognized = destination in prior_manifest
         if mode == Mode.MANUAL and not recognized:
@@ -202,6 +216,9 @@ def _classify_destination(
     if not destination.exists():
         return ActionKind.INSTALL, None
 
+    if force_overwrite:
+        return ActionKind.UPDATE, None
+
     # Exists but not a symlink: some kind of real path we
     # will not clobber without an explicit Repairs action.
     if destination.is_file():
@@ -230,6 +247,7 @@ def plan(
     prior_manifest: frozenset[Path],
     mode: Mode = Mode.HACS,
     cli_symlink_dir: Path | None = None,
+    force_destinations: frozenset[Path] = frozenset(),
 ) -> ReconcilePlan:
     """Compute a reconcile plan.
 
@@ -246,6 +264,12 @@ def plan(
         cli_symlink_dir: If given, install ``bundled/cli/*.py``
             into this directory. If None (default), CLI files
             are not installed.
+        force_destinations: Destinations the caller explicitly
+            wants to overwrite (the Repairs Overwrite flow
+            passes the previously-flagged conflict dests
+            here). Any of these that already have something
+            other than the expected symlink become UPDATE
+            actions instead of conflicts.
     """
     mapping = _destination_mapping(bundled_root, config_root, cli_symlink_dir)
 
@@ -261,6 +285,7 @@ def plan(
             expected_target=target,
             prior_manifest=prior_manifest,
             mode=mode,
+            force_overwrite=dest in force_destinations,
         )
         if conflict is not None:
             conflicts.append(conflict)

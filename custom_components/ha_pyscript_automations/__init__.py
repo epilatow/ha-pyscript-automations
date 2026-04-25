@@ -24,10 +24,18 @@ from typing import TYPE_CHECKING
 
 from . import installer, reconciler
 from .const import (
+    DOMAIN,
     OPTION_CLI_SYMLINK_DIR,
     STORAGE_KEY,
     STORAGE_VERSION,
 )
+
+# Repairs issue IDs are duplicated here (the source-of-
+# truth lives in repairs.py) rather than imported, so this
+# module's import graph stays HA-free for the unit tests
+# that import via the package path.
+_ISSUE_INSTALL_CONFLICTS = "install_conflicts"
+_ISSUE_INSTALL_FAILURE = "install_failure"
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -147,6 +155,81 @@ async def _async_options_updated(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _surface_conflicts(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    conflicts: tuple[reconciler.Conflict, ...],
+) -> None:
+    from homeassistant.helpers import issue_registry as ir
+
+    if not conflicts:
+        ir.async_delete_issue(hass, DOMAIN, _ISSUE_INSTALL_CONFLICTS)
+        return
+    serialised = [
+        {
+            "destination": str(c.destination),
+            "kind": c.kind,
+            "details": c.details,
+        }
+        for c in conflicts
+    ]
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _ISSUE_INSTALL_CONFLICTS,
+        is_fixable=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=_ISSUE_INSTALL_CONFLICTS,
+        data={
+            "entry_id": entry.entry_id,
+            "conflicts": serialised,
+            "conflict_destinations": [str(c.destination) for c in conflicts],
+        },
+    )
+
+
+def _surface_failure(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    errors: list[str],
+) -> None:
+    from homeassistant.helpers import issue_registry as ir
+
+    if not errors:
+        ir.async_delete_issue(hass, DOMAIN, _ISSUE_INSTALL_FAILURE)
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _ISSUE_INSTALL_FAILURE,
+        is_fixable=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key=_ISSUE_INSTALL_FAILURE,
+        data={
+            "entry_id": entry.entry_id,
+            "errors": list(errors),
+        },
+    )
+
+
+def _consume_pending_force_destinations(
+    hass: HomeAssistant,
+) -> frozenset[Path]:
+    """Pop and return any force_destinations the Repairs flow stashed.
+
+    The Repairs ``InstallConflictsFlow`` writes the
+    user-confirmed destinations into ``hass.data[DOMAIN]``
+    and triggers an integration reload; this call (which
+    runs inside the next ``async_setup_entry``) consumes
+    them so they don't leak into a subsequent reconcile.
+    """
+    bucket = hass.data.get(DOMAIN, {})
+    raw = bucket.pop("pending_force_destinations", None)
+    if not raw:
+        return frozenset()
+    return frozenset(Path(p) for p in raw)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -158,6 +241,7 @@ async def async_setup_entry(
     )
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     prior = await _load_prior_manifest(hass)
+    force_destinations = _consume_pending_force_destinations(hass)
 
     plan = await hass.async_add_executor_job(
         functools.partial(
@@ -167,6 +251,7 @@ async def async_setup_entry(
             prior_manifest=prior,
             mode=reconciler.Mode.HACS,
             cli_symlink_dir=cli_symlink_dir,
+            force_destinations=force_destinations,
         ),
     )
 
@@ -183,6 +268,9 @@ async def async_setup_entry(
                 c.kind,
                 c.details,
             )
+
+    _surface_conflicts(hass, entry, plan.conflicts)
+    _surface_failure(hass, entry, result.errors)
 
     await _save_manifest(hass, plan.new_manifest)
 
