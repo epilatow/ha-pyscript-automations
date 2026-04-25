@@ -1,7 +1,7 @@
 {
   "domain": "ha_pyscript_automations",
   "name": "HA PyScript Automations",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "documentation": "https://github.com/epilatow/ha-pyscript-automations",
   "issue_tracker": "https://github.com/epilatow/ha-pyscript-automations/issues",
   "codeowners": [

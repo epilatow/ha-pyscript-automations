@@ -7,6 +7,7 @@ blueprint:
     like automations, scripts, helpers, and template sensors
     (one aggregate notification). Clears notifications
     automatically when drift is resolved.
+    [Full documentation](/local/ha_pyscript_automations/docs/entity_defaults_watchdog.html).
   domain: automation
   author: epilatow
 

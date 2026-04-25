@@ -9,6 +9,7 @@ blueprint:
     entries whose backing YAML block or UI-helper record has
     been removed -- in a single summary notification. All
     notifications clear automatically once fixed.
+    [Full documentation](/local/ha_pyscript_automations/docs/reference_watchdog.html).
   domain: automation
   author: epilatow
 

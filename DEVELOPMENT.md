@@ -2,10 +2,9 @@
 
 ## Repo layout
 
-This repo is preparing to ship as a HACS-distributed
-custom integration. Two external constraints drive the
-top-level layout; everything below that is our own
-convention.
+This repo ships as a HACS-distributed custom integration.
+Two external constraints drive the top-level layout;
+everything below that is our own convention.
 
 Home Assistant's custom-integration loader looks for
 integrations at `/config/custom_components/<domain>/`,
@@ -22,14 +21,14 @@ outside that subtree at install time. So every file we
 want users to receive has to live inside
 `custom_components/ha_pyscript_automations/`.
 
-Inside that subtree, the `bundled/` subdirectory is our
-own convention for the blueprints, pyscript modules,
-docs, and CLI script the installer ships to their
-user-visible `/config/...` paths via symlinks. Integration
-code (`__init__.py`, `manifest.json`, `reconciler.py`,
-etc.) will live alongside it at the
-`custom_components/ha_pyscript_automations/` level when
-it arrives in a later commit.
+Integration code (`__init__.py`, `manifest.json`,
+`reconciler.py`, `installer.py`, `config_flow.py`,
+`repairs.py`, etc.) lives at the
+`custom_components/ha_pyscript_automations/` level. The
+`bundled/` subdirectory is our own convention for the
+blueprints, pyscript modules, docs, and CLI script the
+installer ships to their user-visible `/config/...` paths
+via symlinks.
 
 ```
 custom_components/ha_pyscript_automations/bundled/

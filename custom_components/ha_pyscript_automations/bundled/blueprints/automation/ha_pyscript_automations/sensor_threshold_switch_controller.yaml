@@ -6,6 +6,7 @@ blueprint:
     trigger threshold, OFF when they drop below a release threshold.
     Includes manual override protection, double-off disable, auto-off
     timer for manual activation, and optional notifications.
+    [Full documentation](/local/ha_pyscript_automations/docs/sensor_threshold_switch_controller.html).
   domain: automation
   author: epilatow
 
