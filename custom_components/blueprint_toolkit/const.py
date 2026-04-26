@@ -1,5 +1,5 @@
 # This is AI generated code
-"""Constants for the ha-blueprint-toolkit integration."""
+"""Constants for the blueprint_toolkit integration."""
 
 from __future__ import annotations
 

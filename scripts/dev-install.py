@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # This is AI generated code
-"""HA-node-side installer for ha-blueprint-toolkit.
+"""HA-node-side installer for blueprint_toolkit.
 
 Runs directly on the HA host (invoked remotely by
 ``scripts/dev-deploy.py``) to reconcile the checked-out

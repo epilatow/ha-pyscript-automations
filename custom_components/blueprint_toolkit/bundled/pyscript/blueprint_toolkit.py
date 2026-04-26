@@ -1078,7 +1078,7 @@ def _build_blueprint_mismatch_notification(
     lines.append("")
     lines.append(
         "To fix this issue, please ensure the"
-        " ha-blueprint-toolkit repository is installed"
+        " Blueprint Toolkit integration is installed"
         " correctly and restart Home Assistant.",
     )
     return helpers.PersistentNotification(

@@ -1,5 +1,5 @@
 # This is AI generated code
-"""Pure-function planner for the ha-blueprint-toolkit install.
+"""Pure-function planner for the blueprint_toolkit install.
 
 Given the bundled payload, the target config directory, a
 prior-run manifest, and a mode (HACS vs manual dev-install),
@@ -25,7 +25,7 @@ from pathlib import Path
 
 # Path marker that identifies "ours" in manual mode: any
 # symlink whose target contains this segment is treated as
-# a ha-blueprint-toolkit-owned symlink, regardless of
+# a blueprint_toolkit-owned symlink, regardless of
 # which clone path the target goes through. Lets
 # dev-install.py safely repoint symlinks when the dev
 # clone moves (e.g., /root/old -> /root/new).

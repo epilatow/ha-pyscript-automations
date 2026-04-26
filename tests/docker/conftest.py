@@ -30,7 +30,7 @@ ONBOARD_SCRIPT = HARNESS_DIR / "_harness" / "ha_onboard.py"
 HA_PORT = 8123
 SSH_PORT = 2222
 HA_BASE_URL = f"http://127.0.0.1:{HA_PORT}"
-CONTAINER_NAME = "ha-blueprint-toolkit-test"
+CONTAINER_NAME = "blueprint-toolkit-test"
 
 # Cache for the pyscript custom component. Lives under
 # tests/docker/.cache/pyscript/ (gitignored) so it stays

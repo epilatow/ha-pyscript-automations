@@ -1,5 +1,5 @@
 # This is AI generated code
-# docker-compose for the ha-blueprint-toolkit docker
+# docker-compose for the blueprint_toolkit docker
 # test harness. The pytest fixture at
 # tests/docker/conftest.py brings this up and tears it
 # down per-session. See tests/docker/README.md for manual
@@ -10,8 +10,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ha-blueprint-toolkit-test:latest
-    container_name: ha-blueprint-toolkit-test
+    image: blueprint-toolkit-test:latest
+    container_name: blueprint-toolkit-test
     # Map HA to 8123 and sshd to 2222 on localhost. The
     # pytest fixture connects via these ports.
     ports:

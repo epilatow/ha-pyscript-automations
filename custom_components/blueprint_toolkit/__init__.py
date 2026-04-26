@@ -1,5 +1,5 @@
 # This is AI generated code
-"""ha-blueprint-toolkit integration entry points.
+"""blueprint_toolkit integration entry points.
 
 Wraps the pure-function reconciler and sync installer
 modules in the HA async lifecycle: ``async_setup_entry``

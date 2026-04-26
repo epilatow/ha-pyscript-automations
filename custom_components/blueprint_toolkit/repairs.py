@@ -1,5 +1,5 @@
 # This is AI generated code
-"""Repairs UI integration for ha-blueprint-toolkit.
+"""Repairs UI integration for blueprint_toolkit.
 
 Two issue types surfaced from ``async_setup_entry``:
 

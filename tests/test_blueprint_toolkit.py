@@ -1328,7 +1328,7 @@ class TestBuildBlueprintMismatchNotification:
     def test_body_includes_remediation_hint(self) -> None:
         env = _ServiceEnv()
         n = self._call(env, missing=["x"], extras=[])
-        assert "ha-blueprint-toolkit repository" in n.message
+        assert "Blueprint Toolkit integration" in n.message
         assert "restart Home Assistant" in n.message
 
 

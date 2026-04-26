@@ -1,5 +1,5 @@
 # This is AI generated code
-"""Config and options flows for ha-blueprint-toolkit.
+"""Config and options flows for blueprint_toolkit.
 
 The user-facing flow is intentionally minimal:
 
