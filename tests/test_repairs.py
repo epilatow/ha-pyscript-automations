@@ -244,6 +244,85 @@ class TestIssueClearedOnCleanReconcile:
         assert await _get_issue(hass, ISSUE_INSTALL_FAILURE) is None
 
 
+class TestStaleServiceNotFoundRepairsSweep:
+    """async_setup_entry sweeps automation/service_not_found repairs."""
+
+    async def test_sweep_clears_matching_repairs(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        from homeassistant.helpers import issue_registry as ir
+
+        # Pre-seed three issues that the sweep should clear
+        # (they look exactly like what the automation
+        # integration creates when a blueprint-backed
+        # automation fires before pyscript registers our
+        # services), and one unrelated issue that must
+        # survive.
+        for issue_id in (
+            "automation.foo_service_not_found_pyscript."
+            "device_watchdog_blueprint_entrypoint",
+            "automation.bar_service_not_found_pyscript."
+            "trigger_entity_controller_blueprint_entrypoint",
+            "automation.baz_service_not_found_pyscript."
+            "reference_watchdog_blueprint_entrypoint",
+        ):
+            ir.async_create_issue(
+                hass,
+                "automation",
+                issue_id,
+                is_fixable=True,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="service_not_found",
+            )
+        ir.async_create_issue(
+            hass,
+            "automation",
+            "automation.unrelated_service_not_found_other.something",
+            is_fixable=True,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="service_not_found",
+        )
+
+        registry = ir.async_get(hass)
+
+        def _ours_count() -> int:
+            return sum(
+                1
+                for i in registry.issues.values()
+                if i.domain == "automation"
+                and getattr(i, "translation_key", None) == "service_not_found"
+                and "_blueprint_entrypoint" in i.issue_id
+                and "pyscript." in i.issue_id
+            )
+
+        assert _ours_count() == 3
+        # Unrelated issue should still be there pre-sweep.
+        assert (
+            registry.async_get_issue(
+                "automation",
+                "automation.unrelated_service_not_found_other.something",
+            )
+            is not None
+        )
+
+        # Run setup -- sweep fires at the end.
+        entry = _mock_config_entry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        # Our three were cleared, the unrelated one survived.
+        assert _ours_count() == 0
+        assert (
+            registry.async_get_issue(
+                "automation",
+                "automation.unrelated_service_not_found_other.something",
+            )
+            is not None
+        )
+
+
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "tests/test_repairs.py",

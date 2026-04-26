@@ -212,6 +212,41 @@ def _surface_failure(
     )
 
 
+def _clear_stale_blueprint_service_repairs(hass: HomeAssistant) -> int:
+    """Sweep automation ``service_not_found`` repairs for our services.
+
+    The HA boot orders integration setup in parallel with
+    automation trigger evaluation: if a blueprint-backed
+    automation fires before pyscript's startup scan
+    registers our ``*_blueprint_entrypoint`` services, the
+    automation integration creates a persistent
+    ``service_not_found`` Repairs issue. Subsequent
+    successful service calls do not clear that issue, so it
+    sits in the UI until the user dismisses it manually.
+
+    This sweep runs after the synchronous ``pyscript.reload``
+    above, at which point every blueprint-entrypoint service
+    is guaranteed to be registered. Any matching issue in
+    the registry is therefore stale, and we delete it.
+    Returns the count of issues cleared (for logging).
+    """
+    from homeassistant.helpers import issue_registry as ir
+
+    registry = ir.async_get(hass)
+    targets: list[tuple[str, str]] = []
+    for issue in list(registry.issues.values()):
+        if (
+            issue.domain == "automation"
+            and getattr(issue, "translation_key", None) == "service_not_found"
+            and "_blueprint_entrypoint" in issue.issue_id
+            and "pyscript." in issue.issue_id
+        ):
+            targets.append((issue.domain, issue.issue_id))
+    for domain, issue_id in targets:
+        ir.async_delete_issue(hass, domain, issue_id)
+    return len(targets)
+
+
 def _consume_pending_force_destinations(
     hass: HomeAssistant,
 ) -> frozenset[Path]:
@@ -292,6 +327,19 @@ async def async_setup_entry(
         pyscript=True,
         automation=result.changed,
     )
+
+    # The pyscript.reload above closes the race for any
+    # automation that fires *after* our setup, but boot-time
+    # triggers (which are most of them on a restart) fire
+    # before our setup runs and have already created stale
+    # service_not_found repairs by now. Sweep them up.
+    cleared = _clear_stale_blueprint_service_repairs(hass)
+    if cleared:
+        _LOGGER.info(
+            "cleared %d stale service_not_found repair(s) "
+            "for blueprint-backed automations",
+            cleared,
+        )
 
     _register_docs_static_route(hass)
 
