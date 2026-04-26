@@ -149,6 +149,7 @@ class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "tests/test_manifest.py",
         "scripts/bump-manifest-version.py",
+        "scripts/release.py",
     ]
     # mypy follows the conftest import and trips on
     # pre-existing type-ignore residue in tests/conftest.py

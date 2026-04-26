@@ -551,6 +551,42 @@ edit the manifest by hand instead -- the test only
 checks that the version is strictly greater than the
 parent's, not that it's exactly +1.
 
+### Releasing (tag + GitHub release)
+
+HACS surfaces installable versions from GitHub Releases.
+Once at least one Release exists in the repo, HACS shows
+only Releases as version candidates -- commits pushed to
+master between Releases are invisible to users until the
+next Release is published. (Pre-first-Release, HACS
+falls back to tracking the latest commit SHA, but that
+state ends as soon as the first Release lands and never
+returns.) Tagging and releasing are kept separate from
+`git push` so a manifest bump can sit on master without
+auto-publishing -- run `scripts/release.py` only when you
+want HACS users to see the new version:
+
+```bash
+git push                       # land commits on origin
+scripts/release.py             # then publish the version at HEAD
+scripts/release.py --dry-run   # see what it would do
+```
+
+The script reads the version from HEAD's `manifest.json`,
+creates the local annotated tag `vX.Y.Z` if missing,
+pushes the tag, and creates the GitHub release via `gh`
+(release notes default to HEAD's commit body). Each step
+is idempotent, so re-running after a partial failure
+picks up where the previous run stopped.
+
+Refuses if HEAD isn't reachable from `origin/master` --
+push commits before publishing the release.
+
+Non-bumping commits at HEAD (docs-only follow-ups,
+comment fixes, etc.) are detected (the version's tag
+already exists at an older ancestor commit) and the
+script exits cleanly without creating a duplicate
+release.
+
 ### Code quality
 
 Lint, format, and type checks are included in each test
