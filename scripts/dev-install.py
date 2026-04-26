@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # This is AI generated code
-"""HA-node-side installer for ha-pyscript-automations.
+"""HA-node-side installer for ha-blueprint-toolkit.
 
 Runs directly on the HA host (invoked remotely by
 ``scripts/dev-deploy.py``) to reconcile the checked-out
@@ -13,7 +13,7 @@ to have ``uv`` installed. Python 3.11+ stdlib only.
 Usage
 -----
 
-    dev-install.py --repo-dir /root/ha-pyscript-automations \
+    dev-install.py --repo-dir /root/ha-blueprint-toolkit \
                    --ha-config /config \
                    [--cli-symlink-dir /root/] \
                    [--dry-run]
@@ -29,7 +29,7 @@ State
 -----
 
 A small JSON manifest is written to
-``<ha-config>/.ha_pyscript_automations.manifest.json`` listing
+``<ha-config>/.blueprint_toolkit.manifest.json`` listing
 the destination paths we currently own. Subsequent runs diff
 against this file so stale symlinks (from files that used to
 be bundled but aren't anymore) get removed.
@@ -49,14 +49,14 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from custom_components.ha_pyscript_automations import installer  # noqa: E402
-from custom_components.ha_pyscript_automations.reconciler import (  # noqa: E402
+from custom_components.blueprint_toolkit import installer  # noqa: E402
+from custom_components.blueprint_toolkit.reconciler import (  # noqa: E402
     ActionKind,
     Mode,
     plan,
 )
 
-MANIFEST_FILENAME = ".ha_pyscript_automations.manifest.json"
+MANIFEST_FILENAME = ".blueprint_toolkit.manifest.json"
 
 
 def _load_manifest(ha_config: Path) -> frozenset[Path]:
@@ -94,7 +94,7 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         required=True,
         help=(
-            "Absolute path to the ha-pyscript-automations "
+            "Absolute path to the ha-blueprint-toolkit "
             "clone on this host (not the HA config dir)."
         ),
     )
@@ -122,9 +122,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _bundled_root(repo_dir: Path) -> Path:
-    return (
-        repo_dir / "custom_components" / "ha_pyscript_automations" / "bundled"
-    )
+    return repo_dir / "custom_components" / "blueprint_toolkit" / "bundled"
 
 
 def main() -> int:

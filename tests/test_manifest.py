@@ -14,7 +14,7 @@
 
 Two rules tested here:
 
-1. ``custom_components/ha_pyscript_automations/manifest.json``'s
+1. ``custom_components/blueprint_toolkit/manifest.json``'s
    ``version`` increments whenever any file under
    ``custom_components/`` changes between HEAD~1 and HEAD,
    and stays equal otherwise. Catches both missed bumps
@@ -44,7 +44,7 @@ from conftest import CodeQualityBase
 from packaging.version import Version
 
 REPO_ROOT = Path(__file__).parent.parent
-MANIFEST_REL = "custom_components/ha_pyscript_automations/manifest.json"
+MANIFEST_REL = "custom_components/blueprint_toolkit/manifest.json"
 MANIFEST_PATH = REPO_ROOT / MANIFEST_REL
 
 

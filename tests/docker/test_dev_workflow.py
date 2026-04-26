@@ -30,7 +30,7 @@ from conftest import (
 pytestmark = pytest.mark.docker
 
 # The six blueprint entrypoint services registered by
-# pyscript/ha_pyscript_automations.py. Verifying all six
+# pyscript/blueprint_toolkit.py. Verifying all six
 # appear is our "load succeeded" signal.
 EXPECTED_SERVICES = frozenset(
     {
@@ -54,17 +54,17 @@ EXPECTED_SERVICES = frozenset(
 # side rather than HA's loader).
 EXPECTED_BLUEPRINTS = frozenset(
     {
-        "ha_pyscript_automations/device_watchdog.yaml",
-        "ha_pyscript_automations/entity_defaults_watchdog.yaml",
-        "ha_pyscript_automations/reference_watchdog.yaml",
-        "ha_pyscript_automations/sensor_threshold_switch_controller.yaml",
-        "ha_pyscript_automations/trigger_entity_controller.yaml",
-        "ha_pyscript_automations/zwave_route_manager.yaml",
+        "blueprint_toolkit/device_watchdog.yaml",
+        "blueprint_toolkit/entity_defaults_watchdog.yaml",
+        "blueprint_toolkit/reference_watchdog.yaml",
+        "blueprint_toolkit/sensor_threshold_switch_controller.yaml",
+        "blueprint_toolkit/trigger_entity_controller.yaml",
+        "blueprint_toolkit/zwave_route_manager.yaml",
     },
 )
 
 # Matches scripts/dev-deploy.py DEFAULT_INSTALL_PATH.
-REPO_ON_HOST = "/root/ha-pyscript-automations"
+REPO_ON_HOST = "/root/ha-blueprint-toolkit"
 
 
 def _registered_blueprints(docker_ha: DockerHA) -> set[str]:
@@ -117,10 +117,10 @@ def _clear_installed_symlinks(docker_ha: DockerHA) -> None:
     Leaves the repo clone and HA state alone.
     """
     docker_ha.exec_shell(
-        "rm -f /config/pyscript/ha_pyscript_automations.py && "
+        "rm -f /config/pyscript/blueprint_toolkit.py && "
         "rm -rf /config/pyscript/modules /config/blueprints "
-        "/config/www/ha_pyscript_automations && "
-        "rm -f /config/.ha_pyscript_automations.manifest.json",
+        "/config/www/blueprint_toolkit && "
+        "rm -f /config/.blueprint_toolkit.manifest.json",
     )
 
 
@@ -147,11 +147,11 @@ class TestDevInstallEndToEnd:
         )
 
         check = docker_ha.exec_shell(
-            "test -L /config/pyscript/ha_pyscript_automations.py",
+            "test -L /config/pyscript/blueprint_toolkit.py",
             check=False,
         )
         assert check.returncode == 0, (
-            "expected /config/pyscript/ha_pyscript_automations.py "
+            "expected /config/pyscript/blueprint_toolkit.py "
             "to be a symlink after dev-install"
         )
         # Note: bundled/www/ is not installed by the
@@ -199,7 +199,7 @@ class TestDevInstallEndToEnd:
             _all_blueprints_registered,
             timeout=30,
             message=(
-                "ha_pyscript_automations blueprints not visible to "
+                "blueprint_toolkit blueprints not visible to "
                 "HA's blueprint loader after automation.reload"
             ),
         )
@@ -220,7 +220,7 @@ class TestDevDeployEndToEnd:
     ) -> None:
         _clear_installed_symlinks(docker_ha)
 
-        # Target: /root/ha-pyscript-automations (matches
+        # Target: /root/ha-blueprint-toolkit (matches
         # dev-deploy's default install path).
         copy_repo_into_container(REPO_ON_HOST)
         # Source: /root/source (separate clone we can edit
@@ -250,7 +250,7 @@ class TestDevDeployEndToEnd:
         # something to ship.
         marker = "# dev-deploy-test-marker\n"
         edited_path = (
-            "custom_components/ha_pyscript_automations/bundled/"
+            "custom_components/blueprint_toolkit/bundled/"
             "pyscript/modules/helpers.py"
         )
         docker_ha.exec_shell(

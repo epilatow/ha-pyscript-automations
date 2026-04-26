@@ -1,9 +1,9 @@
 {
-  "domain": "ha_pyscript_automations",
-  "name": "HA PyScript Automations",
-  "version": "0.0.2",
-  "documentation": "https://github.com/epilatow/ha-pyscript-automations",
-  "issue_tracker": "https://github.com/epilatow/ha-pyscript-automations/issues",
+  "domain": "blueprint_toolkit",
+  "name": "Blueprint Toolkit",
+  "version": "0.0.3",
+  "documentation": "https://github.com/epilatow/ha-blueprint-toolkit",
+  "issue_tracker": "https://github.com/epilatow/ha-blueprint-toolkit/issues",
   "codeowners": [
     "@epilatow"
   ],

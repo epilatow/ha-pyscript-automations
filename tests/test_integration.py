@@ -10,7 +10,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Integration-side tests for ha_pyscript_automations.
+"""Integration-side tests for blueprint_toolkit.
 
 Exercises the HA-async wiring around the reconciler and
 installer:
@@ -26,7 +26,7 @@ Pure-function reconciler logic is covered separately by
 ``tests/test_reconciler.py``; pure-function installer
 logic by integration with the dev CLI in
 ``tests/test_dev_install.py``. This file's job is the
-plumbing in ``custom_components/ha_pyscript_automations/__init__.py``.
+plumbing in ``custom_components/blueprint_toolkit/__init__.py``.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from conftest import CodeQualityBase  # noqa: E402
 # scope pulls those transitively, so we defer all
 # pytest-HACC + integration-package imports until inside
 # the test functions themselves.
-DOMAIN = "ha_pyscript_automations"
+DOMAIN = "blueprint_toolkit"
 OPTION_CLI_SYMLINK_DIR = "cli_symlink_dir"
 STORAGE_KEY = f"{DOMAIN}.installed"
 
@@ -60,20 +60,18 @@ def install_our_integration(hass, enable_custom_integrations):  # noqa: ANN001
 
     pytest-HACC's hass.config.config_dir is its own
     testing_config dir, not the repo root. We symlink our
-    custom_components/ha_pyscript_automations/ into there
+    custom_components/blueprint_toolkit/ into there
     so HA's loader finds it. enable_custom_integrations
     clears HA's loader cache so the symlink takes effect.
     """
     import shutil
 
     src = (
-        Path(__file__).parent.parent
-        / "custom_components"
-        / "ha_pyscript_automations"
+        Path(__file__).parent.parent / "custom_components" / "blueprint_toolkit"
     )
     cc = Path(hass.config.config_dir) / "custom_components"
     cc.mkdir(exist_ok=True)
-    dst = cc / "ha_pyscript_automations"
+    dst = cc / "blueprint_toolkit"
     if dst.is_symlink() or dst.exists():
         if dst.is_dir() and not dst.is_symlink():
             shutil.rmtree(dst)
@@ -120,7 +118,7 @@ def _expected_destinations(config_dir: Path) -> set[Path]:
     bundled = (
         Path(__file__).parent.parent
         / "custom_components"
-        / "ha_pyscript_automations"
+        / "blueprint_toolkit"
         / "bundled"
     )
     out: set[Path] = set()
@@ -147,7 +145,7 @@ class TestConfigFlow:
             user_input={},
         )
         assert result["type"] == "create_entry"
-        assert result["title"] == "HA PyScript Automations"
+        assert result["title"] == "Blueprint Toolkit"
 
     async def test_second_entry_aborts(self, hass) -> None:  # noqa: ANN001
         existing = _mock_config_entry(domain=DOMAIN, data={})
@@ -254,7 +252,7 @@ class TestDocsStaticRoute:
         hass_client,  # noqa: ANN001
     ) -> None:
         # async_setup_entry registers an aiohttp static
-        # route at /local/ha_pyscript_automations/docs/
+        # route at /local/blueprint_toolkit/docs/
         # pointing directly at the bundled docs subtree
         # (HA's default /local/ handler can't follow our
         # symlinks; see the long comment in __init__.py
@@ -270,7 +268,7 @@ class TestDocsStaticRoute:
         # is "Device Watchdog" -- a stable substring that
         # surviving content changes.
         resp = await client.get(
-            "/local/ha_pyscript_automations/docs/device_watchdog.html",
+            "/local/blueprint_toolkit/docs/device_watchdog.html",
         )
         assert resp.status == 200, (
             f"static route returned {resp.status} -- "
@@ -310,9 +308,9 @@ class TestRemoveEntry:
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "tests/test_integration.py",
-        "custom_components/ha_pyscript_automations/__init__.py",
-        "custom_components/ha_pyscript_automations/config_flow.py",
-        "custom_components/ha_pyscript_automations/const.py",
+        "custom_components/blueprint_toolkit/__init__.py",
+        "custom_components/blueprint_toolkit/config_flow.py",
+        "custom_components/blueprint_toolkit/const.py",
     ]
     # mypy strict on HA-importing modules requires HA type
     # stubs which the package does not ship; we rely on

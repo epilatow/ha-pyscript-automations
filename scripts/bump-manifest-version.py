@@ -27,10 +27,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = (
-    REPO_ROOT
-    / "custom_components"
-    / "ha_pyscript_automations"
-    / "manifest.json"
+    REPO_ROOT / "custom_components" / "blueprint_toolkit" / "manifest.json"
 )
 
 

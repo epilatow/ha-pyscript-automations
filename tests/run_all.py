@@ -4,7 +4,7 @@
 # dependencies = []
 # ///
 # This is AI generated code
-"""Unified test runner for ha-pyscript-automations.
+"""Unified test runner for ha-blueprint-toolkit.
 
 Discovers and runs all test files in tests/, reporting
 a summary of results.
@@ -136,7 +136,7 @@ def print_summary(results: list[TestResult]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     return argparse.ArgumentParser(
-        description=("Run all tests for ha-pyscript-automations."),
+        description=("Run all tests for ha-blueprint-toolkit."),
         epilog="""\
 exit codes:
   0  All tests passed

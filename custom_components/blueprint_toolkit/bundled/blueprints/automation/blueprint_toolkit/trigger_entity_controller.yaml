@@ -6,7 +6,7 @@ blueprint:
     entities when trigger sensors activate, with
     configurable time-of-day restrictions, disabling
     entities, and force-on behavior.
-    [Full documentation](/local/ha_pyscript_automations/docs/trigger_entity_controller.html).
+    [Full documentation](/local/blueprint_toolkit/docs/trigger_entity_controller.html).
   domain: automation
   author: epilatow
 

@@ -776,7 +776,7 @@ def _build_config_error_notification(
 
 # Hardcoded because ``__file__`` is NameError under
 # pyscript's AST evaluator.
-_WRAPPER_BASENAME = "ha_pyscript_automations.py"
+_WRAPPER_BASENAME = "blueprint_toolkit.py"
 
 
 _BLUEPRINT_SERVICES: dict[
@@ -1078,7 +1078,7 @@ def _build_blueprint_mismatch_notification(
     lines.append("")
     lines.append(
         "To fix this issue, please ensure the"
-        " ha-pyscript-automations repository is installed"
+        " ha-blueprint-toolkit repository is installed"
         " correctly and restart Home Assistant.",
     )
     return helpers.PersistentNotification(

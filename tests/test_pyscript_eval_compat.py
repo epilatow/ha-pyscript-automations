@@ -15,7 +15,7 @@
 """Run every pyscript file through the real PyScript AstEval.
 
 The other ``TestPyScriptCompatibility`` class in
-``test_ha_pyscript_automations.py`` uses static AST
+``test_blueprint_toolkit.py`` uses static AST
 scans to catch a curated list of known-bad patterns.
 That list only grows when we get burned in production.
 
@@ -71,7 +71,7 @@ REPO_ROOT = Path(__file__).parent.parent
 # name.  The evaluator covers every pyscript file,
 # so pick the service wrapper as a representative
 # entry point.
-_SCRIPT_PATH = REPO_ROOT / "pyscript" / "ha_pyscript_automations.py"
+_SCRIPT_PATH = REPO_ROOT / "pyscript" / "blueprint_toolkit.py"
 
 PYSCRIPT_VERSION = "1.7.0"
 _PYSCRIPT_REPO_URL = "https://github.com/custom-components/pyscript.git"
@@ -237,7 +237,7 @@ _PYSCRIPT_DIR = _ensure_pyscript_clone()
 sys.path.insert(0, str(_PYSCRIPT_DIR))
 # Inter-module imports inside a pyscript file (e.g.
 # ``from helpers import ...`` inside
-# ha_pyscript_automations.py) fall through to
+# blueprint_toolkit.py) fall through to
 # importlib via the allow_all_imports path, so
 # pyscript/modules/ must be reachable by name.
 sys.path.insert(0, str(REPO_ROOT / "pyscript" / "modules"))

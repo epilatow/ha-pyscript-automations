@@ -7,13 +7,13 @@
 """Render automation docs from markdown to HTML.
 
 Walks every ``*.md`` under
-``custom_components/ha_pyscript_automations/bundled/docs/`` and
+``custom_components/blueprint_toolkit/bundled/docs/`` and
 writes a corresponding ``<stem>.html`` into
-``custom_components/ha_pyscript_automations/bundled/www/ha_pyscript_automations/docs/``.
+``custom_components/blueprint_toolkit/bundled/www/blueprint_toolkit/docs/``.
 HACS ships the ``bundled/`` subtree; when the integration's
 reconciler installs it, the HTML directory lands under
-``/config/www/ha_pyscript_automations/docs/`` and becomes
-reachable at ``/local/ha_pyscript_automations/docs/<stem>.html``
+``/config/www/blueprint_toolkit/docs/`` and becomes
+reachable at ``/local/blueprint_toolkit/docs/<stem>.html``
 -- the URL the blueprint descriptions link to.
 
 Usage
@@ -62,19 +62,15 @@ from markdown_it import MarkdownIt
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_SRC = (
-    REPO_ROOT
-    / "custom_components"
-    / "ha_pyscript_automations"
-    / "bundled"
-    / "docs"
+    REPO_ROOT / "custom_components" / "blueprint_toolkit" / "bundled" / "docs"
 )
 DOCS_DST = (
     REPO_ROOT
     / "custom_components"
-    / "ha_pyscript_automations"
+    / "blueprint_toolkit"
     / "bundled"
     / "www"
-    / "ha_pyscript_automations"
+    / "blueprint_toolkit"
     / "docs"
 )
 

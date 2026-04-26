@@ -1,5 +1,5 @@
 # This is AI generated code
-"""Repairs UI integration for ha-pyscript-automations.
+"""Repairs UI integration for ha-blueprint-toolkit.
 
 Two issue types surfaced from ``async_setup_entry``:
 

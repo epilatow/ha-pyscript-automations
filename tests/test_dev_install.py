@@ -26,7 +26,7 @@ from conftest import CodeQualityBase
 
 REPO_ROOT = Path(__file__).parent.parent
 DEV_INSTALL = REPO_ROOT / "scripts" / "dev-install.py"
-MANIFEST_FILENAME = ".ha_pyscript_automations.manifest.json"
+MANIFEST_FILENAME = ".blueprint_toolkit.manifest.json"
 
 
 # ---- Helpers --------------------------------------------------
@@ -34,26 +34,26 @@ MANIFEST_FILENAME = ".ha_pyscript_automations.manifest.json"
 
 def _make_fake_repo(root: Path) -> Path:
     """Build a minimal bundled/ tree and return the repo root."""
-    bundled = root / "custom_components" / "ha_pyscript_automations" / "bundled"
-    (bundled / "blueprints" / "automation" / "ha_pyscript_automations").mkdir(
+    bundled = root / "custom_components" / "blueprint_toolkit" / "bundled"
+    (bundled / "blueprints" / "automation" / "blueprint_toolkit").mkdir(
         parents=True
     )
     (bundled / "pyscript" / "modules").mkdir(parents=True)
-    (bundled / "www" / "ha_pyscript_automations" / "docs").mkdir(parents=True)
+    (bundled / "www" / "blueprint_toolkit" / "docs").mkdir(parents=True)
     (bundled / "cli").mkdir(parents=True)
 
     (
         bundled
         / "blueprints"
         / "automation"
-        / "ha_pyscript_automations"
+        / "blueprint_toolkit"
         / "demo.yaml"
     ).write_text("blueprint: {}\n")
-    (bundled / "pyscript" / "ha_pyscript_automations.py").write_text("# svc\n")
+    (bundled / "pyscript" / "blueprint_toolkit.py").write_text("# svc\n")
     (bundled / "pyscript" / "modules" / "demo.py").write_text("# module\n")
-    (
-        bundled / "www" / "ha_pyscript_automations" / "docs" / "demo.html"
-    ).write_text("<html>demo</html>\n")
+    (bundled / "www" / "blueprint_toolkit" / "docs" / "demo.html").write_text(
+        "<html>demo</html>\n"
+    )
     (bundled / "cli" / "demo_cli.py").write_text(
         "#!/usr/bin/env python3\n",
     )
@@ -112,8 +112,8 @@ class TestFreshInstall:
         # the integration registers an aiohttp static
         # route directly at the bundled docs dir instead.
         assert created == {
-            "blueprints/automation/ha_pyscript_automations/demo.yaml",
-            "pyscript/ha_pyscript_automations.py",
+            "blueprints/automation/blueprint_toolkit/demo.yaml",
+            "pyscript/blueprint_toolkit.py",
             "pyscript/modules/demo.py",
         }
 
@@ -129,7 +129,7 @@ class TestFreshInstall:
             (
                 repo
                 / "custom_components"
-                / "ha_pyscript_automations"
+                / "blueprint_toolkit"
                 / "bundled"
                 / "pyscript"
                 / "modules"
@@ -244,7 +244,7 @@ class TestConflicts:
             "dev-install must not overwrite regular files"
         )
         # Other files still got installed.
-        assert (config / "pyscript/ha_pyscript_automations.py").is_symlink()
+        assert (config / "pyscript/blueprint_toolkit.py").is_symlink()
 
 
 # ---- Stale-removal path ---------------------------------------
@@ -267,7 +267,7 @@ class TestStaleRemoval:
         (
             repo
             / "custom_components"
-            / "ha_pyscript_automations"
+            / "blueprint_toolkit"
             / "bundled"
             / "pyscript"
             / "modules"

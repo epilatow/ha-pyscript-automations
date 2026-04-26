@@ -1,7 +1,7 @@
 [project]
-name = "ha-pyscript-automations"
+name = "ha-blueprint-toolkit"
 version = "1.0.0"
-description = "Home Assistant automations with testable PyScript actions"
+description = "Home Assistant blueprints backed by testable PyScript actions"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

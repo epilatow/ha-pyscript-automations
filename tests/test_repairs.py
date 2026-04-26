@@ -10,7 +10,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Repairs flow tests for ha_pyscript_automations.
+"""Repairs flow tests for blueprint_toolkit.
 
 Two flows under test:
 
@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
 
-DOMAIN = "ha_pyscript_automations"
+DOMAIN = "blueprint_toolkit"
 ISSUE_INSTALL_CONFLICTS = "install_conflicts"
 ISSUE_INSTALL_FAILURE = "install_failure"
 
@@ -57,13 +57,11 @@ def install_our_integration(hass, enable_custom_integrations):  # noqa: ANN001
     would otherwise leak into the next.
     """
     src = (
-        Path(__file__).parent.parent
-        / "custom_components"
-        / "ha_pyscript_automations"
+        Path(__file__).parent.parent / "custom_components" / "blueprint_toolkit"
     )
     cc = Path(hass.config.config_dir) / "custom_components"
     cc.mkdir(exist_ok=True)
-    dst = cc / "ha_pyscript_automations"
+    dst = cc / "blueprint_toolkit"
     if dst.is_symlink() or dst.exists():
         if dst.is_dir() and not dst.is_symlink():
             shutil.rmtree(dst)
@@ -110,7 +108,7 @@ def _conflict_destination(config_dir: Path) -> Path:
     Used to pre-seed an unexpected symlink/dir there so
     the reconciler classifies it as a conflict.
     """
-    return config_dir / "pyscript" / "ha_pyscript_automations.py"
+    return config_dir / "pyscript" / "blueprint_toolkit.py"
 
 
 async def _get_issue(hass, issue_id: str):  # noqa: ANN001, ANN202
@@ -186,7 +184,7 @@ class TestInstallConflictsFlow:
 
         assert dest.is_symlink()
         resolved = os.path.realpath(dest)
-        assert "/ha_pyscript_automations/bundled/" in resolved, (
+        assert "/blueprint_toolkit/bundled/" in resolved, (
             f"expected bundled-target after overwrite, got {resolved}"
         )
 
@@ -249,7 +247,7 @@ class TestIssueClearedOnCleanReconcile:
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "tests/test_repairs.py",
-        "custom_components/ha_pyscript_automations/repairs.py",
+        "custom_components/blueprint_toolkit/repairs.py",
     ]
     mypy_targets: list[str] = []
 

@@ -11,7 +11,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Tests for the pyscript/ha_pyscript_automations.py bridge.
+"""Tests for the pyscript/blueprint_toolkit.py bridge.
 
 Uses exec() with mock globals to test the service file
 in isolation, matching how PyScript loads user scripts
@@ -40,7 +40,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).parent.parent
 
 # Path to the script under test (used for coverage)
-_SCRIPT_PATH = REPO_ROOT / "pyscript" / "ha_pyscript_automations.py"
+_SCRIPT_PATH = REPO_ROOT / "pyscript" / "blueprint_toolkit.py"
 
 # All pyscript .py files (service wrappers + modules)
 _PYSCRIPT_DIR = REPO_ROOT / "pyscript"
@@ -1323,12 +1323,12 @@ class TestBuildBlueprintMismatchNotification:
             blueprint_basename="my_bp.yaml",
         )
         assert "my_bp.yaml" in n.message
-        assert "ha_pyscript_automations.py" in n.message
+        assert "blueprint_toolkit.py" in n.message
 
     def test_body_includes_remediation_hint(self) -> None:
         env = _ServiceEnv()
         n = self._call(env, missing=["x"], extras=[])
-        assert "ha-pyscript-automations repository" in n.message
+        assert "ha-blueprint-toolkit repository" in n.message
         assert "restart Home Assistant" in n.message
 
 
@@ -1545,7 +1545,7 @@ class TestBlueprintYamlMatchesRegistry:
     """
 
     _BLUEPRINT_DIR = (
-        REPO_ROOT / "blueprints" / "automation" / "ha_pyscript_automations"
+        REPO_ROOT / "blueprints" / "automation" / "blueprint_toolkit"
     )
 
     def test_all_blueprints_match_registry(self) -> None:
@@ -4897,7 +4897,7 @@ _ER_MODULE_NAMES = (
 
 
 class _DiscoverDevicelessEnv:
-    """Exec's ha_pyscript_automations.py and drives its
+    """Exec's blueprint_toolkit.py and drives its
     real ``_discover_deviceless_entities``.
 
     Paired with the ``discover_env`` fixture, which handles
@@ -5813,7 +5813,7 @@ class TestImportBan:
 
     def _scan_paths(self) -> list[Path]:
         return [
-            REPO_ROOT / "pyscript" / "ha_pyscript_automations.py",
+            REPO_ROOT / "pyscript" / "blueprint_toolkit.py",
             *sorted((REPO_ROOT / "pyscript" / "modules").glob("*.py")),
         ]
 
@@ -5862,11 +5862,11 @@ class TestImportBan:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/ha_pyscript_automations.py",
-        "tests/test_ha_pyscript_automations.py",
+        "pyscript/blueprint_toolkit.py",
+        "tests/test_blueprint_toolkit.py",
     ]
     mypy_targets = [
-        "pyscript/ha_pyscript_automations.py",
+        "pyscript/blueprint_toolkit.py",
     ]
 
 

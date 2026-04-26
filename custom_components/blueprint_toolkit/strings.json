@@ -2,18 +2,18 @@
   "config": {
     "step": {
       "user": {
-        "title": "HA PyScript Automations",
+        "title": "Blueprint Toolkit",
         "description": "Set up the integration. Click Submit to install the bundled blueprints, pyscript modules, and rendered docs into your config directory."
       }
     },
     "abort": {
-      "single_instance_allowed": "Only one instance of HA PyScript Automations can be configured."
+      "single_instance_allowed": "Only one instance of Blueprint Toolkit can be configured."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "HA PyScript Automations Options",
+        "title": "Blueprint Toolkit Options",
         "data": {
           "cli_symlink_dir": "CLI symlink directory"
         },

@@ -1,5 +1,5 @@
 # This is AI generated code
-# Docker image used by the ha-pyscript-automations docker
+# Docker image used by the ha-blueprint-toolkit docker
 # test harness. Extends the upstream Home Assistant image
 # with openssh-server, git, and bash so the in-repo test
 # suite can exercise scripts/install.sh and

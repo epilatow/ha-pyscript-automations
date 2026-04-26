@@ -8,7 +8,7 @@ blueprint:
     route changes. Failed reconciles retry automatically on the
     next minute-granularity tick. Requires the core_zwave_js
     addon (which bundles zwave-js-ui).
-    [Full documentation](/local/ha_pyscript_automations/docs/zwave_route_manager.html)
+    [Full documentation](/local/blueprint_toolkit/docs/zwave_route_manager.html)
     covers the YAML file format.
   domain: automation
   author: epilatow

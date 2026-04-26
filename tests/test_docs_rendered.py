@@ -17,7 +17,7 @@ asserts exit 0. The renderer itself enforces three things:
 
     1. Every markdown source under bundled/docs/ has a
        corresponding rendered HTML under
-       bundled/www/ha_pyscript_automations/docs/.
+       bundled/www/blueprint_toolkit/docs/.
     2. No orphan HTML exists without a matching markdown
        source.
     3. The committed HTML matches what the renderer

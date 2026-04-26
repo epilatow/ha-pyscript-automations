@@ -13,10 +13,10 @@
 """Drift test for blueprint -> rendered-doc links.
 
 Each blueprint under
-``bundled/blueprints/automation/ha_pyscript_automations/``
+``bundled/blueprints/automation/blueprint_toolkit/``
 must include a ``[Full documentation](/local/...)`` markdown
 link in its description, and the target HTML file must
-exist under ``bundled/www/ha_pyscript_automations/docs/``.
+exist under ``bundled/www/blueprint_toolkit/docs/``.
 
 The link points at the integration's own aiohttp static
 route (registered in ``async_setup_entry``), not at HA's
@@ -39,22 +39,22 @@ REPO_ROOT = Path(__file__).parent.parent
 BLUEPRINTS_DIR = (
     REPO_ROOT
     / "custom_components"
-    / "ha_pyscript_automations"
+    / "blueprint_toolkit"
     / "bundled"
     / "blueprints"
     / "automation"
-    / "ha_pyscript_automations"
+    / "blueprint_toolkit"
 )
 RENDERED_DOCS_DIR = (
     REPO_ROOT
     / "custom_components"
-    / "ha_pyscript_automations"
+    / "blueprint_toolkit"
     / "bundled"
     / "www"
-    / "ha_pyscript_automations"
+    / "blueprint_toolkit"
     / "docs"
 )
-LINK_URL_PREFIX = "/local/ha_pyscript_automations/docs/"
+LINK_URL_PREFIX = "/local/blueprint_toolkit/docs/"
 
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 from conftest import CodeQualityBase  # noqa: E402

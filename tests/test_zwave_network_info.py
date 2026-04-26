@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).parent.parent
 _SCRIPT_PATH = (
     REPO_ROOT
     / "custom_components"
-    / "ha_pyscript_automations"
+    / "blueprint_toolkit"
     / "bundled"
     / "cli"
     / "zwave_network_info.py"
@@ -1186,11 +1186,11 @@ class TestRenderTable:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "custom_components/ha_pyscript_automations/bundled/cli/zwave_network_info.py",
+        "custom_components/blueprint_toolkit/bundled/cli/zwave_network_info.py",
         "tests/test_zwave_network_info.py",
     ]
     mypy_targets = [
-        "custom_components/ha_pyscript_automations/bundled/cli/zwave_network_info.py",
+        "custom_components/blueprint_toolkit/bundled/cli/zwave_network_info.py",
     ]
 
 

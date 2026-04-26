@@ -6,7 +6,7 @@
 """Deploy this repo to a Home Assistant host.
 
 Ships every git-tracked file to the install path on the HA
-host (default /root/ha-pyscript-automations), removes files
+host (default /root/ha-blueprint-toolkit), removes files
 the host has under owned top-level entries that git does
 not, runs scripts/dev-install.py on the host to reconcile
 the /config/... symlinks, then fires pyscript.reload and
@@ -41,7 +41,7 @@ from pathlib import Path
 DEFAULT_HOST = "root@homeassistant"
 # Outside of /config/ so the clone never collides with the
 # HACS-installed tree under /config/custom_components/.
-DEFAULT_INSTALL_PATH = "/root/ha-pyscript-automations"
+DEFAULT_INSTALL_PATH = "/root/ha-blueprint-toolkit"
 DEFAULT_HA_CONFIG = "/config"
 
 
@@ -159,13 +159,13 @@ def diff_files(
 
 # After the HACS migration, the on-host repo has symlinks
 # at its root (blueprints/, pyscript/, docs/) that resolve
-# into custom_components/ha_pyscript_automations/bundled/.
+# into custom_components/blueprint_toolkit/bundled/.
 # Any file change under bundled/ affects HA's view via those
 # symlinks, so we always fire both reload services when
 # anything ships -- keeping the heuristic simple and
 # impossible to get wrong in a way that leaves HA serving
 # stale code.
-_BUNDLED_PREFIX = "custom_components/ha_pyscript_automations/bundled/"
+_BUNDLED_PREFIX = "custom_components/blueprint_toolkit/bundled/"
 
 
 def plan_reloads(

@@ -1,5 +1,5 @@
 # This is AI generated code
-"""ha-pyscript-automations integration entry points.
+"""ha-blueprint-toolkit integration entry points.
 
 Wraps the pure-function reconciler and sync installer
 modules in the HA async lifecycle: ``async_setup_entry``
@@ -115,7 +115,7 @@ async def _fire_reload_services(
 
 
 def _register_docs_static_route(hass: HomeAssistant) -> None:
-    """Serve rendered docs at /local/ha_pyscript_automations/docs/.
+    """Serve rendered docs at /local/blueprint_toolkit/docs/.
 
     HA's default ``/local/`` handler refuses to follow
     symlinks whose targets escape ``/config/www/``, and is
@@ -127,7 +127,7 @@ def _register_docs_static_route(hass: HomeAssistant) -> None:
     load this integration) see broken /local/ doc links --
     a documented dev-install limitation.
     """
-    docs_dir = _BUNDLED_ROOT / "www" / "ha_pyscript_automations" / "docs"
+    docs_dir = _BUNDLED_ROOT / "www" / "blueprint_toolkit" / "docs"
     if not docs_dir.is_dir():
         _LOGGER.warning(
             "docs directory missing under bundled payload: %s",
@@ -135,7 +135,7 @@ def _register_docs_static_route(hass: HomeAssistant) -> None:
         )
         return
     hass.http.app.router.add_static(
-        prefix="/local/ha_pyscript_automations/docs",
+        prefix="/local/blueprint_toolkit/docs",
         path=str(docs_dir),
         show_index=False,
     )

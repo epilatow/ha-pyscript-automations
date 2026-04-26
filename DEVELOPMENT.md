@@ -10,32 +10,32 @@ Home Assistant's custom-integration loader looks for
 integrations at `/config/custom_components/<domain>/`,
 where `<domain>` matches the integration's `manifest.json`
 domain. That's why the repo's installable code lives
-under `custom_components/ha_pyscript_automations/` --
+under `custom_components/blueprint_toolkit/` --
 when HACS (or a developer's manual install) puts that
-subtree at `/config/custom_components/ha_pyscript_automations/`,
+subtree at `/config/custom_components/blueprint_toolkit/`,
 HA finds it.
 
 HACS itself only downloads files from the repo that live
 under `custom_components/<name>/`; it discards everything
 outside that subtree at install time. So every file we
 want users to receive has to live inside
-`custom_components/ha_pyscript_automations/`.
+`custom_components/blueprint_toolkit/`.
 
 Integration code (`__init__.py`, `manifest.json`,
 `reconciler.py`, `installer.py`, `config_flow.py`,
 `repairs.py`, etc.) lives at the
-`custom_components/ha_pyscript_automations/` level. The
+`custom_components/blueprint_toolkit/` level. The
 `bundled/` subdirectory is our own convention for the
 blueprints, pyscript modules, docs, and CLI script the
 installer ships to their user-visible `/config/...` paths
 via symlinks.
 
 ```
-custom_components/ha_pyscript_automations/bundled/
-    blueprints/automation/ha_pyscript_automations/*.yaml
+custom_components/blueprint_toolkit/bundled/
+    blueprints/automation/blueprint_toolkit/*.yaml
     cli/zwave_network_info.py
     docs/*.md
-    pyscript/ha_pyscript_automations.py
+    pyscript/blueprint_toolkit.py
     pyscript/modules/*.py
 ```
 
@@ -44,16 +44,16 @@ bundle for path-typing convenience and so existing test
 paths keep resolving:
 
 ```
-blueprints -> custom_components/ha_pyscript_automations/bundled/blueprints
-pyscript   -> custom_components/ha_pyscript_automations/bundled/pyscript
-docs       -> custom_components/ha_pyscript_automations/bundled/docs
+blueprints -> custom_components/blueprint_toolkit/bundled/blueprints
+pyscript   -> custom_components/blueprint_toolkit/bundled/pyscript
+docs       -> custom_components/blueprint_toolkit/bundled/docs
 ```
 
 These are real git symlinks (mode 120000). They live
 outside HACS's download path and are never shipped to
 users. When referring to files, either path works --
 `pyscript/modules/foo.py` and
-`custom_components/ha_pyscript_automations/bundled/pyscript/modules/foo.py`
+`custom_components/blueprint_toolkit/bundled/pyscript/modules/foo.py`
 resolve to the same file.
 
 **POSIX filesystem required for development.** The repo
@@ -75,7 +75,7 @@ All automations follow a three-layer architecture:
 1. **Blueprint** (`blueprints/.../name.yaml`) -- defines HA
    triggers and user-configurable inputs. Calls a pyscript
    service. Contains no logic.
-2. **Service wrapper** (`pyscript/ha_pyscript_automations.py`)
+2. **Service wrapper** (`pyscript/blueprint_toolkit.py`)
    -- runs under PyScript's AST evaluator. Has access to
    PyScript-injected globals (`state`, `hass`,
    `homeassistant`, `service`, `log`, etc.). Parses inputs,
@@ -112,7 +112,7 @@ All Python files begin with `# This is AI generated code`.
   PEP 723 shebang `#!/usr/bin/env -S uv run --script` with
   inline dependency declarations.
 - **Module files** (`pyscript/modules/*.py`,
-  `pyscript/ha_pyscript_automations.py`) have no shebang.
+  `pyscript/blueprint_toolkit.py`) have no shebang.
   They are imported, not executed directly.
 
 ### Test files
@@ -207,7 +207,7 @@ All code has type annotations and mypy strict enforcement:
 
 - **Logic modules** (`pyscript/modules/*.py`) -- fully
   typed, checked by mypy strict.
-- **Service wrapper** (`pyscript/ha_pyscript_automations.py`)
+- **Service wrapper** (`pyscript/blueprint_toolkit.py`)
   -- fully typed, with `TYPE_CHECKING` stubs for
   PyScript-injected globals (`state`, `homeassistant`,
   `service`, `log`, `persistent_notification`, `hass`).
@@ -330,7 +330,7 @@ async def trigger_entity_controller_blueprint_entrypoint(**kwargs):
 
 The entrypoint is ``async def`` because ``_dispatch_blueprint_service``
 awaits the module-reload read lock. See "Module reload coordination" in
-``pyscript/ha_pyscript_automations.py`` for why the lock is async.
+``pyscript/blueprint_toolkit.py`` for why the lock is async.
 
 The registry is the single source of truth wired by
 both the dispatcher and the `TestBlueprintExpectedKeys`
@@ -394,11 +394,11 @@ that ships alongside the integration so HACS users can
 click a "Full documentation" link from each blueprint
 directly to a local page.
 
-- Source: `custom_components/ha_pyscript_automations/bundled/docs/*.md`
+- Source: `custom_components/blueprint_toolkit/bundled/docs/*.md`
   (also reachable via the `docs/` symlink at the repo
   root).
 - Rendered:
-  `custom_components/ha_pyscript_automations/bundled/www/ha_pyscript_automations/docs/*.html`.
+  `custom_components/blueprint_toolkit/bundled/www/blueprint_toolkit/docs/*.html`.
   Committed alongside the source.
 - Renderer: `scripts/render_docs.py` (CommonMark +
   tables, minimal inline-CSS template, `markdown-it-py`
@@ -432,7 +432,7 @@ The rendered HTML is **not** installed under
 
 Instead, the integration's `async_setup_entry`
 registers its own aiohttp static route at
-`/local/ha_pyscript_automations/docs/` pointing
+`/local/blueprint_toolkit/docs/` pointing
 directly at the bundled docs directory. Real files,
 no symlinks, no dependency on `/config/www/`.
 
@@ -452,7 +452,7 @@ renumbering.
 ## PyScript AST Constraints
 
 All pyscript files -- both the service wrapper
-(`ha_pyscript_automations.py`) and logic modules
+(`blueprint_toolkit.py`) and logic modules
 (`pyscript/modules/*.py`) -- run under PyScript's
 custom AST evaluator, which has restrictions. Even
 though some logic modules are called via
@@ -531,7 +531,7 @@ options flow, async_setup_entry, async_remove_entry).
 ### Manifest version bump rule
 
 The integration version in
-`custom_components/ha_pyscript_automations/manifest.json`
+`custom_components/blueprint_toolkit/manifest.json`
 must increment with every commit that changes anything
 under `custom_components/`, and stay equal otherwise.
 `tests/test_manifest.py` enforces both this rule and the
@@ -568,7 +568,7 @@ evaluator incompatibilities before deployment:
 
 - **Static scan**
   (`TestPyScriptCompatibility` in
-  `test_ha_pyscript_automations.py`) -- walks the AST
+  `test_blueprint_toolkit.py`) -- walks the AST
   of every `pyscript/**/*.py` file and flags known-bad
   patterns (generators, lambda, yield, bare `open()`,
   `sorted(key=func)`, etc.). Fast and gives precise
@@ -606,7 +606,7 @@ uvx mypy pyscript/ --strict
 
 - **Deploy with `scripts/dev-deploy.py`.** Ships every
   git-tracked file to the install path on the HA host
-  (default `/root/ha-pyscript-automations`; outside
+  (default `/root/ha-blueprint-toolkit`; outside
   `/config/` so it never collides with a HACS install),
   removes files the host has under owned top-level
   entries that git does not, then invokes
@@ -629,10 +629,10 @@ uvx mypy pyscript/ --strict
   Python (no uv). Reads the checked-out repo under
   `--repo-dir` and reconciles its bundled payload into
   `/config/blueprints/`, `/config/pyscript/`,
-  `/config/www/ha_pyscript_automations/`, and optionally
+  `/config/www/blueprint_toolkit/`, and optionally
   `<cli-symlink-dir>/` as symlinks pointing back into the
   bundled subtree. Idempotent; tracks state in
-  `<ha-config>/.ha_pyscript_automations.manifest.json`
+  `<ha-config>/.blueprint_toolkit.manifest.json`
   so stale symlinks from renamed or removed bundled
   files get cleaned up on the next run. Refuses to
   overwrite regular files at any destination; existing
@@ -643,7 +643,7 @@ uvx mypy pyscript/ --strict
 
 - **Run `pyscript.reload` after pyscript changes.**
   Re-imports every file under `pyscript/`. Needed when
-  you touch `pyscript/ha_pyscript_automations.py` or any
+  you touch `pyscript/blueprint_toolkit.py` or any
   `pyscript/modules/*.py`. Reload picks up the current
   `@service` signatures and module contents:
   ```bash
@@ -656,7 +656,7 @@ uvx mypy pyscript/ --strict
   Re-reads `automations.yaml` *and* re-renders
   blueprint-backed automation actions from the current
   blueprint YAML. Needed when you touch any
-  `blueprints/automation/ha_pyscript_automations/*.yaml`
+  `blueprints/automation/blueprint_toolkit/*.yaml`
   file. Without this, HA keeps dispatching the cached
   rendered action, so if a blueprint input was renamed
   or removed the service call still arrives with the

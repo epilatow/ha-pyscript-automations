@@ -1,9 +1,9 @@
 # This is AI generated code
-"""Constants for the ha-pyscript-automations integration."""
+"""Constants for the ha-blueprint-toolkit integration."""
 
 from __future__ import annotations
 
-DOMAIN = "ha_pyscript_automations"
+DOMAIN = "blueprint_toolkit"
 
 # Persisted manifest of installed destination paths so the
 # next reconcile knows what we own and what to remove when

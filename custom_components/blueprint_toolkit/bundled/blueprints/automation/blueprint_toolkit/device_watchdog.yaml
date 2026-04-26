@@ -6,7 +6,7 @@ blueprint:
     unavailable entities or stop reporting state within
     the configured window. Clears notifications
     automatically when devices recover.
-    [Full documentation](/local/ha_pyscript_automations/docs/device_watchdog.html).
+    [Full documentation](/local/blueprint_toolkit/docs/device_watchdog.html).
   domain: automation
   author: epilatow
 

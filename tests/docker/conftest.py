@@ -30,7 +30,7 @@ ONBOARD_SCRIPT = HARNESS_DIR / "_harness" / "ha_onboard.py"
 HA_PORT = 8123
 SSH_PORT = 2222
 HA_BASE_URL = f"http://127.0.0.1:{HA_PORT}"
-CONTAINER_NAME = "ha-pyscript-automations-test"
+CONTAINER_NAME = "ha-blueprint-toolkit-test"
 
 # Cache for the pyscript custom component. Lives under
 # tests/docker/.cache/pyscript/ (gitignored) so it stays
@@ -462,13 +462,13 @@ def copy_repo_into_container(container_path: str) -> None:
 
 @pytest.fixture
 def repo_in_config(docker_ha: DockerHA) -> str:
-    """Ensure /config/ha-pyscript-automations is a fresh repo clone.
+    """Ensure /config/ha-blueprint-toolkit is a fresh repo clone.
 
     Returns the container-side path. Each test calling
     this gets a clean clone; the fixture re-copies on
     every invocation.
     """
-    path = "/config/ha-pyscript-automations"
+    path = "/config/ha-blueprint-toolkit"
     copy_repo_into_container(path)
     # git 2.35+ refuses cross-uid repos without this.
     docker_ha.exec_shell(

@@ -1,4 +1,4 @@
-# ha-pyscript-automations
+# Blueprint Toolkit
 
 Home Assistant automations built as native HA blueprints that call
 [PyScript](https://github.com/custom-components/pyscript) actions.
@@ -57,7 +57,7 @@ Standalone diagnostic and inspection tools that ship alongside
 the automations. Live in the bundled payload and run from the
 HA host.
 
-- [Z-Wave Network Info](custom_components/ha_pyscript_automations/bundled/cli/zwave_network_info.py) -
+- [Z-Wave Network Info](custom_components/blueprint_toolkit/bundled/cli/zwave_network_info.py) -
   Tabular per-node view of the Z-Wave mesh: protocol (Mesh/LR),
   signal-strength quality, configured priority routes, and
   opt-in stat columns (RX/TX counts, drop counts, drop rates,
@@ -92,13 +92,13 @@ HA host.
    and choose **Custom repositories**. Add this repo's URL with
    the **Integration** type.
 
-4. Find **HA PyScript Automations** in HACS and click
+4. Find **Blueprint Toolkit** in HACS and click
    **Download**.
 
 5. Restart Home Assistant.
 
 6. Go to **Settings > Devices & Services > Add Integration** and
-   add **HA PyScript Automations**. The integration installs the
+   add **Blueprint Toolkit**. The integration installs the
    bundled blueprints, pyscript modules, and rendered docs into
    your `/config/` directory.
 

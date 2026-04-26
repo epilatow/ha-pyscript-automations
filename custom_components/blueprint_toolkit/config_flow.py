@@ -1,5 +1,5 @@
 # This is AI generated code
-"""Config and options flows for ha-pyscript-automations.
+"""Config and options flows for ha-blueprint-toolkit.
 
 The user-facing flow is intentionally minimal:
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from homeassistant.data_entry_flow import FlowResult
 
 
-class HaPyScriptAutomationsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class BlueprintToolkitConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Single-step config flow with no required inputs."""
 
     VERSION = 1
@@ -43,7 +43,7 @@ class HaPyScriptAutomationsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="single_instance_allowed")
         if user_input is not None:
             return self.async_create_entry(
-                title="HA PyScript Automations",
+                title="Blueprint Toolkit",
                 data={},
             )
         return self.async_show_form(
@@ -55,11 +55,11 @@ class HaPyScriptAutomationsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
-    ) -> HaPyScriptAutomationsOptionsFlow:
-        return HaPyScriptAutomationsOptionsFlow()
+    ) -> BlueprintToolkitOptionsFlow:
+        return BlueprintToolkitOptionsFlow()
 
 
-class HaPyScriptAutomationsOptionsFlow(config_entries.OptionsFlow):
+class BlueprintToolkitOptionsFlow(config_entries.OptionsFlow):
     """One-field options flow for the optional CLI dir.
 
     HA 2026 made ``config_entry`` a read-only property on

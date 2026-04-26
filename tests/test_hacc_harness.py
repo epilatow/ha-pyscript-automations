@@ -17,7 +17,7 @@ pytest-HACC plugin and uses it to validate the parts of
 this repo that need real HA at hand:
 
 - HA's blueprint loader parses every blueprint under
-  ``custom_components/ha_pyscript_automations/bundled/blueprints/``
+  ``custom_components/blueprint_toolkit/bundled/blueprints/``
   without error.
 - A hass fixture comes up cleanly and tears down without
   warnings, proving the harness itself works for the
@@ -62,12 +62,8 @@ yaml.SafeLoader.add_constructor(
 )
 
 REPO_ROOT = Path(__file__).parent.parent
-BUNDLED_ROOT = (
-    REPO_ROOT / "custom_components" / "ha_pyscript_automations" / "bundled"
-)
-BLUEPRINT_DIR = (
-    BUNDLED_ROOT / "blueprints" / "automation" / "ha_pyscript_automations"
-)
+BUNDLED_ROOT = REPO_ROOT / "custom_components" / "blueprint_toolkit" / "bundled"
+BLUEPRINT_DIR = BUNDLED_ROOT / "blueprints" / "automation" / "blueprint_toolkit"
 
 
 class TestHassFixtureSmoke:

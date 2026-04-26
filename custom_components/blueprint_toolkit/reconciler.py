@@ -1,5 +1,5 @@
 # This is AI generated code
-"""Pure-function planner for the ha-pyscript-automations install.
+"""Pure-function planner for the ha-blueprint-toolkit install.
 
 Given the bundled payload, the target config directory, a
 prior-run manifest, and a mode (HACS vs manual dev-install),
@@ -25,11 +25,11 @@ from pathlib import Path
 
 # Path marker that identifies "ours" in manual mode: any
 # symlink whose target contains this segment is treated as
-# a ha-pyscript-automations-owned symlink, regardless of
+# a ha-blueprint-toolkit-owned symlink, regardless of
 # which clone path the target goes through. Lets
 # dev-install.py safely repoint symlinks when the dev
 # clone moves (e.g., /root/old -> /root/new).
-BUNDLED_MARKER = "/custom_components/ha_pyscript_automations/bundled/"
+BUNDLED_MARKER = "/custom_components/blueprint_toolkit/bundled/"
 
 
 class ActionKind(Enum):
@@ -112,7 +112,7 @@ def _destination_mapping(
     # and is only registered at startup if /config/www/
     # already exists. The integration's async_setup_entry
     # registers its own static route at
-    # /local/ha_pyscript_automations/docs/ pointing
+    # /local/blueprint_toolkit/docs/ pointing
     # directly into bundled/www/, which neither requires
     # /config/www/ to exist nor needs to traverse a
     # symlink. dev-install users who don't load the HA
@@ -253,7 +253,7 @@ def plan(
 
     Args:
         bundled_root: Absolute path to
-            ``.../custom_components/ha_pyscript_automations/bundled/``.
+            ``.../custom_components/blueprint_toolkit/bundled/``.
         config_root: Absolute path to HA's ``/config/`` dir.
         prior_manifest: Set of destination paths the installer
             recorded after its last successful apply. Empty on

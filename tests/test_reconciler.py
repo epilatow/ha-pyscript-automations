@@ -4,7 +4,7 @@
 # dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
-"""Tests for custom_components/ha_pyscript_automations/reconciler.py.
+"""Tests for custom_components/blueprint_toolkit/reconciler.py.
 
 All tests exercise pure planning against tempdirs; no HA,
 no subprocess. Covers every ActionKind transition,
@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
 
-from custom_components.ha_pyscript_automations.reconciler import (  # noqa: E402
+from custom_components.blueprint_toolkit.reconciler import (  # noqa: E402
     BUNDLED_MARKER,
     Action,
     ActionKind,
@@ -36,28 +36,28 @@ from custom_components.ha_pyscript_automations.reconciler import (  # noqa: E402
 
 def _make_bundled(root: Path) -> Path:
     """Build a minimal bundled/ tree with one file per subdir."""
-    bundled = root / "custom_components" / "ha_pyscript_automations" / "bundled"
-    (bundled / "blueprints" / "automation" / "ha_pyscript_automations").mkdir(
+    bundled = root / "custom_components" / "blueprint_toolkit" / "bundled"
+    (bundled / "blueprints" / "automation" / "blueprint_toolkit").mkdir(
         parents=True,
     )
     (bundled / "pyscript" / "modules").mkdir(parents=True)
-    (bundled / "www" / "ha_pyscript_automations" / "docs").mkdir(parents=True)
+    (bundled / "www" / "blueprint_toolkit" / "docs").mkdir(parents=True)
     (bundled / "cli").mkdir(parents=True)
 
     (
         bundled
         / "blueprints"
         / "automation"
-        / "ha_pyscript_automations"
+        / "blueprint_toolkit"
         / "demo.yaml"
     ).write_text("blueprint: {}\n")
-    (bundled / "pyscript" / "ha_pyscript_automations.py").write_text(
+    (bundled / "pyscript" / "blueprint_toolkit.py").write_text(
         "# service wrapper\n",
     )
     (bundled / "pyscript" / "modules" / "demo.py").write_text("# module\n")
-    (
-        bundled / "www" / "ha_pyscript_automations" / "docs" / "demo.html"
-    ).write_text("<html>demo</html>\n")
+    (bundled / "www" / "blueprint_toolkit" / "docs" / "demo.html").write_text(
+        "<html>demo</html>\n"
+    )
     (bundled / "cli" / "demo_cli.py").write_text(
         "#!/usr/bin/env python3\n",
     )
@@ -104,8 +104,8 @@ class TestFreshInstall:
         # creates a www/ html file to verify the
         # reconciler ignores it.
         expected_dests = {
-            config / "blueprints/automation/ha_pyscript_automations/demo.yaml",
-            config / "pyscript/ha_pyscript_automations.py",
+            config / "blueprints/automation/blueprint_toolkit/demo.yaml",
+            config / "pyscript/blueprint_toolkit.py",
             config / "pyscript/modules/demo.py",
         }
         assert {a.destination for a in result.actions} == expected_dests
@@ -224,7 +224,7 @@ class TestModeHacsStrict:
         config.mkdir()
         # Pre-seed an unknown symlink at a destination we
         # would install.
-        dest = config / "pyscript/ha_pyscript_automations.py"
+        dest = config / "pyscript/blueprint_toolkit.py"
         dest.parent.mkdir(parents=True)
         other = tmp_path / "whatever.py"
         other.write_text("# other\n")
@@ -252,10 +252,10 @@ class TestModeManualLenient:
         config = tmp_path / "config"
         config.mkdir()
         # Pre-seed a symlink that points into the OLD bundle.
-        dest = config / "pyscript/ha_pyscript_automations.py"
+        dest = config / "pyscript/blueprint_toolkit.py"
         dest.parent.mkdir(parents=True)
         dest.symlink_to(
-            old_bundled / "pyscript" / "ha_pyscript_automations.py",
+            old_bundled / "pyscript" / "blueprint_toolkit.py",
         )
 
         # Prior manifest empty -- we have never run
@@ -278,7 +278,7 @@ class TestModeManualLenient:
         bundled = _make_bundled(tmp_path / "repo")
         config = tmp_path / "config"
         config.mkdir()
-        dest = config / "pyscript/ha_pyscript_automations.py"
+        dest = config / "pyscript/blueprint_toolkit.py"
         dest.parent.mkdir(parents=True)
         other = tmp_path / "other-place.py"
         other.write_text("#\n")
@@ -334,7 +334,7 @@ class TestConflicts:
         config = tmp_path / "config"
         config.mkdir()
         # A directory where we want a symlink.
-        dest = config / "pyscript/ha_pyscript_automations.py"
+        dest = config / "pyscript/blueprint_toolkit.py"
         dest.mkdir(parents=True)
 
         result = plan(
@@ -405,7 +405,7 @@ class TestEmptyBundle:
             tmp_path
             / "repo"
             / "custom_components"
-            / "ha_pyscript_automations"
+            / "blueprint_toolkit"
             / "bundled"
         )
         bundled.mkdir(parents=True)
@@ -432,7 +432,7 @@ class TestEmptyBundle:
             tmp_path
             / "repo"
             / "custom_components"
-            / "ha_pyscript_automations"
+            / "blueprint_toolkit"
             / "bundled"
         )
         (bundled / "pyscript" / "modules").mkdir(parents=True)
@@ -470,14 +470,14 @@ class TestDataclassShapes:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "custom_components/ha_pyscript_automations/reconciler.py",
-        "custom_components/ha_pyscript_automations/installer.py",
-        "custom_components/ha_pyscript_automations/__init__.py",
+        "custom_components/blueprint_toolkit/reconciler.py",
+        "custom_components/blueprint_toolkit/installer.py",
+        "custom_components/blueprint_toolkit/__init__.py",
         "tests/test_reconciler.py",
     ]
     mypy_targets = [
-        "custom_components/ha_pyscript_automations/reconciler.py",
-        "custom_components/ha_pyscript_automations/installer.py",
+        "custom_components/blueprint_toolkit/reconciler.py",
+        "custom_components/blueprint_toolkit/installer.py",
     ]
 
 
@@ -489,7 +489,7 @@ if __name__ == "__main__":
         script_path=(
             Path(__file__).parent.parent
             / "custom_components"
-            / "ha_pyscript_automations"
+            / "blueprint_toolkit"
             / "reconciler.py"
         ),
         repo_root=Path(__file__).parent.parent,

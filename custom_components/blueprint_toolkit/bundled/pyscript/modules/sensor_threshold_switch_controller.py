@@ -588,7 +588,7 @@ def handle_service_call(
     target_switch_entity: str,
     **kwargs: Any,
 ) -> ServiceResult:
-    """Bridge entry point called by ha_pyscript_automations.py.
+    """Bridge entry point called by blueprint_toolkit.py.
 
     Accepts pre-loaded data (no HA dependencies) and
     returns a ``ServiceResult`` describing what the caller
