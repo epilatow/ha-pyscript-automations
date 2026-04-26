@@ -274,8 +274,24 @@ async def async_setup_entry(
 
     await _save_manifest(hass, plan.new_manifest)
 
-    if result.changed:
-        await _fire_reload_services(hass, pyscript=True, automation=True)
+    # pyscript runs its own startup scan asynchronously, and
+    # ``after_dependencies`` only orders us after pyscript's
+    # setup, not after its scan -- so a steady-state restart
+    # (where the reconciler has nothing to change) can land us
+    # before pyscript has registered our blueprint-entrypoint
+    # services, and any automation that fires in that window
+    # logs a service_not_found error and creates a
+    # persistent Repairs issue. Forcing pyscript.reload here
+    # is synchronous (blocking=True) and re-imports every
+    # pyscript file before we return, closing the race.
+    # automation.reload is still gated on result.changed --
+    # re-rendering automations is wasted work when nothing
+    # bundled actually changed.
+    await _fire_reload_services(
+        hass,
+        pyscript=True,
+        automation=result.changed,
+    )
 
     _register_docs_static_route(hass)
 
