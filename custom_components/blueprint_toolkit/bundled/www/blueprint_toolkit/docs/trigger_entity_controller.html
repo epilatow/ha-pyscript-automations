@@ -75,11 +75,8 @@ configured entities are missing or renamed</li>
 <li>Optional debug logging</li>
 </ul>
 <h2>Requirements</h2>
-<p>PyScript must be configured with:</p>
-<pre><code class="language-yaml">pyscript:
-  allow_all_imports: true
-  hass_is_global: true
-</code></pre>
+<p>The Blueprint Toolkit integration must be installed (via HACS or
+manual install). No pyscript dependency.</p>
 <h2>Usage</h2>
 <ol>
 <li>Install the automation (see main README)</li>
@@ -209,18 +206,23 @@ keep-alive: while any listed entity is &quot;on&quot;, auto-off is
 held off; the timer (re)starts when they all return to
 &quot;off&quot;.</p>
 <h2>Developer notes</h2>
-<h3>Entity attributes</h3>
-<p>After each evaluation, attributes are written to
-<code>pyscript.&lt;instance_id&gt;_state</code>:</p>
+<h3>Diagnostic state entity</h3>
+<p>After each evaluation, a diagnostic state entry is written at
+<code>blueprint_toolkit.trigger_entity_controller_&lt;slug&gt;_state</code>,
+where <code>&lt;slug&gt;</code> is the automation's entity_id stripped of its
+<code>automation.</code> prefix. The state value is <code>last_action</code> (NONE,
+TURN_ON, or TURN_OFF); attributes:</p>
 <ul>
+<li><code>instance_id</code>: the automation entity_id</li>
 <li><code>last_run</code>: ISO timestamp of last evaluation</li>
-<li><code>last_action</code>: NONE, TURN_ON, or TURN_OFF</li>
-<li><code>last_reason</code>: Human-readable reason for the decision</li>
 <li><code>last_event</code>: TRIGGER_ON, TRIGGER_OFF, CONTROLLED_ON,
 CONTROLLED_OFF, DISABLING_CHANGED, or TIMER</li>
-<li><code>auto_off_at</code>: ISO timestamp of pending auto-off, or empty</li>
+<li><code>last_reason</code>: human-readable reason for the decision</li>
+<li><code>auto_off_at</code>: ISO timestamp of pending auto-off, or null</li>
 </ul>
-<p>View in <strong>Developer Tools &gt; States</strong>.</p>
+<p>View in <strong>Developer Tools &gt; States</strong> (filter on
+<code>blueprint_toolkit.</code>), query from templates, or surface on a
+dashboard via the entity card.</p>
 <h3>Debug logging</h3>
 <p>Enable the <strong>Debug Logging</strong> toggle in the blueprint. Debug
 output appears in <strong>Settings &gt; System &gt; Logs</strong>. Uses
