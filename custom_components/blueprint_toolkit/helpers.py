@@ -403,24 +403,17 @@ def update_instance_state(
 
     Sets a state entry at
     ``blueprint_toolkit.<service>_<slug>_state`` with
-    ``state`` as the state value (defaults to ``"ok"`` --
+    ``state`` as the state value (defaults to ``"ok"``;
     handlers that have a more meaningful value, e.g. TEC
-    using its ``last_action.name``, override). Common
+    using its ``result.action.name``, override). Common
     diagnostic attributes (``instance_id``, ``last_run``,
-    ``runtime``) are always written; handlers add their
-    own via ``extra_attributes``:
-
-    - TEC: ``last_event``, ``last_action``,
-      ``last_reason``, ``auto_off_at``.
-    - DW / EDW / RW: integration / entity / device /
-      issue counts.
-    - ZRM: applied / pending / errored route counts,
-      circuit-breaker fields.
-    - STSC: last temperature reading, threshold state.
+    ``runtime``) are always written; handlers pass their
+    own through ``extra_attributes``.
 
     The state entity is visible from
     Developer Tools > States, queryable from templates,
-    and consumable by dashboards.
+    and consumable by dashboards. See each port's
+    handler module for the per-port attribute list.
     """
     attributes: dict[str, Any] = {
         "instance_id": instance_id,
