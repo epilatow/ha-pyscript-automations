@@ -142,7 +142,11 @@ def determine_event_type(
     disabling_entities: combined list of all disabling
       entity IDs (trigger + auto-off).
     """
-    if entity_id in ("", "timer", "None", "none"):
+    # Empty entity_id is the blueprint default
+    # (``trigger.entity_id | default('timer', true)``);
+    # ``"timer"`` is the sentinel the handler synthesises
+    # in its restart-recovery + auto-off wakeup paths.
+    if entity_id in ("", "timer"):
         return EventType.TIMER
     if to_state not in ("on", "off"):
         return None

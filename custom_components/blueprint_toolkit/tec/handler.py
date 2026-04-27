@@ -47,7 +47,7 @@ rename signal).
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -229,6 +229,19 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
 # --------------------------------------------------------
 
 
+def _parse_notification_service(service: str) -> tuple[str, str]:
+    """Split a notify-service string into ``(domain, name)``.
+
+    Accepts both ``notify.foo`` (full ``domain.service``)
+    and the bare ``foo`` short form, defaulting to the
+    ``notify`` domain.
+    """
+    if "." in service:
+        domain, name = service.split(".", 1)
+        return domain, name
+    return "notify", service
+
+
 def _instance_id_for_error(raw_data: dict[str, Any]) -> str:
     """Best-effort extraction of instance_id for a config error.
 
@@ -317,10 +330,7 @@ async def _async_argparse(
     # --- HA state: notification service exists ---
     notif = data["notification_service"]
     if notif:
-        if "." in notif:
-            notif_domain, notif_name = notif.split(".", 1)
-        else:
-            notif_domain, notif_name = "notify", notif
+        notif_domain, notif_name = _parse_notification_service(notif)
         if not hass.services.has_service(notif_domain, notif_name):
             errors.append(
                 f"notification service {notif} is not registered",
@@ -510,10 +520,7 @@ async def _send_notification(
     state for a missed user-facing message would be
     worse than a silent miss.
     """
-    if "." in service:
-        domain, name = service.split(".", 1)
-    else:
-        domain, name = "notify", service
+    domain, name = _parse_notification_service(service)
     try:
         await hass.services.async_call(
             domain,
@@ -563,7 +570,7 @@ def _apply_auto_off_at(
 def _make_wakeup(
     hass: HomeAssistant,
     instance_id: str,
-) -> Callable[[datetime], Any]:
+) -> Callable[[datetime], Awaitable[None]]:
     """Build the closure async_call_later will fire at the auto-off time."""
 
     async def _on_wakeup(_now: datetime) -> None:

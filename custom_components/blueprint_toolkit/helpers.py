@@ -299,7 +299,14 @@ def parse_entity_registry_update(
 
     Returns ``None`` when the event is for a non-automation
     entity (the listener fires for every registry change),
-    so callers can early-return cleanly.
+    so callers can early-return cleanly. ``action`` is one
+    of HA's registry actions: ``create`` / ``update`` /
+    ``remove``. The dispatcher in
+    ``register_blueprint_handler`` only acts on ``remove``
+    and ``update`` (renames); ``create`` events are
+    intentionally ignored because new automations come in
+    through the blueprint reload path, which the
+    automation_reload listener covers.
     """
     action = event_data.get("action")
     new_id = event_data.get("entity_id") or ""
