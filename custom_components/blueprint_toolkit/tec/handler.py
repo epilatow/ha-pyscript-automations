@@ -77,8 +77,8 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN
+from ..helpers import emit_config_error, format_notification
 from . import logic
-from .helpers import format_notification
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,6 +86,15 @@ SERVICE_NAME = "trigger_entity_controller"
 NATIVE_BLUEPRINT_PATH = (
     "blueprint_toolkit/trigger_entity_controller_native.yaml"
 )
+
+# Subsystem identifiers for the shared config-error
+# notification convention (see ``..helpers``). These
+# are the canonical, externally-visible names (matching
+# the blueprint stem and service name) rather than the
+# internal ``tec/`` package shorthand, so future ports
+# (``device_watchdog``, etc.) follow the same pattern.
+_SUBSYSTEM = "trigger_entity_controller"
+_SUBSYSTEM_LABEL = "Trigger Entity Controller"
 
 # The variable payload the integration synthesises when
 # re-firing an automation for an auto-off wakeup. The
@@ -241,58 +250,25 @@ def _instance_id_for_error(raw_data: dict[str, Any]) -> str:
     return "unknown"
 
 
-def _config_error_notification_id(instance_id: str) -> str:
-    return f"blueprint_toolkit_tec__{instance_id}__config_error"
-
-
-async def _emit_config_error(
+async def _emit(
     hass: HomeAssistant,
     instance_id: str,
     errors: list[str],
 ) -> None:
-    """Surface argparse failures as a persistent notification.
+    """Dispatch a TEC config-error spec via the shared helper.
 
-    Matches the pyscript model: one notification per
-    instance (deterministic notification_id), so a fresh
-    failure overwrites prior content and a successful
-    invocation can dismiss it.
+    Wraps ``emit_config_error`` with our subsystem
+    constants so the call sites stay short. Empty
+    ``errors`` dismisses any prior config-error
+    notification for this instance, so this can be
+    called unconditionally on every successful argparse.
     """
-    notif_id = _config_error_notification_id(instance_id)
-    title = f"Blueprint Toolkit -- TEC config error: {instance_id}"
-    body_lines = [f"- {e}" for e in errors] or ["(no details)"]
-    message = "\n".join(body_lines)
-    await hass.services.async_call(
-        "persistent_notification",
-        "create",
-        {
-            "notification_id": notif_id,
-            "title": title,
-            "message": message,
-        },
-    )
-    _LOGGER.warning(
-        "TEC native: config error for %s: %s",
-        instance_id,
-        "; ".join(errors),
-    )
-
-
-async def _dismiss_config_error(
-    hass: HomeAssistant,
-    instance_id: str,
-) -> None:
-    """Dismiss a previously-emitted config_error notification.
-
-    The persistent_notification.dismiss service is a
-    no-op when the notification doesn't exist, so we can
-    fire it unconditionally on every successful argparse
-    without checking first.
-    """
-    notif_id = _config_error_notification_id(instance_id)
-    await hass.services.async_call(
-        "persistent_notification",
-        "dismiss",
-        {"notification_id": notif_id},
+    await emit_config_error(
+        hass,
+        subsystem=_SUBSYSTEM,
+        subsystem_label=_SUBSYSTEM_LABEL,
+        instance_id=instance_id,
+        errors=errors,
     )
 
 
@@ -311,14 +287,14 @@ async def _async_argparse(
     try:
         data = _SCHEMA(raw)
     except vol.MultipleInvalid as err:
-        await _emit_config_error(
+        await _emit(
             hass,
             _instance_id_for_error(raw),
             [f"schema: {sub}" for sub in err.errors],
         )
         return
     except vol.Invalid as err:
-        await _emit_config_error(
+        await _emit(
             hass,
             _instance_id_for_error(raw),
             [f"schema: {err}"],
@@ -358,11 +334,11 @@ async def _async_argparse(
                 f"notification service {notif} is not registered",
             )
 
+    # Emit unconditionally: empty ``errors`` dismisses any
+    # prior config-error notification for this instance.
+    await _emit(hass, instance_id, errors)
     if errors:
-        await _emit_config_error(hass, instance_id, errors)
         return
-
-    await _dismiss_config_error(hass, instance_id)
 
     # --- Build the Config dataclass logic.evaluate expects ---
     config = logic.Config(

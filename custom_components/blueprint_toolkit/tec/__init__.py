@@ -14,10 +14,9 @@ Module layout:
   ``pyscript/modules/trigger_entity_controller.py``.
   Identical API and behaviour; the existing TEC tests
   (``tests/test_trigger_entity_controller.py``) cover
-  both copies.
-- ``helpers`` -- subset of ``pyscript/modules/helpers.py``
-  needed by ``logic`` (token-aware notification
-  formatting only).
+  both copies. Imports formatting helpers from the
+  shared ``..helpers`` module (counterpart to
+  ``pyscript/modules/helpers.py``).
 - ``handler`` -- native HA wiring: vol.Schema-driven
   argparse with persistent-notification config-error
   surfacing, three-layer dispatch (entrypoint /

@@ -291,12 +291,12 @@ class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "tests/test_native_tec_logic.py",
         "custom_components/blueprint_toolkit/tec/logic.py",
-        "custom_components/blueprint_toolkit/tec/helpers.py",
         "custom_components/blueprint_toolkit/tec/__init__.py",
+        "custom_components/blueprint_toolkit/helpers.py",
     ]
     mypy_targets: list[str] = [
         "custom_components/blueprint_toolkit/tec/logic.py",
-        "custom_components/blueprint_toolkit/tec/helpers.py",
+        "custom_components/blueprint_toolkit/helpers.py",
     ]
 
 
