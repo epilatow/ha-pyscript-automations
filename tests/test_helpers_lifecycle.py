@@ -187,6 +187,21 @@ class _MockHass:
             coro.close()
 
 
+@dataclass
+class _MockRuntimeData:
+    """Stand-in for the IntegrationData on entry.runtime_data."""
+
+    handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class _MockEntry:
+    """Stand-in for HA's ConfigEntry. Carries runtime_data."""
+
+    entry_id: str = "mock_entry"
+    runtime_data: _MockRuntimeData = field(default_factory=_MockRuntimeData)
+
+
 def _service_handler_stub() -> Callable[[Any, Any], Awaitable[None]]:
     async def _h(_hass: Any, _call: Any) -> None:
         return
@@ -343,6 +358,7 @@ class TestInstanceStateEntityId:
 class TestUpdateInstanceState:
     def test_writes_state_with_attributes(self) -> None:
         hass = _MockHass()
+
         run_at = datetime(2024, 1, 15, 12, 0, 0)
         off_at = datetime(2024, 1, 15, 12, 5, 0)
         helpers.update_instance_state(
@@ -371,6 +387,7 @@ class TestUpdateInstanceState:
 
     def test_auto_off_at_none_serialises_as_none(self) -> None:
         hass = _MockHass()
+
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
             service="trigger_entity_controller",
@@ -384,6 +401,7 @@ class TestUpdateInstanceState:
 
     def test_extra_attributes_merged(self) -> None:
         hass = _MockHass()
+
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
             service="zwave_route_manager",
@@ -410,6 +428,7 @@ class TestProcessPersistentNotifications:
     @pytest.mark.asyncio
     async def test_active_creates(self) -> None:
         hass = _MockHass()
+
         await helpers.process_persistent_notifications(
             hass,  # type: ignore[arg-type]
             [
@@ -432,6 +451,7 @@ class TestProcessPersistentNotifications:
     @pytest.mark.asyncio
     async def test_inactive_dismisses(self) -> None:
         hass = _MockHass()
+
         await helpers.process_persistent_notifications(
             hass,  # type: ignore[arg-type]
             [
@@ -461,9 +481,12 @@ class TestRegisterBlueprintHandler:
     @pytest.mark.asyncio
     async def test_minimal_spec_only_registers_service(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         spec = _make_spec()  # all hooks default to None
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         assert (DOMAIN, spec.service) in hass.services.registered
@@ -479,9 +502,12 @@ class TestRegisterBlueprintHandler:
         self,
     ) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         spec = _make_spec(kick=_kick_stub)
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         # Reload listener wired (kick is enough)
@@ -494,9 +520,12 @@ class TestRegisterBlueprintHandler:
         self,
     ) -> None:
         hass = _MockHass(is_running=False)
+
+        entry = _MockEntry()
         spec = _make_spec(kick=_kick_stub)
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         # Recovery is deferred -- no task created right
@@ -512,6 +541,8 @@ class TestRegisterBlueprintHandler:
         self,
     ) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         # Only on_entity_remove provided -- ER listener
         # should still be wired.
         spec = _make_spec(
@@ -519,6 +550,7 @@ class TestRegisterBlueprintHandler:
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         assert len(hass.bus.listeners.get("entity_registry_updated", [])) == 1
@@ -526,13 +558,17 @@ class TestRegisterBlueprintHandler:
     @pytest.mark.asyncio
     async def test_idempotent_under_re_register(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         spec = _make_spec(kick=_kick_stub)
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         # Service still registered once (re-register
@@ -552,14 +588,18 @@ class TestUnregisterBlueprintHandler:
     @pytest.mark.asyncio
     async def test_removes_service(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         spec = _make_spec()
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         assert (DOMAIN, spec.service) in hass.services.registered
         await helpers.unregister_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         assert (DOMAIN, spec.service) not in hass.services.registered
@@ -567,18 +607,22 @@ class TestUnregisterBlueprintHandler:
     @pytest.mark.asyncio
     async def test_unsubscribes_listeners(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         spec = _make_spec(
             kick=_kick_stub,
             on_entity_remove=lambda _h, _e: None,
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         assert len(hass.bus.listeners["automation_reloaded"]) == 1
         assert len(hass.bus.listeners["entity_registry_updated"]) == 1
         await helpers.unregister_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         assert hass.bus.listeners["automation_reloaded"] == []
@@ -587,16 +631,20 @@ class TestUnregisterBlueprintHandler:
     @pytest.mark.asyncio
     async def test_calls_on_teardown_when_set(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         called: list[bool] = []
         spec = _make_spec(
             on_teardown=lambda _h: called.append(True),
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         await helpers.unregister_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         assert called == [True]
@@ -604,14 +652,18 @@ class TestUnregisterBlueprintHandler:
     @pytest.mark.asyncio
     async def test_no_crash_when_on_teardown_absent(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         spec = _make_spec()  # no on_teardown
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         # Should not raise.
         await helpers.unregister_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
 
@@ -638,12 +690,15 @@ class TestListenerDispatch:
     @pytest.mark.asyncio
     async def test_remove_event_calls_on_entity_remove(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         seen_removes: list[str] = []
         spec = _make_spec(
             on_entity_remove=lambda _h, eid: seen_removes.append(eid),
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         listener = hass.bus.listeners["entity_registry_updated"][0]
@@ -661,6 +716,8 @@ class TestListenerDispatch:
     @pytest.mark.asyncio
     async def test_rename_event_calls_on_entity_rename(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         seen_renames: list[tuple[str, str]] = []
         spec = _make_spec(
             on_entity_rename=lambda _h, old, new: seen_renames.append(
@@ -669,6 +726,7 @@ class TestListenerDispatch:
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         listener = hass.bus.listeners["entity_registry_updated"][0]
@@ -686,12 +744,15 @@ class TestListenerDispatch:
     @pytest.mark.asyncio
     async def test_non_automation_event_is_ignored(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         seen: list[str] = []
         spec = _make_spec(
             on_entity_remove=lambda _h, eid: seen.append(eid),
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         listener = hass.bus.listeners["entity_registry_updated"][0]
@@ -713,6 +774,8 @@ class TestListenerDispatch:
         # but old_id == new_id (no rename). The dispatcher
         # must skip both the rename and remove paths.
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         seen_removes: list[str] = []
         seen_renames: list[tuple[str, str]] = []
         spec = _make_spec(
@@ -723,6 +786,7 @@ class TestListenerDispatch:
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         listener = hass.bus.listeners["entity_registry_updated"][0]
@@ -742,6 +806,8 @@ class TestListenerDispatch:
     @pytest.mark.asyncio
     async def test_reload_event_calls_on_reload_then_recovery(self) -> None:
         hass = _MockHass(is_running=True)
+
+        entry = _MockEntry()
         on_reload_calls: list[bool] = []
         spec = _make_spec(
             kick=_kick_stub,
@@ -749,6 +815,7 @@ class TestListenerDispatch:
         )
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
             spec,
         )
         # The is_running=True branch already scheduled an

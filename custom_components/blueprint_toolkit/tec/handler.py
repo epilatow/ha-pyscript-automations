@@ -70,6 +70,7 @@ from ..helpers import (
     emit_config_error,
     format_notification,
     register_blueprint_handler,
+    spec_bucket,
     unregister_blueprint_handler,
     update_instance_state,
 )
@@ -181,23 +182,28 @@ _SCHEMA = vol.Schema(
 
 
 # --------------------------------------------------------
-# hass.data accessors
+# Per-instance state accessor
 # --------------------------------------------------------
 
 
 def _instances(hass: HomeAssistant) -> dict[str, TecInstanceState]:
     """Per-instance state map under our service's bucket.
 
-    The shared ``register_blueprint_handler`` creates
-    ``hass.data[DOMAIN][_SERVICE]`` with the unsubscribe
-    keys; we lazily add our ``instances`` map under the
-    same bucket so config-entry reloads don't drop
-    diagnostic state.
+    Lives in ``entry.runtime_data.handlers[_SERVICE]``,
+    which the shared ``register_blueprint_handler``
+    initialises and which HA auto-clears on entry
+    unload. The integration is single-instance, so we
+    look up the (only) config entry by domain.
+
+    Returns an empty dict when no entry is loaded
+    (e.g. during async_remove_entry after we've already
+    been unregistered) so callers don't have to handle
+    ``KeyError`` on the post-teardown path.
     """
-    bucket = hass.data.setdefault(DOMAIN, {}).setdefault(
-        _SERVICE,
-        {},
-    )
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        return {}
+    bucket = spec_bucket(entries[0], _SERVICE)
     instances: dict[str, TecInstanceState] = bucket.setdefault(
         "instances",
         {},
@@ -731,14 +737,20 @@ _SPEC = BlueprintHandlerSpec(
 )
 
 
-async def async_register(hass: HomeAssistant, _entry: ConfigEntry) -> None:
+async def async_register(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> None:
     """Register TEC's service + lifecycle via the shared helper."""
-    await register_blueprint_handler(hass, _SPEC)
+    await register_blueprint_handler(hass, entry, _SPEC)
 
 
-async def async_unregister(hass: HomeAssistant) -> None:
+async def async_unregister(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> None:
     """Tear down TEC's service + lifecycle via the shared helper."""
-    await unregister_blueprint_handler(hass, _SPEC)
+    await unregister_blueprint_handler(hass, entry, _SPEC)
 
 
 # Expose helper for test imports.

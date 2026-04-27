@@ -485,25 +485,29 @@ class BlueprintHandlerSpec:
 _UNSUBS_KEY = "unsubs"
 
 
-def _spec_bucket(hass: HomeAssistant, service: str) -> dict[str, Any]:
-    """Per-service slot under ``hass.data[DOMAIN][service]``.
+def spec_bucket(entry: Any, service: str) -> dict[str, Any]:
+    """Per-service slot under ``entry.runtime_data.handlers[service]``.
 
     Created lazily; idempotent so reloads don't lose
     pending unsubscribe handles or per-port state. Each
     port is free to stash additional keys here (e.g.
     TEC keeps its ``instances`` map under the same
     bucket).
+
+    Public (no leading underscore) so per-port handlers
+    -- e.g. ``tec/handler.py``'s ``_instances(...)``
+    helper -- can fetch their own bucket without
+    duplicating the entry-runtime-data wiring.
     """
-    bucket: dict[str, Any] = hass.data.setdefault(DOMAIN, {}).setdefault(
-        service,
-        {_UNSUBS_KEY: []},
-    )
+    handlers: dict[str, dict[str, Any]] = entry.runtime_data.handlers
+    bucket = handlers.setdefault(service, {_UNSUBS_KEY: []})
     bucket.setdefault(_UNSUBS_KEY, [])
     return bucket
 
 
 async def register_blueprint_handler(
     hass: HomeAssistant,
+    entry: Any,
     spec: BlueprintHandlerSpec,
 ) -> None:
     """Register the service + every lifecycle hook the spec opted into.
@@ -522,7 +526,7 @@ async def register_blueprint_handler(
         entity_registry as er,
     )
 
-    bucket = _spec_bucket(hass, spec.service)
+    bucket = spec_bucket(entry, spec.service)
 
     # --- Service registration (always) ---
     if hass.services.has_service(DOMAIN, spec.service):
@@ -644,10 +648,11 @@ async def register_blueprint_handler(
 
 async def unregister_blueprint_handler(
     hass: HomeAssistant,
+    entry: Any,
     spec: BlueprintHandlerSpec,
 ) -> None:
     """Tear down the service + bus subscriptions + per-port state."""
-    bucket = _spec_bucket(hass, spec.service)
+    bucket = spec_bucket(entry, spec.service)
     if hass.services.has_service(DOMAIN, spec.service):
         hass.services.async_remove(DOMAIN, spec.service)
     for unsub in bucket[_UNSUBS_KEY]:

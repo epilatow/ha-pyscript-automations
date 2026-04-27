@@ -171,9 +171,49 @@ class _MockServices:
 
 
 @dataclass
+class _MockRuntimeData:
+    """Stand-in for the IntegrationData on entry.runtime_data."""
+
+    handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class _MockEntry:
+    """Stand-in for HA's ConfigEntry. Carries runtime_data."""
+
+    entry_id: str = "mock_entry"
+    runtime_data: _MockRuntimeData = field(default_factory=_MockRuntimeData)
+
+
+@dataclass
+class _MockConfigEntries:
+    """Stand-in for ``hass.config_entries``.
+
+    The handler's ``_instances`` accessor uses
+    ``hass.config_entries.async_entries(DOMAIN)`` to find
+    the (single-instance) integration's entry; this mock
+    returns whatever entries the test stashed.
+    """
+
+    entries: list[_MockEntry] = field(default_factory=list)
+
+    def async_entries(self, _domain: str) -> list[_MockEntry]:
+        return self.entries
+
+
+@dataclass
 class _MockHass:
     services: _MockServices = field(default_factory=_MockServices)
     data: dict[str, Any] = field(default_factory=dict)
+    config_entries: _MockConfigEntries = field(
+        default_factory=_MockConfigEntries,
+    )
+
+    def __post_init__(self) -> None:
+        # Seed a single config entry so the handler's
+        # ``_instances`` accessor finds runtime_data
+        # without each test having to wire it up.
+        self.config_entries.entries.append(_MockEntry())
 
 
 def _reset_acl_state() -> None:
