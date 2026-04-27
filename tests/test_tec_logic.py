@@ -286,10 +286,12 @@ class TestCodeQuality(CodeQualityBase):
         "tests/test_tec_logic.py",
         "custom_components/blueprint_toolkit/tec/logic.py",
         "custom_components/blueprint_toolkit/tec/__init__.py",
+        "custom_components/blueprint_toolkit/tec/handler.py",
         "custom_components/blueprint_toolkit/helpers.py",
     ]
     mypy_targets: list[str] = [
         "custom_components/blueprint_toolkit/tec/logic.py",
+        "custom_components/blueprint_toolkit/tec/handler.py",
         "custom_components/blueprint_toolkit/helpers.py",
     ]
 

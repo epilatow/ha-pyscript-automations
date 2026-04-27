@@ -58,3 +58,10 @@ ignore_missing_imports = true
 module = ["socketio", "socketio.exceptions", "aiohttp"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# voluptuous is a vendored HA dep; the host dev environment
+# may not have it installed. The integration's TEC handler
+# uses vol.Schema to validate service-call payloads.
+module = ["voluptuous"]
+ignore_missing_imports = true
+

@@ -1,8 +1,4 @@
 # This is AI generated code
-# mypy: ignore-errors
-# (Prototype port. Strict mypy on hass.data dynamic
-# dicts and HA's @callback decorator stays out until
-# the prototype graduates.)
 """HA wiring for trigger_entity_controller.
 
 Three-layer dispatch:
@@ -201,7 +197,11 @@ def _instances(hass: HomeAssistant) -> dict[str, TecInstanceState]:
         _SERVICE,
         {},
     )
-    return bucket.setdefault("instances", {})
+    instances: dict[str, TecInstanceState] = bucket.setdefault(
+        "instances",
+        {},
+    )
+    return instances
 
 
 # --------------------------------------------------------
@@ -633,7 +633,7 @@ async def _async_kick_for_recovery(
     )
 
 
-@callback
+@callback  # type: ignore[untyped-decorator]
 def _on_reload(hass: HomeAssistant) -> None:
     """Cancel pending wakeups whose AutomationEntity was replaced.
 
@@ -650,7 +650,7 @@ def _on_reload(hass: HomeAssistant) -> None:
             s.cancel_wakeup = None
 
 
-@callback
+@callback  # type: ignore[untyped-decorator]
 def _on_entity_remove(hass: HomeAssistant, entity_id: str) -> None:
     """Drop tracked state when our automation is removed."""
     s = _instances(hass).pop(entity_id, None)
@@ -663,20 +663,20 @@ def _on_entity_remove(hass: HomeAssistant, entity_id: str) -> None:
         )
 
 
-@callback
+@callback  # type: ignore[untyped-decorator]
 def _on_entity_rename(
     hass: HomeAssistant,
     old_id: str,
     new_id: str,
 ) -> None:
-    """Move tracked state to the new entity_id when the automation is renamed."""
+    """Move tracked state to the new entity_id on rename."""
     s = _instances(hass).pop(old_id, None)
     if s is not None:
         s.instance_id = new_id
         _instances(hass)[new_id] = s
 
 
-@callback
+@callback  # type: ignore[untyped-decorator]
 def _on_teardown(hass: HomeAssistant) -> None:
     """Cancel all pending wakeups and drop the instance map."""
     for s in list(_instances(hass).values()):
