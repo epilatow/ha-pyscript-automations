@@ -97,6 +97,55 @@ def format_notification(
 
 
 # --------------------------------------------------------
+# CommonMark escape for ``persistent_notification`` bodies
+# --------------------------------------------------------
+
+
+def md_escape(s: str) -> str:
+    r"""Escape CommonMark ``\``, ``[``, ``]`` for safe interpolation.
+
+    Apply to any HA-controlled string interpolated into a
+    ``persistent_notification`` ``message`` body -- both
+    inside ``[text](url)`` link text *and* in plain-text
+    portions, since an unescaped ``[`` in plain text can
+    still pair with a later ``](`` to form a bogus link.
+
+    Done as a single ``str.translate`` pass so the
+    backslashes inserted for ``[``/``]`` are not themselves
+    re-escaped by the ``\`` mapping.
+
+    Escaping is NOT needed for:
+
+    - Notification ``title`` strings -- HA renders titles
+      as plain text (frontend ``persistent-notification-item``
+      uses a Lit ``<span>`` with auto-escaping, only
+      ``message`` goes through ``<ha-markdown>``).
+    - Integration domains and entity_ids -- constrained
+      to ``[a-z0-9_]+``, no markdown specials possible.
+    - URLs -- the ``(...)`` target portion of a markdown
+      link is not displayed, only the ``[...]`` text
+      portion is.
+    - Numeric IDs (node ids, device counts, byte sizes).
+    - Values rendered inside a backtick code span
+      (`` `value` ``) -- code spans suppress markdown
+      interpretation, so ``[``/``]`` inside backticks
+      render literally.
+
+    Escaping IS needed for human-typed strings such as
+    automation friendly names, vol.Invalid messages
+    (which can include the offending input value),
+    error messages from external APIs, etc.
+    """
+    return s.translate(
+        {
+            ord("\\"): "\\\\",
+            ord("["): "\\[",
+            ord("]"): "\\]",
+        },
+    )
+
+
+# --------------------------------------------------------
 # Persistent notification spec + dispatcher
 # --------------------------------------------------------
 
@@ -170,6 +219,8 @@ def make_config_error_notification(
     service_tag: str,
     instance_id: str,
     errors: list[str],
+    instance_name: str | None = None,
+    instance_yaml_id: str | None = None,
 ) -> PersistentNotification:
     """Build a config-error spec with the standard wire format.
 
@@ -179,6 +230,24 @@ def make_config_error_notification(
     for this instance is dismissed. This lets handlers
     call ``emit_config_error`` unconditionally on every
     successful argparse without branching.
+
+    The body is a markdown bulleted list:
+
+        Automation: [{instance_name}](/config/automation/edit/{id})
+        - {error 1}
+        - {error 2}
+
+    The ``Automation:`` link prefix is included only when
+    both ``instance_name`` and ``instance_yaml_id`` are
+    provided (the typical caller is ``emit_config_error``,
+    which fetches both from the live automation entity).
+
+    Every interpolated user-controlled string
+    (``instance_name``, each entry of ``errors``) is
+    ``md_escape``-d. ``vol.Invalid`` messages can include
+    the offending input value; automation friendly_names
+    are user-typed; both could otherwise smuggle stray
+    ``[`` / ``]`` / ``\\`` into the rendered markdown.
     """
     notif_id = _config_error_notification_id(service, instance_id)
     if not errors:
@@ -189,13 +258,45 @@ def make_config_error_notification(
             message="",
         )
     title = f"Blueprint Toolkit -- {service_tag} config error: {instance_id}"
-    message = "\n".join(f"- {e}" for e in errors)
+    parts: list[str] = []
+    if instance_name and instance_yaml_id:
+        parts.append(
+            f"Automation: [{md_escape(instance_name)}]"
+            f"(/config/automation/edit/{instance_yaml_id})",
+        )
+    parts.extend(f"- {md_escape(e)}" for e in errors)
+    message = "\n".join(parts)
     return PersistentNotification(
         active=True,
         notification_id=notif_id,
         title=title,
         message=message,
     )
+
+
+def _instance_link_inputs(
+    hass: HomeAssistant,
+    instance_id: str,
+) -> tuple[str | None, str | None]:
+    """Look up the friendly name + YAML id for an automation entity.
+
+    Returns ``(instance_name, instance_yaml_id)`` for use
+    by ``make_config_error_notification`` to build the
+    "Automation: [name](link)" prefix. Both values are
+    ``None`` when the automation entity has not been
+    registered yet -- the call comes from a service the
+    user invoked manually (e.g. via Developer Tools), not
+    from a real automation. The notification still emits
+    in that case, just without the clickable header.
+    """
+    state = hass.states.get(instance_id)
+    if state is None:
+        return None, None
+    name = state.attributes.get("friendly_name") or instance_id
+    yaml_id = state.attributes.get("id")
+    if not isinstance(yaml_id, str) or not yaml_id:
+        return name, None
+    return name, yaml_id
 
 
 async def emit_config_error(
@@ -211,13 +312,19 @@ async def emit_config_error(
     Convenience wrapper -- handlers typically call this
     once per argparse with whatever ``errors`` they
     accumulated (empty list dismisses any prior
-    notification for the same instance).
+    notification for the same instance). Looks up the
+    automation entity to populate the "Automation:
+    [name](link)" header for the notification body when
+    the entity is registered.
     """
+    instance_name, instance_yaml_id = _instance_link_inputs(hass, instance_id)
     spec = make_config_error_notification(
         service=service,
         service_tag=service_tag,
         instance_id=instance_id,
         errors=errors,
+        instance_name=instance_name,
+        instance_yaml_id=instance_yaml_id,
     )
     if errors:
         _LOGGER.warning(

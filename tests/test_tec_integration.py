@@ -224,6 +224,78 @@ class TestArgparseEmitsConfigErrorNotification:
         assert notif_id in notifs
         assert "does not exist" in notifs[notif_id]["message"]
 
+    async def test_notification_includes_automation_link_when_known(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        """When the automation entity is registered, the body
+        starts with the ``Automation: [name](link)`` header.
+        Mirrors the pyscript convention so users can click
+        through to the broken automation from the notification.
+        """
+        await _setup_integration(hass)
+        # Seed the automation entity with a friendly name +
+        # YAML id (the things ``emit_config_error`` looks up).
+        hass.states.async_set(
+            "automation.tec_link",
+            "on",
+            {"friendly_name": "TEC: Hallway", "id": "1234"},
+        )
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE,
+            {"instance_id": "automation.tec_link"},
+            blocking=True,
+        )
+
+        from homeassistant.components.persistent_notification import (
+            _async_get_or_create_notifications,
+        )
+
+        notifs: dict[str, Any] = _async_get_or_create_notifications(hass)
+        notif_id = (
+            "blueprint_toolkit_trigger_entity_controller"
+            "__automation.tec_link__config_error"
+        )
+        assert notif_id in notifs
+        body: str = notifs[notif_id]["message"]
+        assert body.startswith(
+            "Automation: [TEC: Hallway](/config/automation/edit/1234)\n",
+        )
+
+    async def test_notification_md_escapes_friendly_name(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        """A ``[`` / ``]`` in the friendly name would otherwise
+        pair with the ``](`` of the link and corrupt the
+        rendered link. Verify the escape lands end-to-end.
+        """
+        await _setup_integration(hass)
+        hass.states.async_set(
+            "automation.tec_escape",
+            "on",
+            {"friendly_name": "Office [Lights]", "id": "42"},
+        )
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE,
+            {"instance_id": "automation.tec_escape"},
+            blocking=True,
+        )
+
+        from homeassistant.components.persistent_notification import (
+            _async_get_or_create_notifications,
+        )
+
+        notifs: dict[str, Any] = _async_get_or_create_notifications(hass)
+        notif_id = (
+            "blueprint_toolkit_trigger_entity_controller"
+            "__automation.tec_escape__config_error"
+        )
+        body: str = notifs[notif_id]["message"]
+        assert "[Office \\[Lights\\]]" in body
+
     async def test_successful_call_dismisses_prior_notification(
         self,
         hass,  # noqa: ANN001

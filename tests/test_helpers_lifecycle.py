@@ -310,6 +310,61 @@ class TestMakeConfigErrorNotification:
         assert n.title == ""
         assert n.message == ""
 
+    def test_link_prefix_when_name_and_yaml_id_provided(self) -> None:
+        n = helpers.make_config_error_notification(
+            service="trigger_entity_controller",
+            service_tag="TEC",
+            instance_id="automation.x",
+            errors=["bad"],
+            instance_name="My Auto",
+            instance_yaml_id="1234567890",
+        )
+        assert n.message.startswith(
+            "Automation: [My Auto](/config/automation/edit/1234567890)\n",
+        )
+
+    def test_no_link_prefix_when_yaml_id_missing(self) -> None:
+        n = helpers.make_config_error_notification(
+            service="trigger_entity_controller",
+            service_tag="TEC",
+            instance_id="automation.x",
+            errors=["bad"],
+            instance_name="My Auto",
+            instance_yaml_id=None,
+        )
+        assert "Automation:" not in n.message
+        assert n.message == "- bad"
+
+    def test_md_escape_applied_to_friendly_name(self) -> None:
+        # ``[`` / ``]`` in the user-typed friendly name
+        # would otherwise pair with the ``](`` of the
+        # link target and corrupt the rendered link.
+        n = helpers.make_config_error_notification(
+            service="trigger_entity_controller",
+            service_tag="TEC",
+            instance_id="automation.x",
+            errors=["bad"],
+            instance_name="Office [Lights]",
+            instance_yaml_id="42",
+        )
+        assert "[Office \\[Lights\\]]" in n.message
+
+    def test_md_escape_applied_to_error_bullets(self) -> None:
+        # vol.Invalid messages can echo the offending
+        # input value back, which can contain ``[`` /
+        # ``]`` (e.g. bad list literal in YAML). Escape
+        # so those don't render as a markdown link.
+        n = helpers.make_config_error_notification(
+            service="trigger_entity_controller",
+            service_tag="TEC",
+            instance_id="automation.x",
+            errors=[
+                "expected list, got '[evil](http://evil)'",
+            ],
+        )
+        assert "\\[evil\\](http://evil)" in n.message
+        assert "[evil](" not in n.message
+
 
 class TestPersistentNotificationDataclass:
     def test_active_create_spec(self) -> None:
