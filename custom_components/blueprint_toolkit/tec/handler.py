@@ -213,9 +213,12 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
 
     The pyscript wrapper's entrypoint has a
     blueprint-mismatch notification path; vol.Schema
-    fulfils the same role here (extra/missing keys
+    fulfils the same role here (missing/invalid keys
     surface via ``vol.Invalid`` and become a
     config_error notification through argparse).
+    Unexpected keys are tolerated (see ``extra=vol.ALLOW_EXTRA``
+    on ``_SCHEMA``) for forward-compat with future
+    blueprint inputs.
     """
     await _async_argparse(hass, call)
 
@@ -301,8 +304,19 @@ async def _async_argparse(
     raw = dict(call.data)
 
     # --- Schema validation (field shape / type / range) ---
+    # vol.MultipleInvalid carries all collected errors in
+    # ``.errors``; ``str()`` on it returns only the first,
+    # which would hide every key after the first failure.
+    # Iterate so the user sees every problem at once.
     try:
         data = _SCHEMA(raw)
+    except vol.MultipleInvalid as err:
+        await _emit_config_error(
+            hass,
+            _instance_id_for_error(raw),
+            [f"schema: {sub}" for sub in err.errors],
+        )
+        return
     except vol.Invalid as err:
         await _emit_config_error(
             hass,
