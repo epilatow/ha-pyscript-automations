@@ -4,18 +4,7 @@
 # dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
-"""Tests for the TEC logic module.
-
-Ported from ``tests/test_trigger_entity_controller.py``
-(which targets the pyscript copy) so the two stay in
-behaviour parity. The pyscript copy retires in a
-follow-up commit; until then, both files run.
-
-Also includes a parametric parity test that imports
-the pyscript module (skipped if it isn't on the
-import path) and asserts both modules produce
-identical Result for the same Config + Inputs.
-"""
+"""Tests for the TEC logic module."""
 
 import sys
 from datetime import datetime, timedelta
@@ -41,15 +30,6 @@ from custom_components.blueprint_toolkit.tec.logic import (  # noqa: E402
     parse_notification_events,
     parse_period,
 )
-
-# Pyscript copy is the parity-comparison target;
-# importable in the dev tree but allowed to be missing
-# in minimal CI envs.
-sys.path.insert(0, str(REPO_ROOT / "pyscript" / "modules"))
-try:
-    import trigger_entity_controller as pyscript_tec  # noqa: E402
-except ImportError:  # pragma: no cover
-    pyscript_tec = None  # type: ignore[assignment]
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
 
@@ -1317,145 +1297,6 @@ class TestEndToEndScenarios:
         )
         assert r2.action == ActionType.NONE
         assert r2.auto_off_at is not None
-
-
-# --------------------------------------------------------
-# Parity with the pyscript copy
-# --------------------------------------------------------
-
-
-class TestImportSurfaceParity:
-    """Both copies expose the same public symbols."""
-
-    EXPECTED = (
-        "ActionType",
-        "Config",
-        "EventType",
-        "Inputs",
-        "NotificationEvent",
-        "Period",
-        "Result",
-        "determine_event_type",
-        "evaluate",
-        "is_trigger_suppressed",
-        "parse_notification_events",
-        "parse_period",
-    )
-
-    def test_tec_exports_expected(self) -> None:
-        from custom_components.blueprint_toolkit.tec import logic as tec_mod
-
-        for name in self.EXPECTED:
-            assert hasattr(tec_mod, name), (
-                f"tec logic module missing symbol: {name}"
-            )
-
-    @pytest.mark.skipif(
-        pyscript_tec is None,
-        reason="pyscript module not importable in this env",
-    )
-    def test_pyscript_exports_expected(self) -> None:
-        for name in self.EXPECTED:
-            assert hasattr(pyscript_tec, name), (
-                f"pyscript logic module missing symbol: {name}"
-            )
-
-
-class TestParityWithPyscript:
-    """TEC + pyscript modules return identical Result for the same inputs."""
-
-    @pytest.mark.skipif(
-        pyscript_tec is None,
-        reason="pyscript module not importable in this env",
-    )
-    @pytest.mark.parametrize(
-        "event_kind",
-        [
-            "trigger_on",
-            "trigger_off",
-            "controlled_on",
-            "controlled_off",
-            "timer_expired",
-            "timer_catch_up",
-        ],
-    )
-    def test_evaluate_parity(self, event_kind: str) -> None:
-        from custom_components.blueprint_toolkit.tec import logic as tec_mod
-
-        scenarios: dict[str, dict[str, object]] = {
-            "trigger_on": {
-                "event_type": "TRIGGER_ON",
-                "kwargs": {"controlled_on": False},
-            },
-            "trigger_off": {
-                "event_type": "TRIGGER_OFF",
-                "kwargs": {"controlled_on": True, "triggers_on": False},
-            },
-            "controlled_on": {
-                "event_type": "CONTROLLED_ON",
-                "kwargs": {"controlled_on": True, "triggers_on": False},
-            },
-            "controlled_off": {
-                "event_type": "CONTROLLED_OFF",
-                "kwargs": {"controlled_on": False},
-            },
-            "timer_expired": {
-                "event_type": "TIMER",
-                "kwargs": {
-                    "controlled_on": True,
-                    "triggers_on": False,
-                    "auto_off_at": T0 - timedelta(minutes=1),
-                },
-            },
-            "timer_catch_up": {
-                "event_type": "TIMER",
-                "kwargs": {
-                    "controlled_on": True,
-                    "triggers_on": False,
-                    "auto_off_at": None,
-                },
-            },
-        }
-        scenario = scenarios[event_kind]
-
-        def _build(mod: object) -> object:
-            cfg = mod.Config(  # type: ignore[attr-defined]
-                controlled_entities=[LIGHT],
-                auto_off_minutes=5,
-                auto_off_disabling_entities=[],
-                trigger_entities=[MOTION],
-                trigger_period=mod.Period.ALWAYS,  # type: ignore[attr-defined]
-                trigger_forces_on=False,
-                trigger_disabling_entities=[],
-                trigger_disabling_period=mod.Period.ALWAYS,  # type: ignore[attr-defined]
-                notification_prefix="",
-                notification_suffix="",
-                notification_events=[],
-            )
-            ipt = mod.Inputs(  # type: ignore[attr-defined]
-                current_time=T0,
-                event_type=getattr(
-                    mod.EventType,  # type: ignore[attr-defined]
-                    str(scenario["event_type"]),
-                ),
-                changed_entity=MOTION,
-                triggers_on=False,
-                controlled_on=False,
-                is_day_time=True,
-                triggers_disabled=False,
-                auto_off_disabled=False,
-                auto_off_at=None,
-            )
-            for k, v in scenario["kwargs"].items():  # type: ignore[union-attr]
-                setattr(ipt, k, v)
-            return mod.evaluate(cfg, ipt)  # type: ignore[attr-defined]
-
-        tec_result = _build(tec_mod)
-        pyscript_result = _build(pyscript_tec)
-
-        assert tec_result.action.name == pyscript_result.action.name
-        assert tec_result.target_entities == pyscript_result.target_entities
-        assert tec_result.auto_off_at == pyscript_result.auto_off_at
 
 
 class TestCodeQuality(CodeQualityBase):

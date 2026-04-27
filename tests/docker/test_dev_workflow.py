@@ -29,16 +29,18 @@ from conftest import (
 
 pytestmark = pytest.mark.docker
 
-# The six blueprint entrypoint services registered by
-# pyscript/blueprint_toolkit.py. Verifying all six
-# appear is our "load succeeded" signal.
+# The five blueprint entrypoint services registered by
+# pyscript/blueprint_toolkit.py. Verifying all five
+# appear is our "load succeeded" signal. (Trigger Entity
+# Controller is now served by the integration's native
+# handler at ``blueprint_toolkit.trigger_entity_controller``,
+# not by a pyscript ``*_blueprint_entrypoint``.)
 EXPECTED_SERVICES = frozenset(
     {
         "device_watchdog_blueprint_entrypoint",
         "entity_defaults_watchdog_blueprint_entrypoint",
         "reference_watchdog_blueprint_entrypoint",
         "sensor_threshold_switch_controller_blueprint_entrypoint",
-        "trigger_entity_controller_blueprint_entrypoint",
         "zwave_route_manager_blueprint_entrypoint",
     },
 )
