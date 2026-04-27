@@ -8,6 +8,7 @@
 #     "ruff",
 #     "mypy",
 #     "voluptuous",
+#     "PyYAML",
 # ]
 # ///
 # This is AI generated code
@@ -542,6 +543,92 @@ class TestKickForRecovery:
                 },
             ),
         ]
+
+
+# --------------------------------------------------------
+# Blueprint <-> schema drift
+# --------------------------------------------------------
+#
+# Catches the failure mode where someone adds / renames a
+# blueprint input but forgets to update the vol.Schema (or
+# vice-versa). Pyscript-side ``test_blueprint_toolkit.py``
+# had the equivalent ``TestBlueprintYamlMatchesRegistry``
+# test against ``_BLUEPRINT_SERVICES``; this is the native
+# replacement, currently single-port. When a second native
+# port lands, hoist into a shared registry + iterate.
+
+import voluptuous as vol  # noqa: E402
+import yaml  # noqa: E402
+
+_BLUEPRINTS_DIR = (
+    REPO_ROOT
+    / "custom_components"
+    / "blueprint_toolkit"
+    / "bundled"
+    / "blueprints"
+    / "automation"
+    / "blueprint_toolkit"
+)
+
+
+class _PermissiveBlueprintLoader(yaml.SafeLoader):
+    """``SafeLoader`` that ignores blueprint-only ``!`` tags."""
+
+
+def _passthrough_tag(_loader: Any, _suffix: str, node: Any) -> Any:
+    if hasattr(node, "value") and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+_PermissiveBlueprintLoader.add_multi_constructor("!", _passthrough_tag)
+
+
+def _required_keys(schema: vol.Schema) -> set[str]:
+    """Return the string-typed ``vol.Required`` keys in a schema."""
+    out: set[str] = set()
+    for key in schema.schema:
+        if isinstance(key, vol.Required):
+            out.add(str(key))
+    return out
+
+
+class TestBlueprintSchemaDrift:
+    """Native blueprint YAML stays in sync with the handler's vol.Schema."""
+
+    def _load_blueprint(self) -> dict[str, Any]:
+        path = _BLUEPRINTS_DIR / "trigger_entity_controller.yaml"
+        with path.open() as f:
+            loaded: dict[str, Any] = yaml.load(
+                f,
+                Loader=_PermissiveBlueprintLoader,
+            )
+        return loaded
+
+    def test_yaml_data_keys_match_schema_required_keys(self) -> None:
+        parsed = self._load_blueprint()
+        actions = parsed.get("actions") or parsed.get("action") or []
+        first = actions[0] if isinstance(actions, list) else actions
+        yaml_keys = set((first.get("data") or {}).keys())
+        schema_keys = _required_keys(handler._SCHEMA)
+        assert yaml_keys == schema_keys, (
+            "blueprint trigger_entity_controller.yaml 'data:' keys do "
+            "not match handler._SCHEMA's vol.Required keys.\n"
+            f"  only in YAML:   {sorted(yaml_keys - schema_keys)}\n"
+            f"  only in schema: {sorted(schema_keys - yaml_keys)}"
+        )
+
+    def test_blueprint_action_targets_registered_service(self) -> None:
+        parsed = self._load_blueprint()
+        actions = parsed.get("actions") or parsed.get("action") or []
+        first = actions[0] if isinstance(actions, list) else actions
+        action_name = first.get("action", "")
+        expected = f"blueprint_toolkit.{handler._SERVICE}"
+        assert action_name == expected, (
+            f"blueprint trigger_entity_controller.yaml action: "
+            f"{action_name!r} does not match the registered service "
+            f"{expected!r}"
+        )
 
 
 # --------------------------------------------------------
