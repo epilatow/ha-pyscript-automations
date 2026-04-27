@@ -509,6 +509,152 @@ class TestUnregisterBlueprintHandler:
 
 
 # --------------------------------------------------------
+# End-to-end listener dispatch
+# --------------------------------------------------------
+#
+# Drive a synthetic ``EVENT_ENTITY_REGISTRY_UPDATED`` /
+# ``EVENT_AUTOMATION_RELOADED`` event through the
+# listener the dispatcher registered, and verify the
+# per-spec mutator callbacks are called with the right
+# arguments. Catches regressions in the
+# parse-then-dispatch wiring inside
+# ``register_blueprint_handler``.
+
+
+@dataclass
+class _MockEvent:
+    data: dict[str, Any]
+
+
+class TestListenerDispatch:
+    @pytest.mark.asyncio
+    async def test_remove_event_calls_on_entity_remove(self) -> None:
+        hass = _MockHass(is_running=True)
+        seen_removes: list[str] = []
+        spec = _make_spec(
+            on_entity_remove=lambda _h, eid: seen_removes.append(eid),
+        )
+        await helpers.register_blueprint_handler(
+            hass,  # type: ignore[arg-type]
+            spec,
+        )
+        listener = hass.bus.listeners["entity_registry_updated"][0]
+        listener(
+            _MockEvent(
+                data={
+                    "action": "remove",
+                    "entity_id": "automation.foo",
+                    "old_entity_id": "automation.foo",
+                },
+            ),
+        )
+        assert seen_removes == ["automation.foo"]
+
+    @pytest.mark.asyncio
+    async def test_rename_event_calls_on_entity_rename(self) -> None:
+        hass = _MockHass(is_running=True)
+        seen_renames: list[tuple[str, str]] = []
+        spec = _make_spec(
+            on_entity_rename=lambda _h, old, new: seen_renames.append(
+                (old, new),
+            ),
+        )
+        await helpers.register_blueprint_handler(
+            hass,  # type: ignore[arg-type]
+            spec,
+        )
+        listener = hass.bus.listeners["entity_registry_updated"][0]
+        listener(
+            _MockEvent(
+                data={
+                    "action": "update",
+                    "entity_id": "automation.bar",
+                    "old_entity_id": "automation.foo",
+                },
+            ),
+        )
+        assert seen_renames == [("automation.foo", "automation.bar")]
+
+    @pytest.mark.asyncio
+    async def test_non_automation_event_is_ignored(self) -> None:
+        hass = _MockHass(is_running=True)
+        seen: list[str] = []
+        spec = _make_spec(
+            on_entity_remove=lambda _h, eid: seen.append(eid),
+        )
+        await helpers.register_blueprint_handler(
+            hass,  # type: ignore[arg-type]
+            spec,
+        )
+        listener = hass.bus.listeners["entity_registry_updated"][0]
+        listener(
+            _MockEvent(
+                data={
+                    "action": "remove",
+                    "entity_id": "light.kitchen",
+                    "old_entity_id": "light.kitchen",
+                },
+            ),
+        )
+        assert seen == []
+
+    @pytest.mark.asyncio
+    async def test_disable_style_update_does_not_dispatch(self) -> None:
+        # Mirrors what HA fires when an automation's
+        # ``disabled_by`` field is toggled: action=update
+        # but old_id == new_id (no rename). The dispatcher
+        # must skip both the rename and remove paths.
+        hass = _MockHass(is_running=True)
+        seen_removes: list[str] = []
+        seen_renames: list[tuple[str, str]] = []
+        spec = _make_spec(
+            on_entity_remove=lambda _h, eid: seen_removes.append(eid),
+            on_entity_rename=lambda _h, old, new: seen_renames.append(
+                (old, new),
+            ),
+        )
+        await helpers.register_blueprint_handler(
+            hass,  # type: ignore[arg-type]
+            spec,
+        )
+        listener = hass.bus.listeners["entity_registry_updated"][0]
+        listener(
+            _MockEvent(
+                data={
+                    "action": "update",
+                    "entity_id": "automation.foo",
+                    "old_entity_id": "automation.foo",
+                    "changes": {"disabled_by": "user"},
+                },
+            ),
+        )
+        assert seen_removes == []
+        assert seen_renames == []
+
+    @pytest.mark.asyncio
+    async def test_reload_event_calls_on_reload_then_recovery(self) -> None:
+        hass = _MockHass(is_running=True)
+        on_reload_calls: list[bool] = []
+        spec = _make_spec(
+            kick=_kick_stub,
+            on_reload=lambda _h: on_reload_calls.append(True),
+        )
+        await helpers.register_blueprint_handler(
+            hass,  # type: ignore[arg-type]
+            spec,
+        )
+        # The is_running=True branch already scheduled an
+        # initial recovery task at registration. Reset
+        # before exercising the listener so we count only
+        # the reload-triggered one.
+        hass.tasks.clear()
+        listener = hass.bus.listeners["automation_reloaded"][0]
+        listener(_MockEvent(data={}))
+        assert on_reload_calls == [True]
+        assert len(hass.tasks) == 1
+
+
+# --------------------------------------------------------
 # Pytest plumbing: enable asyncio test mode
 # --------------------------------------------------------
 
