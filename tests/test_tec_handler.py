@@ -153,16 +153,21 @@ handler.async_call_later = _async_call_later  # type: ignore[attr-defined]
 
 @dataclass
 class _MockServices:
+    # ``calls`` records ``(domain, name, data)``; ``kwargs``
+    # records the keyword args (``context=``, ``blocking=``)
+    # for the matching index.
     calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+    kwargs: list[dict[str, Any]] = field(default_factory=list)
 
     async def async_call(
         self,
         domain: str,
         name: str,
         data: dict[str, Any] | None = None,
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> None:
         self.calls.append((domain, name, dict(data or {})))
+        self.kwargs.append(dict(kwargs))
 
 
 @dataclass
@@ -432,6 +437,29 @@ class TestMakeWakeup:
                 },
             ),
         ]
+
+    @pytest.mark.asyncio
+    async def test_does_not_propagate_caller_context(
+        self,
+    ) -> None:
+        # Regression guard: the wakeup must NOT pass a
+        # ``context=`` kwarg into ``automation.trigger``.
+        # If it did, HA's automation runner would inherit
+        # the caller's context (the integration setup
+        # context) instead of generating a fresh per-run
+        # context, which would break logbook attribution
+        # of the downstream ``homeassistant.turn_off``.
+        hass = _MockHass()
+        instances = handler._instances(hass)  # type: ignore[arg-type]
+        instances["automation.foo"] = _make_state(
+            "automation.foo",
+            cancel_wakeup=lambda: None,
+        )
+        wakeup = handler._make_wakeup(hass, "automation.foo")  # type: ignore[arg-type]
+
+        await wakeup(_FrozenNow.value)
+
+        assert "context" not in hass.services.kwargs[0]
 
     @pytest.mark.asyncio
     async def test_no_op_when_instance_state_gone(self) -> None:

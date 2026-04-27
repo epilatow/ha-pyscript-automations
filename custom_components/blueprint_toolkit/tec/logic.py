@@ -105,12 +105,17 @@ class Result:
 
 
 def parse_period(value: str) -> Period:
-    """Parse a period string from blueprint input."""
+    """Parse a period string from blueprint input.
+
+    Raises ``ValueError`` on unknown values. Argparse
+    is the only validator and rejects bad values
+    before they reach here, so the lookup must succeed.
+    """
     normalized = value.strip().lower()
     for p in Period:
         if p.value == normalized:
             return p
-    return Period.ALWAYS
+    raise ValueError(f"unknown period {value!r}")
 
 
 _NOTIFICATION_EVENTS_BY_VALUE = {evt.value: evt for evt in NotificationEvent}
@@ -119,13 +124,19 @@ _NOTIFICATION_EVENTS_BY_VALUE = {evt.value: evt for evt in NotificationEvent}
 def parse_notification_events(
     values: list[str],
 ) -> list[NotificationEvent]:
-    """Parse notification event strings."""
-    return [
-        _NOTIFICATION_EVENTS_BY_VALUE[normalized]
-        for v in values
-        for normalized in [str(v).strip().lower()]
-        if normalized in _NOTIFICATION_EVENTS_BY_VALUE
-    ]
+    """Parse notification event strings.
+
+    Raises ``ValueError`` on unknown values. Argparse
+    is the only validator and rejects bad values
+    before they reach here, so every entry must map.
+    """
+    result: list[NotificationEvent] = []
+    for v in values:
+        normalized = str(v).strip().lower()
+        if normalized not in _NOTIFICATION_EVENTS_BY_VALUE:
+            raise ValueError(f"unknown notification event {v!r}")
+        result.append(_NOTIFICATION_EVENTS_BY_VALUE[normalized])
+    return result
 
 
 def determine_event_type(

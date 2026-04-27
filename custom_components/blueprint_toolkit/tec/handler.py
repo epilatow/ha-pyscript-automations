@@ -135,8 +135,11 @@ class TecInstanceState:
 # validation (entity exists in hass.states, notification
 # service is registered) live in ``_async_argparse``.
 
-_PERIOD_VALUES = ("always", "night-time", "day-time")
-_NOTIF_EVENT_VALUES = ("triggered-on", "forced-on", "auto-off")
+# Derived from the logic-side enums so the schema's
+# accepted values can never drift from what the
+# decision tree understands.
+_PERIOD_VALUES = tuple(p.value for p in logic.Period)
+_NOTIF_EVENT_VALUES = tuple(e.value for e in logic.NotificationEvent)
 
 _SCHEMA = vol.Schema(
     {

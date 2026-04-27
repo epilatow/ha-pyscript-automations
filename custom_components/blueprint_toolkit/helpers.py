@@ -156,6 +156,11 @@ async def process_persistent_notifications(
 
 
 def _config_error_notification_id(service: str, instance_id: str) -> str:
+    # ``__`` is reserved as the field separator. HA entity_ids
+    # (which is what ``instance_id`` always is) cannot contain
+    # ``__`` -- ``slugify`` collapses repeated underscores --
+    # so the resulting ID stays unambiguously parseable
+    # ``blueprint_toolkit_{service}__{instance_id}__{kind}``.
     return f"blueprint_toolkit_{service}__{instance_id}__config_error"
 
 

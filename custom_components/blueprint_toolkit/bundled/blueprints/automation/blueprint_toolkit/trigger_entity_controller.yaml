@@ -231,5 +231,10 @@ actions:
       notification_events_raw: !input notification_events
       debug_logging_raw: !input debug_logging
 
+# ``queued`` + ``max: 10`` lets up to 10 trigger events
+# (motion bursts, controlled-state flips) stack up and run
+# in order. Beyond 10, HA drops new events with a warning
+# in the log. Bump if your setup has unusually bursty
+# triggers.
 mode: queued
 max: 10

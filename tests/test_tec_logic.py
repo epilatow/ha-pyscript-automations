@@ -104,9 +104,11 @@ class TestParsePeriod:
     def test_whitespace(self) -> None:
         assert parse_period("  always  ") == Period.ALWAYS
 
-    def test_unknown_defaults_to_always(self) -> None:
-        assert parse_period("bogus") == Period.ALWAYS
-        assert parse_period("") == Period.ALWAYS
+    def test_unknown_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown period"):
+            parse_period("bogus")
+        with pytest.raises(ValueError, match="unknown period"):
+            parse_period("")
 
 
 # -- parse_notification_events --
@@ -130,11 +132,9 @@ class TestParseNotificationEvents:
             NotificationEvent.AUTO_OFF,
         ]
 
-    def test_unknown_ignored(self) -> None:
-        result = parse_notification_events(
-            ["triggered-on", "bogus"],
-        )
-        assert result == [NotificationEvent.TRIGGERED_ON]
+    def test_unknown_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown notification event"):
+            parse_notification_events(["triggered-on", "bogus"])
 
 
 # -- determine_event_type --
