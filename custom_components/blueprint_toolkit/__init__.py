@@ -343,6 +343,14 @@ async def async_setup_entry(
 
     _register_docs_static_route(hass)
 
+    # Native trigger_entity_controller. Coexists with the
+    # pyscript-backed services for the other 5 blueprints.
+    # Lazy-imported because ``tec.handler`` pulls in
+    # ``voluptuous`` and ``homeassistant`` at module scope.
+    from .tec import handler as tec_handler
+
+    await tec_handler.async_register(hass, entry)
+
     # Conflicts surface to the user via Repairs rather
     # than by failing the setup. Real install errors raise
     # an OSError inside the executor job which propagates

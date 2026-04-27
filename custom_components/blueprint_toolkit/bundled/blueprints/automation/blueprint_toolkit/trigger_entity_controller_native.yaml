@@ -1,0 +1,235 @@
+blueprint:
+  name: Trigger Entity Controller
+  description: >
+    Controls entities with optional trigger-based
+    activation and auto-off timer. Turns on controlled
+    entities when trigger sensors activate, with
+    configurable time-of-day restrictions, disabling
+    entities, and force-on behavior.
+    [Full documentation](/local/blueprint_toolkit/docs/trigger_entity_controller.html).
+  domain: automation
+  author: epilatow
+
+  input:
+    controlled_entities:
+      name: Controlled Entities
+      description: >
+        Entities to turn on and off.
+      selector:
+        entity:
+          domain:
+            - automation
+            - climate
+            - cover
+            - fan
+            - humidifier
+            - input_boolean
+            - light
+            - lock
+            - media_player
+            - switch
+            - vacuum
+            - water_heater
+          multiple: true
+
+    auto_off_minutes:
+      name: Auto-Off Delay (minutes)
+      description: >
+        Turn off controlled entities this many minutes
+        after all triggers clear. Set to 0 to disable.
+        Timer resets on new trigger activity. Starts
+        immediately on any turn-on when triggers are
+        not active.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: minutes
+          mode: box
+
+    auto_off_disabling_entities:
+      name: Auto-Off Disabling Entities (optional)
+      description: >
+        When ANY of these entities is "on", auto-off is
+        suppressed: any pending timer is cleared, and a
+        fresh countdown starts when all return to "off".
+        Use for manual occupancy locks (e.g., an
+        "occupied" input_boolean) or motion keep-alive
+        (e.g., a motion sensor that resets the timer
+        while active).
+      default: []
+      selector:
+        entity:
+          domain:
+            - binary_sensor
+            - input_boolean
+          multiple: true
+
+    trigger_entities:
+      name: Trigger Entities (optional)
+      description: >
+        Binary sensors that trigger activation of
+        controlled entities. Leave empty for manual-only
+        control with auto-off.
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+    trigger_period:
+      name: Trigger Period
+      description: >
+        When triggers can activate controlled entities.
+        "always" = any time. "night-time" = only when
+        sun is below horizon. "day-time" = only when
+        sun is above horizon.
+      default: always
+      selector:
+        select:
+          options:
+            - always
+            - night-time
+            - day-time
+
+    trigger_forces_on:
+      name: Trigger Forces On
+      description: >
+        When enabled, if a controlled entity is turned
+        off while a trigger is active (and triggering is
+        not suppressed), the entity is turned back on.
+      default: false
+      selector:
+        boolean:
+
+    trigger_disabling_entities:
+      name: Trigger Disabling Entities (optional)
+      description: >
+        When ANY of these entities is "on" (during the
+        disabling period), trigger activation is
+        suppressed. Requires trigger entities to be
+        configured.
+      default: []
+      selector:
+        entity:
+          domain:
+            - binary_sensor
+            - input_boolean
+          multiple: true
+
+    trigger_disabling_period:
+      name: Trigger Disabling Period
+      description: >
+        When disabling entities are checked. "always" =
+        checked at all times. "night-time" = only
+        checked when sun is below horizon. "day-time" =
+        only checked when sun is above horizon.
+      default: always
+      selector:
+        select:
+          options:
+            - always
+            - night-time
+            - day-time
+
+    notification_service:
+      name: Notification Service (optional)
+      description: >
+        Service name for notifications (e.g., "notify"
+        or "notify.mobile_app_phone"). Validated at
+        automation startup; if the service does not
+        exist a persistent notification is raised and
+        the automation will not run. Leave empty to
+        disable notifications.
+      default: ""
+      selector:
+        text:
+
+    notification_prefix:
+      name: Notification Prefix
+      description: >
+        Text prepended to notifications. Supports
+        timestamp tokens: YYYY, YY, MM, DD, HH, mm, ss.
+      default: "TEC: "
+      selector:
+        text:
+
+    notification_suffix:
+      name: Notification Suffix
+      description: >
+        Text appended to notifications. Supports
+        timestamp tokens: YYYY, YY, MM, DD, HH, mm, ss.
+      default: " at YYYY-MM-DD HH:mm:ss"
+      selector:
+        text:
+
+    notification_events:
+      name: Notification Events
+      description: >
+        Which actions generate notifications. Leave
+        empty to notify on all actions.
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Triggered On
+              value: triggered-on
+            - label: Forced On
+              value: forced-on
+            - label: Auto Off
+              value: auto-off
+
+    debug_logging:
+      name: Debug Logging
+      description: >
+        Enable debug logging. When enabled, emits a
+        log.warning message with full decision context
+        on every invocation. Check Settings > System >
+        Logs to view output.
+      default: false
+      selector:
+        boolean:
+
+triggers:
+  - id: controlled_change
+    trigger: state
+    entity_id: !input controlled_entities
+  - id: auto_off_disabling_change
+    trigger: state
+    entity_id: !input auto_off_disabling_entities
+  - id: trigger_change
+    trigger: state
+    entity_id: !input trigger_entities
+  - id: trigger_disabling_change
+    trigger: state
+    entity_id: !input trigger_disabling_entities
+
+actions:
+  - action: blueprint_toolkit.trigger_entity_controller
+    data:
+      instance_id: "{{ this.entity_id }}"
+      controlled_entities_raw: !input controlled_entities
+      trigger_entity_id: >-
+        {{ trigger.entity_id
+           | default('timer', true) }}
+      trigger_to_state: >-
+        {{ trigger.to_state.state
+           if trigger.to_state is defined
+           else '' }}
+      auto_off_minutes_raw: !input auto_off_minutes
+      auto_off_disabling_entities_raw: !input auto_off_disabling_entities
+      trigger_entities_raw: !input trigger_entities
+      trigger_period_raw: !input trigger_period
+      trigger_forces_on_raw: !input trigger_forces_on
+      trigger_disabling_entities_raw: !input trigger_disabling_entities
+      trigger_disabling_period_raw: !input trigger_disabling_period
+      notification_service: !input notification_service
+      notification_prefix_raw: !input notification_prefix
+      notification_suffix_raw: !input notification_suffix
+      notification_events_raw: !input notification_events
+      debug_logging_raw: !input debug_logging
+
+mode: queued
+max: 10

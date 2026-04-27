@@ -60,8 +60,13 @@ sys.path.insert(0, str(REPO_ROOT / "tests"))
 from conftest import CodeQualityBase  # noqa: E402
 
 
+def _doc_stem_for(blueprint_stem: str) -> str:
+    """``_native`` variants share the base blueprint's docs file."""
+    return blueprint_stem.removesuffix("_native")
+
+
 def _expected_link(stem: str) -> str:
-    return f"[Full documentation]({LINK_URL_PREFIX}{stem}.html)"
+    return f"[Full documentation]({LINK_URL_PREFIX}{_doc_stem_for(stem)}.html)"
 
 
 def _blueprint_paths() -> list[Path]:
@@ -115,10 +120,11 @@ class TestBlueprintDocLinks:
         self,
         blueprint_path: Path,
     ) -> None:
-        target = RENDERED_DOCS_DIR / f"{blueprint_path.stem}.html"
+        doc_stem = _doc_stem_for(blueprint_path.stem)
+        target = RENDERED_DOCS_DIR / f"{doc_stem}.html"
         assert target.is_file(), (
             f"{blueprint_path.name}: link points at "
-            f"{LINK_URL_PREFIX}{blueprint_path.stem}.html but "
+            f"{LINK_URL_PREFIX}{doc_stem}.html but "
             f"the rendered HTML at {target} does not exist. "
             "Run 'scripts/render_docs.py' if the markdown "
             "source exists, or rename the blueprint stem to "
