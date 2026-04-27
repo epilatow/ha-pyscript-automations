@@ -91,9 +91,7 @@ _LOGGER = logging.getLogger(__name__)
 _SERVICE = "trigger_entity_controller"
 _SERVICE_TAG = "TEC"
 _SERVICE_NAME = "Trigger Entity Controller"
-NATIVE_BLUEPRINT_PATH = (
-    "blueprint_toolkit/trigger_entity_controller_native.yaml"
-)
+BLUEPRINT_PATH = "blueprint_toolkit/trigger_entity_controller.yaml"
 
 # The variable payload the integration synthesises when
 # re-firing an automation for an auto-off wakeup. The
@@ -697,7 +695,7 @@ _SPEC = BlueprintHandlerSpec(
     service=_SERVICE,
     service_tag=_SERVICE_TAG,
     service_name=_SERVICE_NAME,
-    blueprint_path=NATIVE_BLUEPRINT_PATH,
+    blueprint_path=BLUEPRINT_PATH,
     service_handler=_async_entrypoint,
     kick=_async_kick_for_recovery,
     on_reload=_on_reload,
@@ -719,7 +717,7 @@ async def async_unregister(hass: HomeAssistant) -> None:
 
 # Expose helper for test imports.
 __all__ = [
-    "NATIVE_BLUEPRINT_PATH",
+    "BLUEPRINT_PATH",
     "TecInstanceState",
     "async_register",
     "async_unregister",

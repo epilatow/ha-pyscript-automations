@@ -205,12 +205,9 @@ triggers:
   - id: trigger_disabling_change
     trigger: state
     entity_id: !input trigger_disabling_entities
-  - id: timer
-    trigger: time_pattern
-    minutes: "/1"
 
 actions:
-  - action: pyscript.trigger_entity_controller_blueprint_entrypoint
+  - action: blueprint_toolkit.trigger_entity_controller
     data:
       instance_id: "{{ this.entity_id }}"
       controlled_entities_raw: !input controlled_entities
