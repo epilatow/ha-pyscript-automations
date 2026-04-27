@@ -3,17 +3,16 @@
 # (Prototype port. Strict mypy on hass.data dynamic
 # dicts and HA's @callback decorator stays out until
 # the prototype graduates.)
-"""Native HA wiring for trigger_entity_controller.
+"""HA wiring for trigger_entity_controller.
 
-Three-layer dispatch matching the existing pyscript
-convention:
+Three-layer dispatch:
 
 1. **Entrypoint** -- the function ``hass.services.async_register``
    wires up. Receives the raw ``ServiceCall``; sole
    responsibility is to hand off to argparse. Owns
    ``blueprint_mismatch`` notifications (currently a
-   no-op since vol.Schema covers that surface for
-   native -- see comment in ``_async_argparse``).
+   no-op since vol.Schema covers that surface --
+   see comment in ``_async_argparse``).
 
 2. **Argparse** -- runs the vol.Schema, then the
    cross-field + HA-state checks (entity existence,

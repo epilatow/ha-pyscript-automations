@@ -1,33 +1,28 @@
 # This is AI generated code
-"""Native Trigger Entity Controller for blueprint_toolkit.
+"""Trigger Entity Controller subpackage for blueprint_toolkit.
 
 Public surface: ``async_register(hass, entry)`` and
 ``async_unregister(hass)``, called from the integration's
 ``async_setup_entry`` / ``async_unload_entry`` to wire up
-the native ``blueprint_toolkit.trigger_entity_controller``
+the ``blueprint_toolkit.trigger_entity_controller``
 service plus the discovery / scheduling / restart-recovery
 plumbing.
 
 Module layout:
 
-- ``logic`` -- pure-function decision tree, lifted from
-  ``pyscript/modules/trigger_entity_controller.py``.
-  Identical API and behaviour; the existing TEC tests
-  (``tests/test_trigger_entity_controller.py``) cover
-  both copies. Imports formatting helpers from the
-  shared ``..helpers`` module (counterpart to
-  ``pyscript/modules/helpers.py``).
-- ``handler`` -- native HA wiring: vol.Schema-driven
-  argparse with persistent-notification config-error
-  surfacing, three-layer dispatch (entrypoint /
-  argparse / service), per-instance state on
-  ``hass.data``, ``async_call_later`` auto-off
-  scheduling, ``automation.trigger`` re-fire so
-  logbook attributes downstream actions to the right
-  automation, blueprint discovery via
-  ``hass.data[DATA_COMPONENT].entities``, live
-  add/remove via ``EVENT_AUTOMATION_RELOADED`` plus
-  ``entity_registry_updated``.
+- ``logic`` -- pure-function decision tree. Imports
+  formatting helpers from the shared ``..helpers``
+  module.
+- ``handler`` -- HA wiring: vol.Schema-driven argparse
+  with persistent-notification config-error surfacing,
+  three-layer dispatch (entrypoint / argparse /
+  service), per-instance state on ``hass.data``,
+  ``async_call_later`` auto-off scheduling,
+  ``automation.trigger`` re-fire so logbook attributes
+  downstream actions to the right automation, blueprint
+  discovery via ``hass.data[DATA_COMPONENT].entities``,
+  live add/remove via ``EVENT_AUTOMATION_RELOADED``
+  plus ``entity_registry_updated``.
 """
 
 from __future__ import annotations

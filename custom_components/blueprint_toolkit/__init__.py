@@ -343,8 +343,7 @@ async def async_setup_entry(
 
     _register_docs_static_route(hass)
 
-    # Native trigger_entity_controller. Coexists with the
-    # pyscript-backed services for the other 5 blueprints.
+    # trigger_entity_controller service handler.
     # Lazy-imported because ``tec.handler`` pulls in
     # ``voluptuous`` and ``homeassistant`` at module scope.
     from .tec import handler as tec_handler
@@ -364,7 +363,7 @@ async def async_unload_entry(
 ) -> bool:
     """Unload the config entry. No filesystem side effects.
 
-    Tears down the native TEC handler so a reload (e.g.
+    Tears down the TEC handler so a reload (e.g.
     after ``_async_options_updated`` fires from an
     options-flow save) doesn't leak service
     registrations, bus listeners, or pending

@@ -1,9 +1,8 @@
 # This is AI generated code
-"""Shared helpers for native blueprint_toolkit subpackages.
+"""Shared helpers for blueprint_toolkit subpackages.
 
-Counterpart to ``pyscript/modules/helpers.py``: utility
-surface that subpackage logic + handler modules share.
-Lifted incrementally as native ports land (today: TEC;
+Utility surface that subpackage logic + handler modules
+share. Lifted incrementally as ports land (today: TEC;
 future: DW, EDW, RW, STSC, ZWRM).
 
 Three flavours of symbol live here:
@@ -268,7 +267,7 @@ async def recover_at_startup(
     Fires the per-port ``kick`` callable once per
     discovered automation entity_id. Standardises the
     "no automations discovered" / "kicking N for catch-up"
-    INFO log lines so all native ports surface the same
+    INFO log lines so all subpackages surface the same
     diagnostic shape.
     """
     discovered = discover_automations_using_blueprint(hass, blueprint_path)
@@ -321,7 +320,7 @@ def parse_entity_registry_update(
 
 @dataclass
 class BlueprintHandlerSpec:
-    """Per-port configuration for a native blueprint handler.
+    """Per-port configuration for a blueprint handler.
 
     Bundles the identifiers, service callback, and
     optional lifecycle hooks the shared register /

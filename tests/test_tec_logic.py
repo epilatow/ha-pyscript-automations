@@ -4,23 +4,19 @@
 # dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
-"""Smoke + parity tests for the lifted TEC logic module.
+"""Smoke + parity tests for the TEC logic module.
 
-The native port at
-``custom_components/blueprint_toolkit/tec/logic.py`` is a
-near-verbatim lift of the pyscript module at
-``pyscript/modules/trigger_entity_controller.py`` -- only
-``import helpers`` was changed to ``from . import helpers``
-to fit a Python package. The pyscript copy is exhaustively
-covered by ``tests/test_trigger_entity_controller.py``;
-this file adds:
+``custom_components/blueprint_toolkit/tec/logic.py``
+was lifted from the pyscript module at
+``pyscript/modules/trigger_entity_controller.py`` --
+only the ``helpers`` import differs. While both copies
+coexist, this file pins:
 
-1. An import-surface smoke test that catches accidental
-   API drift between the two copies.
-2. A handful of evaluate-the-decision-tree scenarios
-   confirming the lifted module produces the same
-   result as the pyscript module would for the same
-   ``Config`` + ``Inputs``.
+1. The public API surface of the integration's copy.
+2. A handful of evaluate-the-decision-tree scenarios.
+3. Parity with the pyscript copy for representative
+   inputs (skipped if the pyscript copy isn't
+   importable).
 
 If the two copies ever diverge in API or behaviour, this
 file fails fast.
@@ -38,10 +34,8 @@ sys.path.insert(0, str(REPO_ROOT))
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
 
-# Lifted module under test.
-from custom_components.blueprint_toolkit.tec import (  # noqa: E402
-    logic as native,
-)
+# Module under test.
+from custom_components.blueprint_toolkit.tec import logic as tec  # noqa: E402
 
 # Pyscript-side module (parity comparison target). Skipped
 # if the path isn't importable (e.g., minimal CI envs).
@@ -57,27 +51,27 @@ LIGHT = "light.hallway"
 MOTION = "binary_sensor.motion"
 
 
-def _config(**overrides: object) -> native.Config:
+def _config(**overrides: object) -> tec.Config:
     defaults: dict[str, object] = {
         "controlled_entities": [LIGHT],
         "auto_off_minutes": 0,
         "auto_off_disabling_entities": [],
         "trigger_entities": [MOTION],
-        "trigger_period": native.Period.ALWAYS,
+        "trigger_period": tec.Period.ALWAYS,
         "trigger_forces_on": False,
         "trigger_disabling_entities": [],
-        "trigger_disabling_period": native.Period.ALWAYS,
+        "trigger_disabling_period": tec.Period.ALWAYS,
         "notification_prefix": "TEC: ",
         "notification_suffix": "",
         "notification_events": [],
     }
     defaults.update(overrides)
-    return native.Config(**defaults)  # type: ignore[arg-type]
+    return tec.Config(**defaults)  # type: ignore[arg-type]
 
 
 def _inputs(
     *,
-    event_type: native.EventType,
+    event_type: tec.EventType,
     changed_entity: str = MOTION,
     triggers_on: bool = False,
     controlled_on: bool = False,
@@ -86,8 +80,8 @@ def _inputs(
     auto_off_disabled: bool = False,
     auto_off_at: datetime | None = None,
     current_time: datetime = T0,
-) -> native.Inputs:
-    return native.Inputs(
+) -> tec.Inputs:
+    return tec.Inputs(
         current_time=current_time,
         event_type=event_type,
         changed_entity=changed_entity,
@@ -118,10 +112,10 @@ class TestImportSurfaceParity:
         "parse_period",
     )
 
-    def test_native_exports_expected(self) -> None:
+    def test_tec_exports_expected(self) -> None:
         for name in self.EXPECTED:
-            assert hasattr(native, name), (
-                f"native logic module missing symbol: {name}"
+            assert hasattr(tec, name), (
+                f"tec logic module missing symbol: {name}"
             )
 
     @pytest.mark.skipif(
@@ -135,58 +129,58 @@ class TestImportSurfaceParity:
             )
 
 
-class TestNativeDecisionTreeSmoke:
-    """A few representative scenarios exercising the lifted module."""
+class TestDecisionTreeSmoke:
+    """A few representative scenarios exercising the logic module."""
 
     def test_trigger_on_turns_on(self) -> None:
         config = _config(auto_off_minutes=5)
         inputs = _inputs(
-            event_type=native.EventType.TRIGGER_ON,
+            event_type=tec.EventType.TRIGGER_ON,
             controlled_on=False,
         )
-        result = native.evaluate(config, inputs)
-        assert result.action == native.ActionType.TURN_ON
+        result = tec.evaluate(config, inputs)
+        assert result.action == tec.ActionType.TURN_ON
         assert result.target_entities == [LIGHT]
         assert result.auto_off_at is None
 
     def test_trigger_off_arms_auto_off(self) -> None:
         config = _config(auto_off_minutes=5)
         inputs = _inputs(
-            event_type=native.EventType.TRIGGER_OFF,
+            event_type=tec.EventType.TRIGGER_OFF,
             controlled_on=True,
             triggers_on=False,
         )
-        result = native.evaluate(config, inputs)
-        assert result.action == native.ActionType.NONE
+        result = tec.evaluate(config, inputs)
+        assert result.action == tec.ActionType.NONE
         assert result.auto_off_at == T0 + timedelta(minutes=5)
 
     def test_timer_expires_turns_off(self) -> None:
         config = _config(auto_off_minutes=5)
         inputs = _inputs(
-            event_type=native.EventType.TIMER,
+            event_type=tec.EventType.TIMER,
             controlled_on=True,
             triggers_on=False,
             auto_off_at=T0 - timedelta(minutes=1),  # already past
         )
-        result = native.evaluate(config, inputs)
-        assert result.action == native.ActionType.TURN_OFF
+        result = tec.evaluate(config, inputs)
+        assert result.action == tec.ActionType.TURN_OFF
         assert result.auto_off_at is None
 
     def test_timer_catch_up_arms_when_controlled_on(self) -> None:
         config = _config(auto_off_minutes=5)
         inputs = _inputs(
-            event_type=native.EventType.TIMER,
+            event_type=tec.EventType.TIMER,
             controlled_on=True,
             triggers_on=False,
             auto_off_at=None,  # catch-up scenario
         )
-        result = native.evaluate(config, inputs)
-        assert result.action == native.ActionType.NONE
+        result = tec.evaluate(config, inputs)
+        assert result.action == tec.ActionType.NONE
         assert result.auto_off_at == T0 + timedelta(minutes=5)
 
 
 class TestParityWithPyscript:
-    """Native + pyscript modules return identical Result for the same inputs."""
+    """TEC + pyscript modules return identical Result for the same inputs."""
 
     @pytest.mark.skipif(
         pyscript_tec is None,
@@ -206,7 +200,7 @@ class TestParityWithPyscript:
     def test_evaluate_parity(self, event_kind: str) -> None:
         # Build matching Config / Inputs in both modules.
         # The dataclasses are structurally identical so we
-        # can use the native fixtures and re-instantiate
+        # can use the tec-side fixtures and re-instantiate
         # against the pyscript module via attribute lookup.
         scenarios: dict[str, dict[str, object]] = {
             "trigger_on": {
@@ -276,20 +270,20 @@ class TestParityWithPyscript:
                 setattr(ipt, k, v)
             return mod.evaluate(cfg, ipt)  # type: ignore[attr-defined]
 
-        native_result = _build(native)
+        tec_result = _build(tec)
         pyscript_result = _build(pyscript_tec)
 
         # Compare the load-bearing fields. The dataclasses
         # are not comparable across module identities, so
         # we walk the attributes manually.
-        assert native_result.action.name == pyscript_result.action.name
-        assert native_result.target_entities == pyscript_result.target_entities
-        assert native_result.auto_off_at == pyscript_result.auto_off_at
+        assert tec_result.action.name == pyscript_result.action.name
+        assert tec_result.target_entities == pyscript_result.target_entities
+        assert tec_result.auto_off_at == pyscript_result.auto_off_at
 
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "tests/test_native_tec_logic.py",
+        "tests/test_tec_logic.py",
         "custom_components/blueprint_toolkit/tec/logic.py",
         "custom_components/blueprint_toolkit/tec/__init__.py",
         "custom_components/blueprint_toolkit/helpers.py",
