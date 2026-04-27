@@ -172,7 +172,7 @@ class TestArgparseEmitsConfigErrorNotification:
         self,
         hass,  # noqa: ANN001
     ) -> None:
-        """Cross-field overlap (controlled ∩ trigger) must error."""
+        """Cross-field overlap (controlled and trigger) must error."""
         await _setup_integration(hass)
         hass.states.async_set(LIGHT, "off")
         hass.states.async_set(MOTION, "off")
@@ -229,9 +229,9 @@ class TestArgparseEmitsConfigErrorNotification:
         hass,  # noqa: ANN001
     ) -> None:
         """When the automation entity is registered, the body
-        starts with the ``Automation: [name](link)`` header.
-        Mirrors the pyscript convention so users can click
-        through to the broken automation from the notification.
+        starts with the ``Automation: [name](link)`` header
+        so users can click through to the broken automation
+        from the notification.
         """
         await _setup_integration(hass)
         # Seed the automation entity with a friendly name +
@@ -398,9 +398,16 @@ class TestServiceLayerAppliesActions:
             "blueprint_toolkit.trigger_entity_controller_tec_diag_state",
         )
         assert state is not None, "diagnostic state entity was not created"
+        # State value is the TEC-specific override.
         assert state.state == "TURN_ON"
-        assert state.attributes["last_event"] == "TRIGGER_ON"
+        # Common attrs always present.
         assert state.attributes["instance_id"] == "automation.tec_diag"
+        assert "last_run" in state.attributes
+        assert "runtime" in state.attributes
+        # TEC-specific attrs go through extra_attributes.
+        assert state.attributes["last_event"] == "TRIGGER_ON"
+        assert "last_reason" in state.attributes
+        assert "auto_off_at" in state.attributes
 
 
 # --------------------------------------------------------

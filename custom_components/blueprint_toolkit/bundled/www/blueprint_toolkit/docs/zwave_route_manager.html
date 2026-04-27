@@ -77,22 +77,6 @@ support routing (Z-Wave Long Range devices)</li>
 <li>Distinct notification categories: config errors, API
 unavailable, apply failures, pending timeouts</li>
 </ul>
-<h2>Requirements</h2>
-<ul>
-<li>
-<p>Home Assistant <strong>Z-Wave JS</strong> addon (<code>core_zwave_js</code>), which
-bundles <code>zwave-js-ui</code>. The socket.io backend on port 8091 is
-the automation's target -- tested against addon v1.2.0
-(bundling zwave-js-ui v11.16.0).</p>
-</li>
-<li>
-<p>PyScript configured with:</p>
-<pre><code class="language-yaml">pyscript:
-  allow_all_imports: true
-  hass_is_global: true
-</code></pre>
-</li>
-</ul>
 <h2>Usage</h2>
 <ol>
 <li>Install the blueprint + pyscript modules (see main README).</li>

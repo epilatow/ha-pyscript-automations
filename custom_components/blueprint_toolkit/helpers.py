@@ -96,6 +96,22 @@ def format_notification(
     return f"{formatted_prefix}{text}{formatted_suffix}"
 
 
+def parse_notification_service(service: str) -> tuple[str, str]:
+    """Split a notify-service string into ``(domain, name)``.
+
+    Accepts both ``notify.foo`` (full ``domain.service``)
+    and the bare ``foo`` short form, defaulting to the
+    ``notify`` domain. Used by per-port handlers in two
+    spots: argparse-time validation that the service is
+    registered, and the actual dispatch when a finding-
+    style notification needs to be sent.
+    """
+    if "." in service:
+        domain, name = service.split(".", 1)
+        return domain, name
+    return "notify", service
+
+
 # --------------------------------------------------------
 # CommonMark escape for ``persistent_notification`` bodies
 # --------------------------------------------------------
@@ -159,12 +175,67 @@ class PersistentNotification:
     layers can return these without taking an HA
     dependency, and ``process_persistent_notifications``
     can apply them in one batch.
+
+    ``instance_id`` is the automation entity_id this
+    notification belongs to. When set, the dispatcher
+    looks the automation up in ``hass.states`` and
+    prepends an ``Automation: [{name}](edit-link)\\n``
+    line to the message body so users can click straight
+    through to the broken / problematic automation. All
+    notification builders that originate from a per-
+    instance service call should set this; ad-hoc one-off
+    notifications can leave it empty.
     """
 
     active: bool
     notification_id: str
     title: str
     message: str
+    instance_id: str | None = None
+
+
+def _instance_link_inputs(
+    hass: HomeAssistant,
+    instance_id: str,
+) -> tuple[str | None, str | None]:
+    """Look up the friendly name + YAML id for an automation entity.
+
+    Used by ``process_persistent_notifications`` to build
+    the ``Automation: [name](edit-link)`` prefix. Returns
+    ``(None, None)`` when the automation entity isn't
+    registered (e.g. the call came from Developer Tools
+    rather than a real automation).
+    """
+    state = hass.states.get(instance_id)
+    if state is None:
+        return None, None
+    name = state.attributes.get("friendly_name") or instance_id
+    yaml_id = state.attributes.get("id")
+    if not isinstance(yaml_id, str) or not yaml_id:
+        return name, None
+    return name, yaml_id
+
+
+def _automation_link_prefix(
+    hass: HomeAssistant,
+    instance_id: str | None,
+) -> str:
+    """Render the ``Automation: [name](edit-link)\\n`` prefix.
+
+    Returns ``""`` when ``instance_id`` is ``None`` or
+    the automation entity isn't registered or hasn't been
+    given a YAML ``id:``. The friendly name is
+    ``md_escape``-d so user-typed ``[`` / ``]`` in the
+    name don't corrupt the rendered link.
+    """
+    if not instance_id:
+        return ""
+    name, yaml_id = _instance_link_inputs(hass, instance_id)
+    if name is None or yaml_id is None:
+        return ""
+    return (
+        f"Automation: [{md_escape(name)}](/config/automation/edit/{yaml_id})\n"
+    )
 
 
 async def process_persistent_notifications(
@@ -179,16 +250,24 @@ async def process_persistent_notifications(
     ``persistent_notification.dismiss`` call (which is
     a no-op if the notification doesn't exist, so it's
     always safe to fire).
+
+    For ``active`` specs whose ``instance_id`` is set,
+    the dispatcher prepends an
+    ``Automation: [name](edit-link)\\n`` header to the
+    message body so users can click through to the
+    associated automation. Inactive (dismiss) specs are
+    not prefixed -- nothing's being shown.
     """
     for n in notifications:
         if n.active:
+            link_prefix = _automation_link_prefix(hass, n.instance_id)
             await hass.services.async_call(
                 "persistent_notification",
                 "create",
                 {
                     "notification_id": n.notification_id,
                     "title": n.title,
-                    "message": n.message,
+                    "message": f"{link_prefix}{n.message}",
                 },
             )
         else:
@@ -219,8 +298,6 @@ def make_config_error_notification(
     service_tag: str,
     instance_id: str,
     errors: list[str],
-    instance_name: str | None = None,
-    instance_yaml_id: str | None = None,
 ) -> PersistentNotification:
     """Build a config-error spec with the standard wire format.
 
@@ -231,22 +308,16 @@ def make_config_error_notification(
     call ``emit_config_error`` unconditionally on every
     successful argparse without branching.
 
-    The body is a markdown bulleted list:
+    The body is a markdown bulleted list of the errors;
+    ``process_persistent_notifications`` prepends an
+    ``Automation: [name](edit-link)\\n`` header when it
+    dispatches (driven by the ``instance_id`` field on
+    the spec).
 
-        Automation: [{instance_name}](/config/automation/edit/{id})
-        - {error 1}
-        - {error 2}
-
-    The ``Automation:`` link prefix is included only when
-    both ``instance_name`` and ``instance_yaml_id`` are
-    provided (the typical caller is ``emit_config_error``,
-    which fetches both from the live automation entity).
-
-    Every interpolated user-controlled string
-    (``instance_name``, each entry of ``errors``) is
-    ``md_escape``-d. ``vol.Invalid`` messages can include
-    the offending input value; automation friendly_names
-    are user-typed; both could otherwise smuggle stray
+    Every interpolated user-controlled string -- each
+    entry of ``errors`` -- is ``md_escape``-d here.
+    ``vol.Invalid`` messages can include the offending
+    input value, which could otherwise smuggle stray
     ``[`` / ``]`` / ``\\`` into the rendered markdown.
     """
     notif_id = _config_error_notification_id(service, instance_id)
@@ -256,47 +327,17 @@ def make_config_error_notification(
             notification_id=notif_id,
             title="",
             message="",
+            instance_id=instance_id,
         )
     title = f"Blueprint Toolkit -- {service_tag} config error: {instance_id}"
-    parts: list[str] = []
-    if instance_name and instance_yaml_id:
-        parts.append(
-            f"Automation: [{md_escape(instance_name)}]"
-            f"(/config/automation/edit/{instance_yaml_id})",
-        )
-    parts.extend(f"- {md_escape(e)}" for e in errors)
-    message = "\n".join(parts)
+    message = "\n".join(f"- {md_escape(e)}" for e in errors)
     return PersistentNotification(
         active=True,
         notification_id=notif_id,
         title=title,
         message=message,
+        instance_id=instance_id,
     )
-
-
-def _instance_link_inputs(
-    hass: HomeAssistant,
-    instance_id: str,
-) -> tuple[str | None, str | None]:
-    """Look up the friendly name + YAML id for an automation entity.
-
-    Returns ``(instance_name, instance_yaml_id)`` for use
-    by ``make_config_error_notification`` to build the
-    "Automation: [name](link)" prefix. Both values are
-    ``None`` when the automation entity has not been
-    registered yet -- the call comes from a service the
-    user invoked manually (e.g. via Developer Tools), not
-    from a real automation. The notification still emits
-    in that case, just without the clickable header.
-    """
-    state = hass.states.get(instance_id)
-    if state is None:
-        return None, None
-    name = state.attributes.get("friendly_name") or instance_id
-    yaml_id = state.attributes.get("id")
-    if not isinstance(yaml_id, str) or not yaml_id:
-        return name, None
-    return name, yaml_id
 
 
 async def emit_config_error(
@@ -312,19 +353,13 @@ async def emit_config_error(
     Convenience wrapper -- handlers typically call this
     once per argparse with whatever ``errors`` they
     accumulated (empty list dismisses any prior
-    notification for the same instance). Looks up the
-    automation entity to populate the "Automation:
-    [name](link)" header for the notification body when
-    the entity is registered.
+    notification for the same instance).
     """
-    instance_name, instance_yaml_id = _instance_link_inputs(hass, instance_id)
     spec = make_config_error_notification(
         service=service,
         service_tag=service_tag,
         instance_id=instance_id,
         errors=errors,
-        instance_name=instance_name,
-        instance_yaml_id=instance_yaml_id,
     )
     if errors:
         _LOGGER.warning(
@@ -344,13 +379,11 @@ async def emit_config_error(
 def instance_state_entity_id(service: str, instance_id: str) -> str:
     """Build the ``blueprint_toolkit.<service>_<slug>_state`` entity_id.
 
-    Mirrors the pyscript convention
-    (``pyscript.automation_<slug>_state``) but in our
-    integration's namespace. ``instance_id`` is the
-    automation entity_id (e.g. ``automation.foo_bar``);
-    we strip the ``automation.`` prefix so the resulting
-    diagnostic entity_id reads cleanly in
-    Developer Tools / templates / dashboards.
+    ``instance_id`` is the automation entity_id (e.g.
+    ``automation.foo_bar``); we strip the
+    ``automation.`` prefix so the resulting diagnostic
+    entity_id reads cleanly in Developer Tools /
+    templates / dashboards.
     """
     slug = instance_id.removeprefix("automation.")
     return f"{DOMAIN}.{service}_{slug}_state"
@@ -361,42 +394,44 @@ def update_instance_state(
     *,
     service: str,
     instance_id: str,
-    last_event: str,
-    last_action: str,
     last_run: datetime,
-    last_reason: str = "",
-    auto_off_at: datetime | None = None,
+    runtime: float,
+    state: str = "ok",
     extra_attributes: dict[str, Any] | None = None,
 ) -> None:
     """Surface per-instance runtime state for debugging.
 
     Sets a state entry at
     ``blueprint_toolkit.<service>_<slug>_state`` with
-    ``last_action`` as the state value (e.g.
-    ``TURN_ON``, ``NONE``) and the rest of the
-    diagnostic fields as attributes. Visible from
+    ``state`` as the state value (defaults to ``"ok"`` --
+    handlers that have a more meaningful value, e.g. TEC
+    using its ``last_action.name``, override). Common
+    diagnostic attributes (``instance_id``, ``last_run``,
+    ``runtime``) are always written; handlers add their
+    own via ``extra_attributes``:
+
+    - TEC: ``last_event``, ``last_action``,
+      ``last_reason``, ``auto_off_at``.
+    - DW / EDW / RW: integration / entity / device /
+      issue counts.
+    - ZRM: applied / pending / errored route counts,
+      circuit-breaker fields.
+    - STSC: last temperature reading, threshold state.
+
+    The state entity is visible from
     Developer Tools > States, queryable from templates,
     and consumable by dashboards.
-
-    ``extra_attributes`` lets per-port handlers add
-    fields beyond the common set (TEC has none today;
-    a future ZRM port might add per-route status,
-    etc).
     """
     attributes: dict[str, Any] = {
         "instance_id": instance_id,
-        "last_event": last_event,
         "last_run": last_run.isoformat(),
-        "last_reason": last_reason,
-        "auto_off_at": (
-            auto_off_at.isoformat() if auto_off_at is not None else None
-        ),
+        "runtime": round(runtime, 2),
     }
     if extra_attributes:
         attributes.update(extra_attributes)
     hass.states.async_set(
         instance_state_entity_id(service, instance_id),
-        last_action,
+        state,
         attributes,
     )
 

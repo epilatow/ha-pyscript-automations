@@ -152,12 +152,26 @@ class _MockBus:
 
 
 @dataclass
+class _MockStateLike:
+    """Stand-in for ``hass.states.get(...)``'s return value."""
+
+    state: str
+    attributes: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class _MockStates:
-    """Captures ``hass.states.async_set`` calls for inspection."""
+    """Captures ``hass.states.async_set`` calls for inspection.
+
+    Also provides ``hass.states.get(entity_id)`` so the
+    dispatcher's automation-link lookup can find seeded
+    entities. Tests stash entries via ``stub_state``.
+    """
 
     set_calls: list[tuple[str, str, dict[str, Any]]] = field(
         default_factory=list,
     )
+    stubs: dict[str, _MockStateLike] = field(default_factory=dict)
 
     def async_set(
         self,
@@ -166,6 +180,17 @@ class _MockStates:
         attributes: dict[str, Any] | None = None,
     ) -> None:
         self.set_calls.append((entity_id, state, dict(attributes or {})))
+
+    def get(self, entity_id: str) -> _MockStateLike | None:
+        return self.stubs.get(entity_id)
+
+    def stub_state(
+        self,
+        entity_id: str,
+        state: str = "on",
+        **attributes: Any,
+    ) -> None:
+        self.stubs[entity_id] = _MockStateLike(state, dict(attributes))
 
 
 @dataclass
@@ -310,44 +335,21 @@ class TestMakeConfigErrorNotification:
         assert n.title == ""
         assert n.message == ""
 
-    def test_link_prefix_when_name_and_yaml_id_provided(self) -> None:
+    def test_instance_id_set_so_dispatcher_can_prepend_link(self) -> None:
+        # The link prefix is added by the dispatcher, not
+        # the builder; the builder just stamps the
+        # instance_id onto the spec so the dispatcher
+        # knows which automation to look up.
         n = helpers.make_config_error_notification(
             service="trigger_entity_controller",
             service_tag="TEC",
             instance_id="automation.x",
             errors=["bad"],
-            instance_name="My Auto",
-            instance_yaml_id="1234567890",
         )
-        assert n.message.startswith(
-            "Automation: [My Auto](/config/automation/edit/1234567890)\n",
-        )
-
-    def test_no_link_prefix_when_yaml_id_missing(self) -> None:
-        n = helpers.make_config_error_notification(
-            service="trigger_entity_controller",
-            service_tag="TEC",
-            instance_id="automation.x",
-            errors=["bad"],
-            instance_name="My Auto",
-            instance_yaml_id=None,
-        )
-        assert "Automation:" not in n.message
+        assert n.instance_id == "automation.x"
+        # Builder body is just the bullets -- no prefix
+        # baked in.
         assert n.message == "- bad"
-
-    def test_md_escape_applied_to_friendly_name(self) -> None:
-        # ``[`` / ``]`` in the user-typed friendly name
-        # would otherwise pair with the ``](`` of the
-        # link target and corrupt the rendered link.
-        n = helpers.make_config_error_notification(
-            service="trigger_entity_controller",
-            service_tag="TEC",
-            instance_id="automation.x",
-            errors=["bad"],
-            instance_name="Office [Lights]",
-            instance_yaml_id="42",
-        )
-        assert "[Office \\[Lights\\]]" in n.message
 
     def test_md_escape_applied_to_error_bullets(self) -> None:
         # vol.Invalid messages can echo the offending
@@ -411,67 +413,70 @@ class TestInstanceStateEntityId:
 
 
 class TestUpdateInstanceState:
-    def test_writes_state_with_attributes(self) -> None:
+    def test_writes_common_attrs_with_default_state(self) -> None:
         hass = _MockHass()
-
         run_at = datetime(2024, 1, 15, 12, 0, 0)
-        off_at = datetime(2024, 1, 15, 12, 5, 0)
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
-            service="trigger_entity_controller",
-            instance_id="automation.foo_bar",
-            last_event="TRIGGER_ON",
-            last_action="TURN_ON",
+            service="device_watchdog",
+            instance_id="automation.dw",
             last_run=run_at,
-            last_reason="motion fired",
-            auto_off_at=off_at,
+            runtime=1.234,
         )
         assert hass.states.set_calls == [
             (
-                ("blueprint_toolkit.trigger_entity_controller_foo_bar_state"),
-                "TURN_ON",
+                "blueprint_toolkit.device_watchdog_dw_state",
+                "ok",
                 {
-                    "instance_id": "automation.foo_bar",
-                    "last_event": "TRIGGER_ON",
+                    "instance_id": "automation.dw",
                     "last_run": run_at.isoformat(),
-                    "last_reason": "motion fired",
-                    "auto_off_at": off_at.isoformat(),
+                    "runtime": 1.23,
                 },
             ),
         ]
 
-    def test_auto_off_at_none_serialises_as_none(self) -> None:
+    def test_state_value_override_for_trigger_handlers(self) -> None:
         hass = _MockHass()
-
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
             service="trigger_entity_controller",
-            instance_id="automation.foo",
-            last_event="TIMER",
-            last_action="TURN_OFF",
+            instance_id="automation.tec",
             last_run=datetime(2024, 1, 15, 12, 0, 0),
+            runtime=0.05,
+            state="TURN_ON",
         )
-        attrs = hass.states.set_calls[0][2]
-        assert attrs["auto_off_at"] is None
+        assert hass.states.set_calls[0][1] == "TURN_ON"
 
     def test_extra_attributes_merged(self) -> None:
         hass = _MockHass()
+        helpers.update_instance_state(
+            hass,  # type: ignore[arg-type]
+            service="trigger_entity_controller",
+            instance_id="automation.tec",
+            last_run=datetime(2024, 1, 15, 12, 0, 0),
+            runtime=0.1,
+            state="TURN_ON",
+            extra_attributes={
+                "last_event": "TRIGGER_ON",
+                "last_reason": "motion fired",
+                "auto_off_at": "2024-01-15T12:05:00",
+            },
+        )
+        attrs = hass.states.set_calls[0][2]
+        assert attrs["last_event"] == "TRIGGER_ON"
+        assert attrs["last_reason"] == "motion fired"
+        assert attrs["auto_off_at"] == "2024-01-15T12:05:00"
 
+    def test_runtime_rounded_to_two_decimals(self) -> None:
+        hass = _MockHass()
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
             service="zwave_route_manager",
             instance_id="automation.zrm",
-            last_event="EVALUATE",
-            last_action="APPLIED",
             last_run=datetime(2024, 1, 15, 12, 0, 0),
-            extra_attributes={
-                "applied_routes": 17,
-                "pending_routes": 1,
-            },
+            runtime=2.4567,
         )
-        attrs = hass.states.set_calls[0][2]
-        assert attrs["applied_routes"] == 17
-        assert attrs["pending_routes"] == 1
+        assert hass.states.set_calls[0][2]["runtime"] == 2.46
 
 
 # --------------------------------------------------------
@@ -518,6 +523,124 @@ class TestProcessPersistentNotifications:
                 ),
             ],
         )
+        assert hass.services.calls == [
+            (
+                "persistent_notification",
+                "dismiss",
+                {"notification_id": "x"},
+            ),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_prepends_automation_link_when_instance_known(self) -> None:
+        hass = _MockHass()
+        hass.states.stub_state(
+            "automation.foo",
+            "on",
+            friendly_name="My Auto",
+            id="1234",
+        )
+        await helpers.process_persistent_notifications(
+            hass,  # type: ignore[arg-type]
+            [
+                helpers.PersistentNotification(
+                    active=True,
+                    notification_id="x",
+                    title="t",
+                    message="- bad",
+                    instance_id="automation.foo",
+                ),
+            ],
+        )
+        sent = hass.services.calls[0][2]["message"]
+        assert sent.startswith(
+            "Automation: [My Auto](/config/automation/edit/1234)\n",
+        )
+        assert sent.endswith("- bad")
+
+    @pytest.mark.asyncio
+    async def test_no_prefix_when_instance_id_absent(self) -> None:
+        hass = _MockHass()
+        await helpers.process_persistent_notifications(
+            hass,  # type: ignore[arg-type]
+            [
+                helpers.PersistentNotification(
+                    active=True,
+                    notification_id="x",
+                    title="t",
+                    message="m",
+                ),
+            ],
+        )
+        assert hass.services.calls[0][2]["message"] == "m"
+
+    @pytest.mark.asyncio
+    async def test_no_prefix_when_automation_not_registered(self) -> None:
+        # instance_id set on the spec but no matching state
+        # in hass.states (the user invoked the service via
+        # Developer Tools).
+        hass = _MockHass()
+        await helpers.process_persistent_notifications(
+            hass,  # type: ignore[arg-type]
+            [
+                helpers.PersistentNotification(
+                    active=True,
+                    notification_id="x",
+                    title="t",
+                    message="m",
+                    instance_id="automation.unknown",
+                ),
+            ],
+        )
+        assert hass.services.calls[0][2]["message"] == "m"
+
+    @pytest.mark.asyncio
+    async def test_md_escape_applied_to_friendly_name(self) -> None:
+        hass = _MockHass()
+        hass.states.stub_state(
+            "automation.foo",
+            "on",
+            friendly_name="Office [Lights]",
+            id="42",
+        )
+        await helpers.process_persistent_notifications(
+            hass,  # type: ignore[arg-type]
+            [
+                helpers.PersistentNotification(
+                    active=True,
+                    notification_id="x",
+                    title="t",
+                    message="- bad",
+                    instance_id="automation.foo",
+                ),
+            ],
+        )
+        assert "[Office \\[Lights\\]]" in hass.services.calls[0][2]["message"]
+
+    @pytest.mark.asyncio
+    async def test_dismiss_does_not_prepend(self) -> None:
+        # Inactive specs are dismiss calls; nothing rendered.
+        hass = _MockHass()
+        hass.states.stub_state(
+            "automation.foo",
+            "on",
+            friendly_name="My Auto",
+            id="42",
+        )
+        await helpers.process_persistent_notifications(
+            hass,  # type: ignore[arg-type]
+            [
+                helpers.PersistentNotification(
+                    active=False,
+                    notification_id="x",
+                    title="",
+                    message="",
+                    instance_id="automation.foo",
+                ),
+            ],
+        )
+        # ``dismiss`` only carries notification_id; no
+        # message field even possible.
         assert hass.services.calls == [
             (
                 "persistent_notification",

@@ -1,10 +1,13 @@
 # This is AI generated code
 """Business logic for trigger entity controller.
 
-Does not use PyScript-injected globals.
+Pure-function decision tree: ``evaluate(config, inputs)``
+returns a ``Result`` describing what should happen, with
+no side effects. The HA-facing wiring lives in
+``handler.py``.
 
 Controls entities with optional trigger-based activation
-and auto-off timer.  Supports time-of-day restrictions,
+and auto-off timer. Supports time-of-day restrictions,
 disabling entities, and force-on behavior.
 """
 

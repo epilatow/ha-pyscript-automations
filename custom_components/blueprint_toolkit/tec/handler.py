@@ -15,11 +15,10 @@ Three-layer dispatch:
    notify-service existence, no overlapping sets).
    Accumulates errors and emits a single
    ``persistent_notification`` config_error per
-   automation instance (matching the pyscript model:
-   one notification per instance, dismissed on
-   subsequent successful argparse). On success builds
-   a ``logic.Config`` and hands off to the service
-   layer.
+   automation instance (one notification per instance,
+   dismissed on subsequent successful argparse). On
+   success builds a ``logic.Config`` and hands off to
+   the service layer.
 
 3. **Service layer** -- reads HA state to populate
    ``logic.Inputs`` (current state of trigger /
@@ -47,6 +46,7 @@ rename signal).
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -69,6 +69,7 @@ from ..helpers import (
     BlueprintHandlerSpec,
     emit_config_error,
     format_notification,
+    parse_notification_service,
     register_blueprint_handler,
     spec_bucket,
     unregister_blueprint_handler,
@@ -94,9 +95,8 @@ BLUEPRINT_PATH = "blueprint_toolkit/trigger_entity_controller.yaml"
 # re-firing an automation for an auto-off wakeup. The
 # blueprint's action: passes ``{{ trigger.entity_id }}``
 # through; the service handler uses the ``"timer"``
-# sentinel (matching the pyscript wrapper's TIMER event
-# classification) to reach the catch-up / expiration
-# branch in ``logic._handle_timer``.
+# sentinel to reach the catch-up / expiration branch in
+# ``logic._handle_timer``.
 _TIMER_TRIGGER_ENTITY_ID = "timer"
 
 
@@ -126,13 +126,14 @@ class TecInstanceState:
 # Service-call schema (vol.Schema)
 # --------------------------------------------------------
 #
-# Wire format mirrors the pyscript entrypoint's accepted
-# kwargs (see ``pyscript/blueprint_toolkit.py``'s
-# ``trigger_entity_controller_blueprint_argparse``). The
-# schema covers field-shape validation only; cross-field
-# rules (no overlapping entity sets) and HA-state
-# validation (entity exists in hass.states, notification
-# service is registered) live in ``_async_argparse``.
+# Wire format matches the blueprint's ``data:`` block in
+# ``trigger_entity_controller.yaml`` -- enforced by the
+# ``TestBlueprintSchemaDrift`` test in
+# ``tests/test_tec_handler.py``. The schema covers
+# field-shape validation only; cross-field rules (no
+# overlapping entity sets) and HA-state validation
+# (entity exists in hass.states, notification service is
+# registered) live in ``_async_argparse``.
 
 # Derived from the logic-side enums so the schema's
 # accepted values can never drift from what the
@@ -174,9 +175,9 @@ _SCHEMA = vol.Schema(
     # We do NOT pass schema= to async_register, so HA
     # doesn't reject the call before our handler runs --
     # that lets us emit a persistent_notification on
-    # config errors rather than just a log line, matching
-    # the pyscript model's user-visible config_error UX.
-    # Extra keys are tolerated for forward-compat.
+    # config errors rather than just a log line. Extra
+    # keys are tolerated for forward-compat with future
+    # blueprint inputs.
     extra=vol.ALLOW_EXTRA,
 )
 
@@ -219,14 +220,12 @@ def _instances(hass: HomeAssistant) -> dict[str, TecInstanceState]:
 async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
     """Service handler -- thin wrapper, hands off to argparse.
 
-    The pyscript wrapper's entrypoint has a
-    blueprint-mismatch notification path; vol.Schema
-    fulfils the same role here (missing/invalid keys
-    surface via ``vol.Invalid`` and become a
-    config_error notification through argparse).
-    Unexpected keys are tolerated (see ``extra=vol.ALLOW_EXTRA``
-    on ``_SCHEMA``) for forward-compat with future
-    blueprint inputs.
+    Missing or invalid keys surface via ``vol.Invalid``
+    inside ``_async_argparse`` and become a
+    ``persistent_notification`` config_error.  Unexpected
+    keys are tolerated (see ``extra=vol.ALLOW_EXTRA`` on
+    ``_SCHEMA``) for forward-compat with future blueprint
+    inputs.
     """
     await _async_argparse(hass, call)
 
@@ -234,19 +233,6 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
 # --------------------------------------------------------
 # Layer 2: argparse (vol.Schema + cross-field + state)
 # --------------------------------------------------------
-
-
-def _parse_notification_service(service: str) -> tuple[str, str]:
-    """Split a notify-service string into ``(domain, name)``.
-
-    Accepts both ``notify.foo`` (full ``domain.service``)
-    and the bare ``foo`` short form, defaulting to the
-    ``notify`` domain.
-    """
-    if "." in service:
-        domain, name = service.split(".", 1)
-        return domain, name
-    return "notify", service
 
 
 def _instance_id_for_error(raw_data: dict[str, Any]) -> str:
@@ -337,7 +323,7 @@ async def _async_argparse(
     # --- HA state: notification service exists ---
     notif = data["notification_service"]
     if notif:
-        notif_domain, notif_name = _parse_notification_service(notif)
+        notif_domain, notif_name = parse_notification_service(notif)
         if not hass.services.has_service(notif_domain, notif_name):
             errors.append(
                 f"notification service {notif} is not registered",
@@ -355,9 +341,13 @@ async def _async_argparse(
     )
     if needs_sun and hass.states.get("sun.sun") is None:
         errors.append(
-            "sun.sun entity is not available; required when "
-            "trigger_period or trigger_disabling_period is set "
-            "to a non-'always' value",
+            "sun.sun entity is not available, but is required "
+            "when trigger_period or trigger_disabling_period "
+            "is set to a non-'always' value. To fix: install "
+            "the Sun integration via Settings > Devices & "
+            "Services > Add Integration > Sun, or change both "
+            "period inputs to 'always' if you don't need "
+            "time-of-day gating.",
         )
 
     # Emit unconditionally: empty ``errors`` dismisses any
@@ -440,6 +430,7 @@ async def _async_service_layer(
     debug_logging: bool,
 ) -> None:
     """Read HA state, build Inputs, evaluate, apply Result."""
+    started = time.monotonic()
     state = _instances(hass).setdefault(
         instance_id,
         TecInstanceState(instance_id=instance_id),
@@ -480,11 +471,18 @@ async def _async_service_layer(
         hass,
         service=_SERVICE,
         instance_id=instance_id,
-        last_event=event_type.name,
-        last_action=result.action.name,
         last_run=now,
-        last_reason=result.reason or "",
-        auto_off_at=result.auto_off_at,
+        runtime=time.monotonic() - started,
+        state=result.action.name,
+        extra_attributes={
+            "last_event": event_type.name,
+            "last_reason": result.reason or "",
+            "auto_off_at": (
+                result.auto_off_at.isoformat()
+                if result.auto_off_at is not None
+                else None
+            ),
+        },
     )
 
     # --- Apply: turn_on/off (context propagated for logbook) ---
@@ -554,7 +552,7 @@ async def _send_notification(
     that propagate -- a loud failure in HA's logbook is
     more useful than a silent miss.
     """
-    domain, name = _parse_notification_service(service)
+    domain, name = parse_notification_service(service)
     await hass.services.async_call(
         domain,
         name,

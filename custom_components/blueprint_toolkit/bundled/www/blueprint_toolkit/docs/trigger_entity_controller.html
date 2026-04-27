@@ -74,9 +74,6 @@ events</li>
 configured entities are missing or renamed</li>
 <li>Optional debug logging</li>
 </ul>
-<h2>Requirements</h2>
-<p>The Blueprint Toolkit integration must be installed (via HACS or
-manual install). No pyscript dependency.</p>
 <h2>Usage</h2>
 <ol>
 <li>Install the automation (see main README)</li>
@@ -210,11 +207,16 @@ held off; the timer (re)starts when they all return to
 <p>After each evaluation, a diagnostic state entry is written at
 <code>blueprint_toolkit.trigger_entity_controller_&lt;slug&gt;_state</code>,
 where <code>&lt;slug&gt;</code> is the automation's entity_id stripped of its
-<code>automation.</code> prefix. The state value is <code>last_action</code> (NONE,
-TURN_ON, or TURN_OFF); attributes:</p>
+<code>automation.</code> prefix. The state value is the decision name
+(NONE, TURN_ON, or TURN_OFF); attributes:</p>
+<p>Common attributes:</p>
 <ul>
 <li><code>instance_id</code>: the automation entity_id</li>
 <li><code>last_run</code>: ISO timestamp of last evaluation</li>
+<li><code>runtime</code>: seconds the evaluation took (rounded to 2 decimals)</li>
+</ul>
+<p>TEC-specific attributes:</p>
+<ul>
 <li><code>last_event</code>: TRIGGER_ON, TRIGGER_OFF, CONTROLLED_ON,
 CONTROLLED_OFF, DISABLING_CHANGED, or TIMER</li>
 <li><code>last_reason</code>: human-readable reason for the decision</li>
