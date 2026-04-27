@@ -113,18 +113,19 @@ def parse_period(value: str) -> Period:
     return Period.ALWAYS
 
 
+_NOTIFICATION_EVENTS_BY_VALUE = {evt.value: evt for evt in NotificationEvent}
+
+
 def parse_notification_events(
     values: list[str],
 ) -> list[NotificationEvent]:
     """Parse notification event strings."""
-    result: list[NotificationEvent] = []
-    for v in values:
-        normalized = str(v).strip().lower()
-        for evt in NotificationEvent:
-            if evt.value == normalized:
-                result.append(evt)
-                break
-    return result
+    return [
+        _NOTIFICATION_EVENTS_BY_VALUE[normalized]
+        for v in values
+        for normalized in [str(v).strip().lower()]
+        if normalized in _NOTIFICATION_EVENTS_BY_VALUE
+    ]
 
 
 def determine_event_type(
@@ -234,7 +235,7 @@ def _friendly_list(
     names: dict[str, str],
 ) -> str:
     """Comma-separated friendly names."""
-    return ", ".join([_friendly(eid, names) for eid in entity_ids])
+    return ", ".join(_friendly(eid, names) for eid in entity_ids)
 
 
 def _compute_auto_off_at(
