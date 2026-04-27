@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -283,8 +283,19 @@ async def recover_at_startup(
         service_tag,
         len(discovered),
     )
+    # Best-effort: a single bad automation entity must
+    # not stop recovery for the rest of the discovered
+    # set. Catch + log, then continue.
     for entity_id in discovered:
-        await kick(hass, entity_id)
+        try:
+            await kick(hass, entity_id)
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.warning(
+                "[%s] catch-up kick for %s failed: %s",
+                service_tag,
+                entity_id,
+                e,
+            )
 
 
 # --------------------------------------------------------
@@ -393,15 +404,15 @@ class BlueprintHandlerSpec:
     on_entity_remove: Callable[[HomeAssistant, str], None] | None = None
     on_entity_rename: Callable[[HomeAssistant, str, str], None] | None = None
     on_teardown: Callable[[HomeAssistant], None] | None = None
-    # Internal: per-spec bookkeeping (unsubscribe
-    # handles for the bus listeners we registered).
-    # Lives in hass.data, not on the dataclass, so
-    # config-entry reload doesn't lose handles when the
-    # spec is reconstructed.
-    _bookkeeping_keys: tuple[str, ...] = field(
-        default=("unsub_reload", "unsub_er"),
-        repr=False,
-    )
+
+
+# Bucket key under which ``register_blueprint_handler``
+# stashes the unsubscribe callables for every bus
+# listener it registered. ``unregister_blueprint_handler``
+# iterates and calls each. Generic list (no per-listener
+# slot names) so future ports can add new listener types
+# without changing the bookkeeping shape.
+_UNSUBS_KEY = "unsubs"
 
 
 def _spec_bucket(hass: HomeAssistant, service: str) -> dict[str, Any]:
@@ -415,8 +426,9 @@ def _spec_bucket(hass: HomeAssistant, service: str) -> dict[str, Any]:
     """
     bucket: dict[str, Any] = hass.data.setdefault(DOMAIN, {}).setdefault(
         service,
-        {"unsub_reload": None, "unsub_er": None},
+        {_UNSUBS_KEY: []},
     )
+    bucket.setdefault(_UNSUBS_KEY, [])
     return bucket
 
 
@@ -451,6 +463,13 @@ async def register_blueprint_handler(
 
     hass.services.async_register(DOMAIN, spec.service, _service_wrapper)
 
+    # Idempotent re-register: tear down every prior unsub
+    # before re-subscribing so listener counts stay 1.
+    unsubs: list[Callable[[], None]] = bucket[_UNSUBS_KEY]
+    for prior in unsubs:
+        prior()
+    unsubs.clear()
+
     # Local-capture the optional hooks so closures see
     # the narrowed (non-None) type and so mypy doesn't
     # have to track narrowing through closure boundaries.
@@ -477,12 +496,11 @@ async def register_blueprint_handler(
                     ),
                 )
 
-        prior = bucket.get("unsub_reload")
-        if callable(prior):
-            prior()
-        bucket["unsub_reload"] = hass.bus.async_listen(
-            EVENT_AUTOMATION_RELOADED,
-            _reload_listener,
+        unsubs.append(
+            hass.bus.async_listen(
+                EVENT_AUTOMATION_RELOADED,
+                _reload_listener,
+            ),
         )
 
     # --- Entity-registry listener (if either remove or
@@ -504,12 +522,11 @@ async def register_blueprint_handler(
             ):
                 on_entity_rename(hass, old_id, new_id)
 
-        prior = bucket.get("unsub_er")
-        if callable(prior):
-            prior()
-        bucket["unsub_er"] = hass.bus.async_listen(
-            er.EVENT_ENTITY_REGISTRY_UPDATED,
-            _er_listener,
+        unsubs.append(
+            hass.bus.async_listen(
+                er.EVENT_ENTITY_REGISTRY_UPDATED,
+                _er_listener,
+            ),
         )
 
     # --- Restart recovery (if kick is configured) ---
@@ -533,9 +550,16 @@ async def register_blueprint_handler(
                     kick=kick,
                 )
 
-            hass.bus.async_listen_once(
-                EVENT_HOMEASSISTANT_STARTED,
-                _recover_when_ready,
+            # Capture the once-listener unsub: if the
+            # config entry unloads before HA finishes
+            # starting, unregister tears this listener
+            # down so a deferred kick doesn't fire into
+            # stale state.
+            unsubs.append(
+                hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED,
+                    _recover_when_ready,
+                ),
             )
 
     _LOGGER.info(
@@ -556,10 +580,8 @@ async def unregister_blueprint_handler(
     bucket = _spec_bucket(hass, spec.service)
     if hass.services.has_service(DOMAIN, spec.service):
         hass.services.async_remove(DOMAIN, spec.service)
-    for key in spec._bookkeeping_keys:
-        unsub = bucket.get(key)
-        if callable(unsub):
-            unsub()
-            bucket[key] = None
+    for unsub in bucket[_UNSUBS_KEY]:
+        unsub()
+    bucket[_UNSUBS_KEY] = []
     if spec.on_teardown is not None:
         spec.on_teardown(hass)
