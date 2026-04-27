@@ -1,27 +1,45 @@
 # This is AI generated code
 """Shared helpers for native blueprint_toolkit subpackages.
 
-Counterpart to ``pyscript/modules/helpers.py``: pure-Python
-utility surface that subpackage logic + handler modules
-can pull from. Lifted incrementally as native ports land
-(today: TEC; future: DW, EDW, RW, STSC, ZWRM).
+Counterpart to ``pyscript/modules/helpers.py``: utility
+surface that subpackage logic + handler modules share.
+Lifted incrementally as native ports land (today: TEC;
+future: DW, EDW, RW, STSC, ZWRM).
 
-Two flavours of symbol live here:
+Three flavours of symbol live here:
 
 - **Pure** (no HA imports): ``format_timestamp``,
   ``format_notification``, ``PersistentNotification``,
-  ``make_config_error_notification``. Safe to import
-  from non-HA test environments.
-- **HA-dependent** (use the runtime ``hass`` argument
-  but do not import HA modules at module scope):
+  ``make_config_error_notification``,
+  ``parse_entity_registry_update``. Safe to import from
+  non-HA test environments.
+- **Runtime-HA** (uses the runtime ``hass`` argument
+  but doesn't import HA at module scope):
   ``process_persistent_notifications``,
-  ``emit_config_error``. The ``hass`` parameter is
-  duck-typed so ``import custom_components.blueprint_toolkit.helpers``
-  succeeds outside HA; calling these functions requires
-  a real ``HomeAssistant`` instance.
+  ``emit_config_error``, ``recover_at_startup``. Module
+  import succeeds outside HA; calling the function
+  needs a real ``HomeAssistant`` instance.
+- **Lifecycle** (late-imports HA inside the function):
+  ``discover_automations_using_blueprint``,
+  ``register_blueprint_handler``,
+  ``unregister_blueprint_handler``. Module import still
+  succeeds outside HA; calling these forces the late
+  import.
+
+Subsystem identifier convention:
+
+- ``service`` -- slug used for the HA service name
+  (``blueprint_toolkit.<service>``) and as the bucket
+  key under ``hass.data[DOMAIN]``. Same string in both
+  places by design. Example: ``trigger_entity_controller``.
+- ``service_tag`` -- short tag for notification titles
+  and per-event log lines. Example: ``TEC``.
+- ``service_name`` -- human-readable name for the
+  one-time registration log and any other verbose
+  context. Example: ``Trigger Entity Controller``.
 
 Notification IDs follow the convention
-``blueprint_toolkit_{subsystem}__{instance_id}__{kind}``
+``blueprint_toolkit_{service}__{instance_id}__{kind}``
 so each subpackage's notifications stay disambiguated
 in the HA persistent-notification namespace.
 """
@@ -29,12 +47,15 @@ in the HA persistent-notification namespace.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from .const import DOMAIN
 
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
+    from homeassistant.core import Event, HomeAssistant, ServiceCall
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,14 +156,14 @@ async def process_persistent_notifications(
 # --------------------------------------------------------
 
 
-def _config_error_notification_id(subsystem: str, instance_id: str) -> str:
-    return f"blueprint_toolkit_{subsystem}__{instance_id}__config_error"
+def _config_error_notification_id(service: str, instance_id: str) -> str:
+    return f"blueprint_toolkit_{service}__{instance_id}__config_error"
 
 
 def make_config_error_notification(
     *,
-    subsystem: str,
-    subsystem_label: str,
+    service: str,
+    service_tag: str,
     instance_id: str,
     errors: list[str],
 ) -> PersistentNotification:
@@ -155,7 +176,7 @@ def make_config_error_notification(
     call ``emit_config_error`` unconditionally on every
     successful argparse without branching.
     """
-    notif_id = _config_error_notification_id(subsystem, instance_id)
+    notif_id = _config_error_notification_id(service, instance_id)
     if not errors:
         return PersistentNotification(
             active=False,
@@ -163,9 +184,7 @@ def make_config_error_notification(
             title="",
             message="",
         )
-    title = (
-        f"Blueprint Toolkit -- {subsystem_label} config error: {instance_id}"
-    )
+    title = f"Blueprint Toolkit -- {service_tag} config error: {instance_id}"
     message = "\n".join(f"- {e}" for e in errors)
     return PersistentNotification(
         active=True,
@@ -178,8 +197,8 @@ def make_config_error_notification(
 async def emit_config_error(
     hass: HomeAssistant,
     *,
-    subsystem: str,
-    subsystem_label: str,
+    service: str,
+    service_tag: str,
     instance_id: str,
     errors: list[str],
 ) -> None:
@@ -191,16 +210,350 @@ async def emit_config_error(
     notification for the same instance).
     """
     spec = make_config_error_notification(
-        subsystem=subsystem,
-        subsystem_label=subsystem_label,
+        service=service,
+        service_tag=service_tag,
         instance_id=instance_id,
         errors=errors,
     )
     if errors:
         _LOGGER.warning(
-            "%s config error for %s: %s",
-            subsystem_label,
+            "[%s] config error for %s: %s",
+            service_tag,
             instance_id,
             "; ".join(errors),
         )
     await process_persistent_notifications(hass, [spec])
+
+
+# --------------------------------------------------------
+# Blueprint discovery + restart-recovery
+# --------------------------------------------------------
+
+
+def discover_automations_using_blueprint(
+    hass: HomeAssistant,
+    blueprint_path: str,
+) -> list[str]:
+    """Return entity_ids of automations using ``blueprint_path``.
+
+    Walks ``hass.data[DATA_COMPONENT].entities`` and
+    matches ``BaseAutomationEntity.referenced_blueprint``
+    (HA core's ``homeassistant/components/automation/__init__.py``).
+    Returns an empty list when the automation component
+    isn't loaded yet (early in HA startup).
+    """
+    from homeassistant.components.automation import (  # noqa: PLC0415
+        DATA_COMPONENT,
+    )
+
+    component = hass.data.get(DATA_COMPONENT)
+    if component is None:
+        return []
+    return [
+        ent.entity_id
+        for ent in component.entities
+        if getattr(ent, "referenced_blueprint", None) == blueprint_path
+    ]
+
+
+async def recover_at_startup(
+    hass: HomeAssistant,
+    *,
+    service_tag: str,
+    blueprint_path: str,
+    kick: Callable[[HomeAssistant, str], Awaitable[None]],
+) -> None:
+    """Discover, log, and kick every automation using ``blueprint_path``.
+
+    Fires the per-port ``kick`` callable once per
+    discovered automation entity_id. Standardises the
+    "no automations discovered" / "kicking N for catch-up"
+    INFO log lines so all native ports surface the same
+    diagnostic shape.
+    """
+    discovered = discover_automations_using_blueprint(hass, blueprint_path)
+    if not discovered:
+        _LOGGER.info(
+            "[%s] no automations using %s discovered at startup",
+            service_tag,
+            blueprint_path,
+        )
+        return
+    _LOGGER.info(
+        "[%s] kicking %d discovered automations for catch-up",
+        service_tag,
+        len(discovered),
+    )
+    for entity_id in discovered:
+        await kick(hass, entity_id)
+
+
+# --------------------------------------------------------
+# Entity-registry event parsing
+# --------------------------------------------------------
+
+
+def parse_entity_registry_update(
+    event_data: dict[str, Any],
+) -> tuple[str, str, str] | None:
+    """Extract ``(action, old_id, new_id)`` for an automation entity event.
+
+    Returns ``None`` when the event is for a non-automation
+    entity (the listener fires for every registry change),
+    so callers can early-return cleanly.
+    """
+    action = event_data.get("action")
+    new_id = event_data.get("entity_id") or ""
+    old_id = event_data.get("old_entity_id") or new_id
+    if not (
+        new_id.startswith("automation.") or old_id.startswith("automation.")
+    ):
+        return None
+    if not isinstance(action, str):
+        return None
+    return action, old_id, new_id
+
+
+# --------------------------------------------------------
+# Blueprint handler lifecycle
+# --------------------------------------------------------
+
+
+@dataclass
+class BlueprintHandlerSpec:
+    """Per-port configuration for a native blueprint handler.
+
+    Bundles the identifiers, service callback, and
+    optional lifecycle hooks the shared register /
+    unregister helpers need to wire up the standard
+    plumbing (idempotent service registration, bus
+    subscriptions, restart-recovery scheduling, log
+    messages).
+
+    Required:
+        service: Slug for the HA service registered as
+            ``blueprint_toolkit.<service>`` and as the
+            bucket key under ``hass.data[DOMAIN]``.
+        service_tag: Short tag for notification titles
+            and per-event log messages (e.g. ``TEC``).
+        service_name: Human-readable name for the
+            one-time registration log (e.g.
+            ``Trigger Entity Controller``).
+        blueprint_path: HA-relative path to the
+            blueprint that uses this handler. Used for
+            restart-recovery discovery.
+        service_handler: Async service callback;
+            receives ``(hass, ServiceCall)``.
+
+    All lifecycle hooks default to ``None``. Each
+    one a port supplies enables one piece of plumbing;
+    a port that needs none of them (e.g. a periodic
+    watchdog) gets just the service registration.
+
+    Lifecycle hooks:
+        kick: When set, restart-recovery is enabled --
+            at HA-started time, every automation using
+            ``blueprint_path`` is discovered and ``kick``
+            is invoked with its entity_id. The
+            automation_reload listener also re-runs
+            recovery. Most handlers want this.
+        on_reload: When set, ``EVENT_AUTOMATION_RELOADED``
+            invokes this synchronously (typical use:
+            cancel pending per-instance work whose
+            AutomationEntity objects have been
+            replaced). Recovery still runs afterwards
+            if ``kick`` is also set.
+        on_entity_remove: When set, an automation's
+            entity-registry remove event invokes this
+            with its entity_id (typical use: drop
+            tracked state, cancel pending timers).
+        on_entity_rename: When set, an automation's
+            entity-registry rename event invokes this
+            with ``(old_id, new_id)`` (typical use:
+            move the per-instance state map entry).
+        on_teardown: Invoked from
+            ``unregister_blueprint_handler`` (typical
+            use: cancel all pending work and clear
+            tracked state).
+    """
+
+    service: str
+    service_tag: str
+    service_name: str
+    blueprint_path: str
+    service_handler: Callable[[HomeAssistant, ServiceCall], Awaitable[None]]
+    kick: Callable[[HomeAssistant, str], Awaitable[None]] | None = None
+    on_reload: Callable[[HomeAssistant], None] | None = None
+    on_entity_remove: Callable[[HomeAssistant, str], None] | None = None
+    on_entity_rename: Callable[[HomeAssistant, str, str], None] | None = None
+    on_teardown: Callable[[HomeAssistant], None] | None = None
+    # Internal: per-spec bookkeeping (unsubscribe
+    # handles for the bus listeners we registered).
+    # Lives in hass.data, not on the dataclass, so
+    # config-entry reload doesn't lose handles when the
+    # spec is reconstructed.
+    _bookkeeping_keys: tuple[str, ...] = field(
+        default=("unsub_reload", "unsub_er"),
+        repr=False,
+    )
+
+
+def _spec_bucket(hass: HomeAssistant, service: str) -> dict[str, Any]:
+    """Per-service slot under ``hass.data[DOMAIN][service]``.
+
+    Created lazily; idempotent so reloads don't lose
+    pending unsubscribe handles or per-port state. Each
+    port is free to stash additional keys here (e.g.
+    TEC keeps its ``instances`` map under the same
+    bucket).
+    """
+    bucket: dict[str, Any] = hass.data.setdefault(DOMAIN, {}).setdefault(
+        service,
+        {"unsub_reload": None, "unsub_er": None},
+    )
+    return bucket
+
+
+async def register_blueprint_handler(
+    hass: HomeAssistant,
+    spec: BlueprintHandlerSpec,
+) -> None:
+    """Register the service + every lifecycle hook the spec opted into.
+
+    Idempotent under config-entry reload -- existing
+    service registration is removed first; existing
+    bus subscriptions are unsubscribed before
+    re-subscribing.
+    """
+    from homeassistant.components.automation import (  # noqa: PLC0415
+        EVENT_AUTOMATION_RELOADED,
+    )
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED  # noqa: PLC0415
+    from homeassistant.core import callback  # noqa: PLC0415
+    from homeassistant.helpers import (  # noqa: PLC0415
+        entity_registry as er,
+    )
+
+    bucket = _spec_bucket(hass, spec.service)
+
+    # --- Service registration (always) ---
+    if hass.services.has_service(DOMAIN, spec.service):
+        hass.services.async_remove(DOMAIN, spec.service)
+
+    async def _service_wrapper(call: ServiceCall) -> None:
+        await spec.service_handler(hass, call)
+
+    hass.services.async_register(DOMAIN, spec.service, _service_wrapper)
+
+    # Local-capture the optional hooks so closures see
+    # the narrowed (non-None) type and so mypy doesn't
+    # have to track narrowing through closure boundaries.
+    on_reload = spec.on_reload
+    on_entity_remove = spec.on_entity_remove
+    on_entity_rename = spec.on_entity_rename
+    kick = spec.kick
+
+    # --- Reload listener (if any per-reload behaviour
+    # is configured) ---
+    if on_reload is not None or kick is not None:
+
+        @callback  # type: ignore[untyped-decorator]
+        def _reload_listener(_event: Event) -> None:
+            if on_reload is not None:
+                on_reload(hass)
+            if kick is not None:
+                hass.async_create_task(
+                    recover_at_startup(
+                        hass,
+                        service_tag=spec.service_tag,
+                        blueprint_path=spec.blueprint_path,
+                        kick=kick,
+                    ),
+                )
+
+        prior = bucket.get("unsub_reload")
+        if callable(prior):
+            prior()
+        bucket["unsub_reload"] = hass.bus.async_listen(
+            EVENT_AUTOMATION_RELOADED,
+            _reload_listener,
+        )
+
+    # --- Entity-registry listener (if either remove or
+    # rename hook is set) ---
+    if on_entity_remove is not None or on_entity_rename is not None:
+
+        @callback  # type: ignore[untyped-decorator]
+        def _er_listener(event: Event) -> None:
+            parsed = parse_entity_registry_update(event.data)
+            if parsed is None:
+                return
+            action, old_id, new_id = parsed
+            if action == "remove" and on_entity_remove is not None:
+                on_entity_remove(hass, old_id)
+            elif (
+                action == "update"
+                and old_id != new_id
+                and on_entity_rename is not None
+            ):
+                on_entity_rename(hass, old_id, new_id)
+
+        prior = bucket.get("unsub_er")
+        if callable(prior):
+            prior()
+        bucket["unsub_er"] = hass.bus.async_listen(
+            er.EVENT_ENTITY_REGISTRY_UPDATED,
+            _er_listener,
+        )
+
+    # --- Restart recovery (if kick is configured) ---
+    if kick is not None:
+        if hass.is_running:
+            hass.async_create_task(
+                recover_at_startup(
+                    hass,
+                    service_tag=spec.service_tag,
+                    blueprint_path=spec.blueprint_path,
+                    kick=kick,
+                ),
+            )
+        else:
+
+            async def _recover_when_ready(_event: Event) -> None:
+                await recover_at_startup(
+                    hass,
+                    service_tag=spec.service_tag,
+                    blueprint_path=spec.blueprint_path,
+                    kick=kick,
+                )
+
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED,
+                _recover_when_ready,
+            )
+
+    _LOGGER.info(
+        "%s [%s]: service %s.%s registered (blueprint=%s)",
+        spec.service_name,
+        spec.service_tag,
+        DOMAIN,
+        spec.service,
+        spec.blueprint_path,
+    )
+
+
+async def unregister_blueprint_handler(
+    hass: HomeAssistant,
+    spec: BlueprintHandlerSpec,
+) -> None:
+    """Tear down the service + bus subscriptions + per-port state."""
+    bucket = _spec_bucket(hass, spec.service)
+    if hass.services.has_service(DOMAIN, spec.service):
+        hass.services.async_remove(DOMAIN, spec.service)
+    for key in spec._bookkeeping_keys:
+        unsub = bucket.get(key)
+        if callable(unsub):
+            unsub()
+            bucket[key] = None
+    if spec.on_teardown is not None:
+        spec.on_teardown(hass)

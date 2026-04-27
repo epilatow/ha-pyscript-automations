@@ -58,43 +58,42 @@ from datetime import datetime
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.components.automation import (
-    DATA_COMPONENT,
-    EVENT_AUTOMATION_RELOADED,
-)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import (
     Context,
-    Event,
     HomeAssistant,
     ServiceCall,
     callback,
 )
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN
-from ..helpers import emit_config_error, format_notification
+from ..helpers import (
+    BlueprintHandlerSpec,
+    emit_config_error,
+    format_notification,
+    register_blueprint_handler,
+    unregister_blueprint_handler,
+)
 from . import logic
 
 _LOGGER = logging.getLogger(__name__)
 
-SERVICE_NAME = "trigger_entity_controller"
+# Service identifiers (see ``..helpers`` for naming
+# convention). ``_SERVICE`` is the slug used to register
+# the HA service and as the bucket key under
+# ``hass.data[DOMAIN]``; ``_SERVICE_TAG`` is the short
+# tag used in notification titles + per-event log lines;
+# ``_SERVICE_NAME`` is the human-readable name used in
+# the one-time registration log.
+_SERVICE = "trigger_entity_controller"
+_SERVICE_TAG = "TEC"
+_SERVICE_NAME = "Trigger Entity Controller"
 NATIVE_BLUEPRINT_PATH = (
     "blueprint_toolkit/trigger_entity_controller_native.yaml"
 )
-
-# Subsystem identifiers for the shared config-error
-# notification convention (see ``..helpers``). These
-# are the canonical, externally-visible names (matching
-# the blueprint stem and service name) rather than the
-# internal ``tec/`` package shorthand, so future ports
-# (``device_watchdog``, etc.) follow the same pattern.
-_SUBSYSTEM = "trigger_entity_controller"
-_SUBSYSTEM_LABEL = "Trigger Entity Controller"
 
 # The variable payload the integration synthesises when
 # re-firing an automation for an auto-off wakeup. The
@@ -192,24 +191,20 @@ _SCHEMA = vol.Schema(
 # --------------------------------------------------------
 
 
-def _bucket(hass: HomeAssistant) -> dict[str, Any]:
-    """Return our slot under ``hass.data[DOMAIN]['tec_native']``.
-
-    Created lazily; idempotent so config-entry reloads
-    don't lose pending wakeup handles or instance state.
-    """
-    return hass.data.setdefault(DOMAIN, {}).setdefault(
-        "tec_native",
-        {
-            "instances": {},
-            "unsub_reload": None,
-            "unsub_er": None,
-        },
-    )
-
-
 def _instances(hass: HomeAssistant) -> dict[str, TecInstanceState]:
-    return _bucket(hass)["instances"]
+    """Per-instance state map under our service's bucket.
+
+    The shared ``register_blueprint_handler`` creates
+    ``hass.data[DOMAIN][_SERVICE]`` with the unsubscribe
+    keys; we lazily add our ``instances`` map under the
+    same bucket so config-entry reloads don't drop
+    diagnostic state.
+    """
+    bucket = hass.data.setdefault(DOMAIN, {}).setdefault(
+        _SERVICE,
+        {},
+    )
+    return bucket.setdefault("instances", {})
 
 
 # --------------------------------------------------------
@@ -265,8 +260,8 @@ async def _emit(
     """
     await emit_config_error(
         hass,
-        subsystem=_SUBSYSTEM,
-        subsystem_label=_SUBSYSTEM_LABEL,
+        service=_SERVICE,
+        service_tag=_SERVICE_TAG,
         instance_id=instance_id,
         errors=errors,
     )
@@ -454,21 +449,21 @@ async def _async_service_layer(
     state.last_reason = result.reason or ""
 
     # --- Apply: turn_on/off (context propagated for logbook) ---
-    if result.action == logic.ActionType.TURN_ON:
-        await _do_call(
-            hass,
+    if result.action == logic.ActionType.TURN_ON and result.target_entities:
+        await hass.services.async_call(
             "homeassistant",
             "turn_on",
-            result.target_entities,
-            context,
+            {"entity_id": result.target_entities},
+            context=context,
+            blocking=False,
         )
-    elif result.action == logic.ActionType.TURN_OFF:
-        await _do_call(
-            hass,
+    elif result.action == logic.ActionType.TURN_OFF and result.target_entities:
+        await hass.services.async_call(
             "homeassistant",
             "turn_off",
-            result.target_entities,
-            context,
+            {"entity_id": result.target_entities},
+            context=context,
+            blocking=False,
         )
 
     # --- Apply: scheduling auto_off_at (cancel previous) ---
@@ -485,9 +480,10 @@ async def _async_service_layer(
 
     if debug_logging:
         _LOGGER.warning(
-            "[TEC native: %s] event=%s action=%s reason=%r"
+            "[%s: %s] event=%s action=%s reason=%r"
             " auto_off_at=%s triggers_on=%s controlled_on=%s"
             " is_day_time=%s",
+            _SERVICE_TAG,
             instance_id,
             event_type.name,
             result.action.name,
@@ -501,24 +497,6 @@ async def _async_service_layer(
             inputs.controlled_on,
             inputs.is_day_time,
         )
-
-
-async def _do_call(
-    hass: HomeAssistant,
-    domain: str,
-    service: str,
-    entities: list[str],
-    context: Context,
-) -> None:
-    if not entities:
-        return
-    await hass.services.async_call(
-        domain,
-        service,
-        {"entity_id": entities},
-        context=context,
-        blocking=False,
-    )
 
 
 async def _send_notification(
@@ -549,7 +527,8 @@ async def _send_notification(
         )
     except Exception as e:  # noqa: BLE001
         _LOGGER.warning(
-            "TEC native: notification via %s failed: %s",
+            "[%s] notification via %s failed: %s",
+            _SERVICE_TAG,
             service,
             e,
         )
@@ -620,34 +599,27 @@ def _make_wakeup(
 
 
 # --------------------------------------------------------
-# Discovery + restart recovery
+# Restart-recovery kick + per-port lifecycle mutators
 # --------------------------------------------------------
-
-
-def _discover_automations(hass: HomeAssistant) -> list[str]:
-    """Return entity_ids of automations using our native blueprint.
-
-    Uses ``hass.data[DATA_COMPONENT].entities`` and the
-    public ``BaseAutomationEntity.referenced_blueprint``
-    property (HA core's
-    ``homeassistant/components/automation/__init__.py``).
-    """
-    component = hass.data.get(DATA_COMPONENT)
-    if component is None:
-        return []
-    out: list[str] = []
-    for ent in component.entities:
-        ref = getattr(ent, "referenced_blueprint", None)
-        if ref == NATIVE_BLUEPRINT_PATH:
-            out.append(ent.entity_id)
-    return out
+#
+# These small ``@callback`` functions feed into
+# ``_SPEC`` below; the shared
+# ``register_blueprint_handler`` wires them up to
+# EVENT_AUTOMATION_RELOADED, EVENT_ENTITY_REGISTRY_UPDATED,
+# and the HA-started recovery scheduler.
 
 
 async def _async_kick_for_recovery(
     hass: HomeAssistant,
     entity_id: str,
 ) -> None:
-    """Fire one TIMER event so the catch-up branch arms its timer."""
+    """Fire one TIMER event so the catch-up branch arms its timer.
+
+    The variables payload is TEC-specific: synthetic
+    ``trigger.entity_id == "timer"`` reaches the
+    catch-up / expiration branch in
+    ``logic._handle_timer``.
+    """
     await hass.services.async_call(
         "automation",
         "trigger",
@@ -664,166 +636,90 @@ async def _async_kick_for_recovery(
     )
 
 
-async def _async_recover_at_startup(hass: HomeAssistant) -> None:
-    discovered = _discover_automations(hass)
-    if not discovered:
-        _LOGGER.info(
-            "TEC native: no automations using %s discovered at startup",
-            NATIVE_BLUEPRINT_PATH,
-        )
-        return
-    _LOGGER.info(
-        "TEC native: kicking %d discovered automations for catch-up",
-        len(discovered),
-    )
-    for entity_id in discovered:
-        await _async_kick_for_recovery(hass, entity_id)
-
-
-# --------------------------------------------------------
-# Live add/remove subscriptions
-# --------------------------------------------------------
-
-
 @callback
-def _on_automation_reloaded(hass: HomeAssistant, _event: Event) -> None:
-    """Rescan + reconcile after any automation config change.
+def _on_reload(hass: HomeAssistant) -> None:
+    """Cancel pending wakeups whose AutomationEntity was replaced.
 
-    ``EVENT_AUTOMATION_RELOADED`` carries no payload by
-    design -- we can't tell which automation changed.
-    Cancel pending wakeups for instances we knew about
-    (the old AutomationEntity objects have been replaced)
-    and let the catch-up kick re-arm what's still needed.
+    Called on EVENT_AUTOMATION_RELOADED. Don't drop
+    instance state -- entity_ids survive reload and we
+    want to preserve diagnostic last_action / last_reason
+    between events. The auto_off_at field gets
+    re-derived by the catch-up kick the shared listener
+    runs after this returns.
     """
-    instances = _instances(hass)
-    for s in list(instances.values()):
+    for s in list(_instances(hass).values()):
         if s.cancel_wakeup is not None:
             s.cancel_wakeup()
             s.cancel_wakeup = None
-    # Don't drop instance state -- entity_ids survive
-    # reload, and we want to preserve diagnostic
-    # last_action / last_reason between events. The
-    # auto_off_at field gets re-derived by the catch-up
-    # kick.
-    hass.async_create_task(_async_recover_at_startup(hass))
 
 
 @callback
-def _on_entity_registry_updated(hass: HomeAssistant, event: Event) -> None:
-    """Drop tracked state when our automation is removed or renamed."""
-    data = event.data
-    action = data.get("action")
-    new_id = data.get("entity_id") or ""
-    old_id = data.get("old_entity_id") or new_id
-    if not (
-        new_id.startswith("automation.") or old_id.startswith("automation.")
-    ):
-        return
-    instances = _instances(hass)
-    if action == "remove":
-        s = instances.pop(old_id, None)
-        if s is not None and s.cancel_wakeup is not None:
-            s.cancel_wakeup()
-            _LOGGER.info(
-                "TEC native: dropped %s (automation removed)",
-                old_id,
-            )
-    elif action == "update" and old_id != new_id:
-        s = instances.pop(old_id, None)
-        if s is not None:
-            s.instance_id = new_id
-            instances[new_id] = s
-
-
-# --------------------------------------------------------
-# Registration / teardown
-# --------------------------------------------------------
-
-
-async def async_register(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Wire up the native TEC service + lifecycle hooks.
-
-    Idempotent under config-entry reload: subsequent
-    calls just re-register the service handler and
-    refresh the bus subscriptions, leaving in-flight
-    wakeups intact.
-    """
-    bucket = _bucket(hass)
-
-    if hass.services.has_service(DOMAIN, SERVICE_NAME):
-        hass.services.async_remove(DOMAIN, SERVICE_NAME)
-
-    async def _service_handler(call: ServiceCall) -> None:
-        await _async_entrypoint(hass, call)
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_NAME,
-        _service_handler,
-    )
-
-    # Bus subscriptions -- swap any prior handles before
-    # re-subscribing so reloads don't accumulate
-    # listeners.
-    prior = bucket.get("unsub_reload")
-    if callable(prior):
-        prior()
-    bucket["unsub_reload"] = hass.bus.async_listen(
-        EVENT_AUTOMATION_RELOADED,
-        lambda e: _on_automation_reloaded(hass, e),
-    )
-    prior = bucket.get("unsub_er")
-    if callable(prior):
-        prior()
-    bucket["unsub_er"] = hass.bus.async_listen(
-        er.EVENT_ENTITY_REGISTRY_UPDATED,
-        lambda e: _on_entity_registry_updated(hass, e),
-    )
-
-    # Restart-recovery: defer the discovery + catch-up
-    # kick until HA finishes starting (DATA_COMPONENT
-    # may not be populated until then; automations
-    # mid-load may not yet be triggerable).
-    if hass.is_running:
-        hass.async_create_task(_async_recover_at_startup(hass))
-    else:
-
-        async def _recover_when_ready(_event: Event) -> None:
-            await _async_recover_at_startup(hass)
-
-        hass.bus.async_listen_once(
-            EVENT_HOMEASSISTANT_STARTED,
-            _recover_when_ready,
+def _on_entity_remove(hass: HomeAssistant, entity_id: str) -> None:
+    """Drop tracked state when our automation is removed."""
+    s = _instances(hass).pop(entity_id, None)
+    if s is not None and s.cancel_wakeup is not None:
+        s.cancel_wakeup()
+        _LOGGER.info(
+            "[%s] dropped %s (automation removed)",
+            _SERVICE_TAG,
+            entity_id,
         )
 
-    _LOGGER.info(
-        "TEC native: service %s.%s registered (blueprint=%s)",
-        DOMAIN,
-        SERVICE_NAME,
-        NATIVE_BLUEPRINT_PATH,
-    )
+
+@callback
+def _on_entity_rename(
+    hass: HomeAssistant,
+    old_id: str,
+    new_id: str,
+) -> None:
+    """Move tracked state to the new entity_id when the automation is renamed."""
+    s = _instances(hass).pop(old_id, None)
+    if s is not None:
+        s.instance_id = new_id
+        _instances(hass)[new_id] = s
 
 
-async def async_unregister(hass: HomeAssistant) -> None:
-    """Tear down service + cancel pending wakeups + drop state."""
-    bucket = _bucket(hass)
-    if hass.services.has_service(DOMAIN, SERVICE_NAME):
-        hass.services.async_remove(DOMAIN, SERVICE_NAME)
-    for key in ("unsub_reload", "unsub_er"):
-        unsub = bucket.get(key)
-        if callable(unsub):
-            unsub()
-            bucket[key] = None
+@callback
+def _on_teardown(hass: HomeAssistant) -> None:
+    """Cancel all pending wakeups and drop the instance map."""
     for s in list(_instances(hass).values()):
         if s.cancel_wakeup is not None:
             s.cancel_wakeup()
     _instances(hass).clear()
 
 
+# --------------------------------------------------------
+# Spec + registration / teardown
+# --------------------------------------------------------
+
+
+_SPEC = BlueprintHandlerSpec(
+    service=_SERVICE,
+    service_tag=_SERVICE_TAG,
+    service_name=_SERVICE_NAME,
+    blueprint_path=NATIVE_BLUEPRINT_PATH,
+    service_handler=_async_entrypoint,
+    kick=_async_kick_for_recovery,
+    on_reload=_on_reload,
+    on_entity_remove=_on_entity_remove,
+    on_entity_rename=_on_entity_rename,
+    on_teardown=_on_teardown,
+)
+
+
+async def async_register(hass: HomeAssistant, _entry: ConfigEntry) -> None:
+    """Register TEC's service + lifecycle via the shared helper."""
+    await register_blueprint_handler(hass, _SPEC)
+
+
+async def async_unregister(hass: HomeAssistant) -> None:
+    """Tear down TEC's service + lifecycle via the shared helper."""
+    await unregister_blueprint_handler(hass, _SPEC)
+
+
 # Expose helper for test imports.
 __all__ = [
     "NATIVE_BLUEPRINT_PATH",
-    "SERVICE_NAME",
     "TecInstanceState",
     "async_register",
     "async_unregister",
