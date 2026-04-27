@@ -362,7 +362,17 @@ async def async_unload_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> bool:
-    """Unload the config entry. No filesystem side effects."""
+    """Unload the config entry. No filesystem side effects.
+
+    Tears down the native TEC handler so a reload (e.g.
+    after ``_async_options_updated`` fires from an
+    options-flow save) doesn't leak service
+    registrations, bus listeners, or pending
+    ``async_call_later`` wakeups.
+    """
+    from .tec import handler as tec_handler
+
+    await tec_handler.async_unregister(hass)
     return True
 
 
