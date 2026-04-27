@@ -230,6 +230,71 @@ async def emit_config_error(
 
 
 # --------------------------------------------------------
+# Per-instance diagnostic state
+# --------------------------------------------------------
+
+
+def instance_state_entity_id(service: str, instance_id: str) -> str:
+    """Build the ``blueprint_toolkit.<service>_<slug>_state`` entity_id.
+
+    Mirrors the pyscript convention
+    (``pyscript.automation_<slug>_state``) but in our
+    integration's namespace. ``instance_id`` is the
+    automation entity_id (e.g. ``automation.foo_bar``);
+    we strip the ``automation.`` prefix so the resulting
+    diagnostic entity_id reads cleanly in
+    Developer Tools / templates / dashboards.
+    """
+    slug = instance_id.removeprefix("automation.")
+    return f"{DOMAIN}.{service}_{slug}_state"
+
+
+def update_instance_state(
+    hass: HomeAssistant,
+    *,
+    service: str,
+    instance_id: str,
+    last_event: str,
+    last_action: str,
+    last_run: datetime,
+    last_reason: str = "",
+    auto_off_at: datetime | None = None,
+    extra_attributes: dict[str, Any] | None = None,
+) -> None:
+    """Surface per-instance runtime state for debugging.
+
+    Sets a state entry at
+    ``blueprint_toolkit.<service>_<slug>_state`` with
+    ``last_action`` as the state value (e.g.
+    ``TURN_ON``, ``NONE``) and the rest of the
+    diagnostic fields as attributes. Visible from
+    Developer Tools > States, queryable from templates,
+    and consumable by dashboards.
+
+    ``extra_attributes`` lets per-port handlers add
+    fields beyond the common set (TEC has none today;
+    a future ZRM port might add per-route status,
+    etc).
+    """
+    attributes: dict[str, Any] = {
+        "instance_id": instance_id,
+        "last_event": last_event,
+        "last_run": last_run.isoformat(),
+        "last_reason": last_reason,
+        "auto_off_at": (
+            auto_off_at.isoformat() if auto_off_at is not None else None
+        ),
+    }
+    if extra_attributes:
+        attributes.update(extra_attributes)
+    hass.states.async_set(
+        instance_state_entity_id(service, instance_id),
+        last_action,
+        attributes,
+    )
+
+
+# --------------------------------------------------------
 # Blueprint discovery + restart-recovery
 # --------------------------------------------------------
 

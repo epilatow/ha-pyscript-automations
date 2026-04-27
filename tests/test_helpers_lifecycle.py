@@ -41,6 +41,7 @@ import sys
 import types
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -151,9 +152,27 @@ class _MockBus:
 
 
 @dataclass
+class _MockStates:
+    """Captures ``hass.states.async_set`` calls for inspection."""
+
+    set_calls: list[tuple[str, str, dict[str, Any]]] = field(
+        default_factory=list,
+    )
+
+    def async_set(
+        self,
+        entity_id: str,
+        state: str,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        self.set_calls.append((entity_id, state, dict(attributes or {})))
+
+
+@dataclass
 class _MockHass:
     services: _MockServices = field(default_factory=_MockServices)
     bus: _MockBus = field(default_factory=_MockBus)
+    states: _MockStates = field(default_factory=_MockStates)
     data: dict[str, Any] = field(default_factory=dict)
     is_running: bool = True
     tasks: list[Awaitable[Any]] = field(default_factory=list)
@@ -291,6 +310,95 @@ class TestPersistentNotificationDataclass:
             "t",
             "m",
         )
+
+
+# --------------------------------------------------------
+# Per-instance diagnostic state
+# --------------------------------------------------------
+
+
+class TestInstanceStateEntityId:
+    def test_strips_automation_prefix(self) -> None:
+        assert (
+            helpers.instance_state_entity_id(
+                "trigger_entity_controller",
+                "automation.foo_bar",
+            )
+            == "blueprint_toolkit.trigger_entity_controller_foo_bar_state"
+        )
+
+    def test_passes_through_non_automation_id(self) -> None:
+        # Belt-and-suspenders: a caller passing a bare slug
+        # without the ``automation.`` prefix still gets a
+        # well-formed entity_id.
+        assert (
+            helpers.instance_state_entity_id(
+                "trigger_entity_controller",
+                "foo_bar",
+            )
+            == "blueprint_toolkit.trigger_entity_controller_foo_bar_state"
+        )
+
+
+class TestUpdateInstanceState:
+    def test_writes_state_with_attributes(self) -> None:
+        hass = _MockHass()
+        run_at = datetime(2024, 1, 15, 12, 0, 0)
+        off_at = datetime(2024, 1, 15, 12, 5, 0)
+        helpers.update_instance_state(
+            hass,  # type: ignore[arg-type]
+            service="trigger_entity_controller",
+            instance_id="automation.foo_bar",
+            last_event="TRIGGER_ON",
+            last_action="TURN_ON",
+            last_run=run_at,
+            last_reason="motion fired",
+            auto_off_at=off_at,
+        )
+        assert hass.states.set_calls == [
+            (
+                ("blueprint_toolkit.trigger_entity_controller_foo_bar_state"),
+                "TURN_ON",
+                {
+                    "instance_id": "automation.foo_bar",
+                    "last_event": "TRIGGER_ON",
+                    "last_run": run_at.isoformat(),
+                    "last_reason": "motion fired",
+                    "auto_off_at": off_at.isoformat(),
+                },
+            ),
+        ]
+
+    def test_auto_off_at_none_serialises_as_none(self) -> None:
+        hass = _MockHass()
+        helpers.update_instance_state(
+            hass,  # type: ignore[arg-type]
+            service="trigger_entity_controller",
+            instance_id="automation.foo",
+            last_event="TIMER",
+            last_action="TURN_OFF",
+            last_run=datetime(2024, 1, 15, 12, 0, 0),
+        )
+        attrs = hass.states.set_calls[0][2]
+        assert attrs["auto_off_at"] is None
+
+    def test_extra_attributes_merged(self) -> None:
+        hass = _MockHass()
+        helpers.update_instance_state(
+            hass,  # type: ignore[arg-type]
+            service="zwave_route_manager",
+            instance_id="automation.zrm",
+            last_event="EVALUATE",
+            last_action="APPLIED",
+            last_run=datetime(2024, 1, 15, 12, 0, 0),
+            extra_attributes={
+                "applied_routes": 17,
+                "pending_routes": 1,
+            },
+        )
+        attrs = hass.states.set_calls[0][2]
+        assert attrs["applied_routes"] == 17
+        assert attrs["pending_routes"] == 1
 
 
 # --------------------------------------------------------

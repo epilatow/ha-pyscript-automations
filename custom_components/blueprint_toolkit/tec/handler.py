@@ -71,6 +71,7 @@ from ..helpers import (
     format_notification,
     register_blueprint_handler,
     unregister_blueprint_handler,
+    update_instance_state,
 )
 from . import logic
 
@@ -109,18 +110,15 @@ class TecInstanceState:
 
     No persistence -- restart recovery rebuilds via
     ``logic._handle_timer``'s catch-up branch off the
-    live HA state. The fields after ``auto_off_at`` are
-    diagnostic-only (mirror the attributes the pyscript
-    wrapper writes to ``pyscript.automation_<slug>_state``).
+    live HA state. Diagnostic state visible to the
+    user (``last_event`` / ``last_action`` / etc.) is
+    surfaced via ``helpers.update_instance_state`` at
+    every evaluate, not stashed here.
     """
 
     instance_id: str
     auto_off_at: datetime | None = None
     cancel_wakeup: Callable[[], None] | None = field(default=None, repr=False)
-    last_event: str = "NONE"
-    last_action: str = "NONE"
-    last_reason: str = ""
-    last_run: datetime | None = None
 
 
 # --------------------------------------------------------
@@ -442,7 +440,6 @@ async def _async_service_layer(
     )
 
     now = dt_util.now()
-    state.last_run = now
 
     all_disabling = (
         config.trigger_disabling_entities + config.auto_off_disabling_entities
@@ -456,7 +453,6 @@ async def _async_service_layer(
     )
     if event_type is None:
         return
-    state.last_event = event_type.name
 
     inputs = logic.Inputs(
         current_time=now,
@@ -472,8 +468,18 @@ async def _async_service_layer(
     )
 
     result = logic.evaluate(config, inputs)
-    state.last_action = result.action.name
-    state.last_reason = result.reason or ""
+
+    # --- Surface diagnostic state for the user ---
+    update_instance_state(
+        hass,
+        service=_SERVICE,
+        instance_id=instance_id,
+        last_event=event_type.name,
+        last_action=result.action.name,
+        last_run=now,
+        last_reason=result.reason or "",
+        auto_off_at=result.auto_off_at,
+    )
 
     # --- Apply: turn_on/off (context propagated for logbook) ---
     if result.action == logic.ActionType.TURN_ON and result.target_entities:
