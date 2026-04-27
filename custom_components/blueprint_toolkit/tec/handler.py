@@ -336,6 +336,23 @@ async def _async_argparse(
                 f"notification service {notif} is not registered",
             )
 
+    # --- HA state: sun.sun must exist for time-of-day periods ---
+    # Without it, ``_is_day_time()`` falls back to False and any
+    # ``day-time`` configuration silently never fires; the
+    # ``night-time`` configuration silently always fires. Surface
+    # this loudly at config time instead of debugging a
+    # never-firing automation.
+    needs_sun = (
+        data["trigger_period_raw"] != "always"
+        or data["trigger_disabling_period_raw"] != "always"
+    )
+    if needs_sun and hass.states.get("sun.sun") is None:
+        errors.append(
+            "sun.sun entity is not available; required when "
+            "trigger_period or trigger_disabling_period is set "
+            "to a non-'always' value",
+        )
+
     # Emit unconditionally: empty ``errors`` dismisses any
     # prior config-error notification for this instance.
     await _emit(hass, instance_id, errors)
@@ -514,28 +531,22 @@ async def _send_notification(
 ) -> None:
     """Dispatch a finding-style notification via the user's notify.* service.
 
-    Failures (e.g., the notify integration is briefly
-    down) are swallowed -- the side effect on the
-    controlled entity has already happened, dropping
-    state for a missed user-facing message would be
-    worse than a silent miss.
+    Argparse already validated that ``service`` is
+    registered, and ``blocking=False`` returns before the
+    notify handler runs, so the only thing that could
+    raise here is a TOCTOU window where the service
+    deregistered between argparse and dispatch. We let
+    that propagate -- a loud failure in HA's logbook is
+    more useful than a silent miss.
     """
     domain, name = _parse_notification_service(service)
-    try:
-        await hass.services.async_call(
-            domain,
-            name,
-            {"message": message},
-            context=context,
-            blocking=False,
-        )
-    except Exception as e:  # noqa: BLE001
-        _LOGGER.warning(
-            "[%s] notification via %s failed: %s",
-            _SERVICE_TAG,
-            service,
-            e,
-        )
+    await hass.services.async_call(
+        domain,
+        name,
+        {"message": message},
+        context=context,
+        blocking=False,
+    )
 
 
 # --------------------------------------------------------
