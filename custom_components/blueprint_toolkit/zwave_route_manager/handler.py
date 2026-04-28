@@ -63,11 +63,15 @@ from homeassistant.util import dt as dt_util
 from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
+    IssueNotification,
     PersistentNotification,
+    automation_friendly_name,
     instance_id_for_config_error,
     make_emit_config_error,
     md_escape,
+    prepare_notifications,
     process_persistent_notifications,
+    process_persistent_notifications_with_sweep,
     register_blueprint_handler,
     spec_bucket,
     unregister_blueprint_handler,
@@ -350,13 +354,17 @@ async def _async_service_layer(
         ZrmInstanceState(instance_id=instance_id),
     )
 
-    # (Re-)arm the periodic reconcile timer for this
-    # instance. First call bootstraps it; subsequent calls
-    # re-arm only when the interval changes.
-    _ensure_timer(hass, state, reconcile_interval_minutes)
-
-    # Serialise the reconcile per instance.
+    # Serialise everything that touches per-instance state
+    # under one lock: timer (re-)arming and the reconcile
+    # body itself. The lock guards against two service
+    # calls landing for the same instance (e.g. a manual
+    # trigger arriving mid-periodic-tick) racing on
+    # ``state.pending`` / ``state.applied`` and
+    # double-issuing route commands.
     async with state.lock:
+        # First call bootstraps the timer; subsequent calls
+        # re-arm only when the interval changes.
+        _ensure_timer(hass, state, reconcile_interval_minutes)
         await _do_reconcile(
             hass,
             state,
@@ -395,7 +403,7 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     instance_id = state.instance_id
     notif_prefix = _notification_prefix(instance_id)
     now = dt_util.now()
-    tag = f"[{_SERVICE_TAG}: {instance_id}]"
+    tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
     # File-mtime change detection: edit the YAML and the next
     # tick picks it up even if the periodic interval hasn't
@@ -782,52 +790,36 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             ),
         )
 
-    # Cap notifications if configured.
+    # Cap + sort the issue notifications via the shared
+    # helper. Wrap each pre-built PersistentNotification in
+    # IssueNotification so it satisfies the CappableResult
+    # protocol; ZRM's "issues" are already PNs by the time
+    # we get here, vs watchdogs which start from result
+    # dataclasses.
     issue_notifications = apply_notifications + timeout_notifications
-    if max_notifications > 0 and len(issue_notifications) > max_notifications:
-        kept = issue_notifications[:max_notifications]
-        cap_summary = PersistentNotification(
-            active=True,
-            notification_id=f"{notif_prefix}cap",
-            title=f"{_SERVICE_NAME}: notification cap reached",
-            message=(
-                f"Showing {max_notifications} of"
-                f" {len(issue_notifications)} route issues."
-                " Increase the blueprint's max_notifications"
-                " input to see all."
-            ),
-            instance_id=instance_id,
-        )
-        issue_notifications = kept + [cap_summary]
-    else:
-        issue_notifications.append(
-            PersistentNotification(
-                active=False,
-                notification_id=f"{notif_prefix}cap",
-                title="",
-                message="",
-            ),
-        )
+    capped = prepare_notifications(
+        [IssueNotification(n) for n in issue_notifications],
+        max_notifications=max_notifications,
+        cap_notification_id=f"{notif_prefix}cap",
+        cap_title=f"{_SERVICE_NAME}: notification cap reached",
+        cap_item_label="route issues",
+        instance_id=instance_id,
+    )
 
-    # Always include inactive api notification so any
-    # stale one is cleared.
-    inactive_api = PersistentNotification(
-        active=False,
-        notification_id=f"{notif_prefix}api",
-        title="",
-        message="",
+    # Dispatch with sweep so notifications from prior runs
+    # that this run isn't re-emitting (e.g. apply_<node>
+    # for a node that was failing last run but isn't in
+    # the failures this run, or for a node that's been
+    # removed from the config entirely) get dismissed.
+    # ``__timeout_`` IDs are kept across sweeps -- each
+    # retry creates a unique attempt-timestamped ID, the
+    # user wants the history.
+    await process_persistent_notifications_with_sweep(
+        hass,
+        capped,
+        sweep_prefix=notif_prefix,
+        keep_pattern="__timeout_",
     )
-    inactive_breaker = PersistentNotification(
-        active=False,
-        notification_id=f"{notif_prefix}circuit_breaker",
-        title="",
-        message="",
-    )
-    final_notifications = [
-        inactive_api,
-        inactive_breaker,
-    ] + issue_notifications
-    await process_persistent_notifications(hass, final_notifications)
 
     # Persist diagnostic state.
     routes_in_config = len(resolved) * len(logic.MANAGED_ROUTE_TYPES)

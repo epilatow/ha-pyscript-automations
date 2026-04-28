@@ -66,6 +66,7 @@ from homeassistant.util import dt as dt_util
 from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
+    automation_friendly_name,
     format_notification,
     instance_id_for_config_error,
     make_emit_config_error,
@@ -498,7 +499,7 @@ async def _async_service_layer(
             " auto_off_at=%s triggers_on=%s controlled_on=%s"
             " is_day_time=%s",
             _SERVICE_TAG,
-            instance_id,
+            automation_friendly_name(hass, instance_id),
             event_type.name,
             result.action.name,
             result.reason,
