@@ -211,13 +211,22 @@ actions:
     data:
       instance_id: "{{ this.entity_id }}"
       controlled_entities_raw: !input controlled_entities
+      # Synthetic invocations from the integration (auto-off
+      # wakeup, restart-recovery kick) pass these as flat
+      # top-level variables since HA's automation.trigger
+      # service strips the ``trigger`` key from caller
+      # variables. Real state-trigger firings reach the
+      # ``else`` branches via the native ``trigger.*`` context.
       trigger_entity_id: >-
-        {{ trigger.entity_id
-           | default('timer', true) }}
+        {{ trigger_entity_id
+           if trigger_entity_id is defined
+           else (trigger.entity_id | default('timer', true)) }}
       trigger_to_state: >-
-        {{ trigger.to_state.state
-           if trigger.to_state is defined
-           else '' }}
+        {{ trigger_to_state
+           if trigger_to_state is defined
+           else (trigger.to_state.state
+                 if trigger.to_state is defined
+                 else '') }}
       auto_off_minutes_raw: !input auto_off_minutes
       auto_off_disabling_entities_raw: !input auto_off_disabling_entities
       trigger_entities_raw: !input trigger_entities

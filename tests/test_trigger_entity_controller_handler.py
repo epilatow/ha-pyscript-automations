@@ -464,7 +464,11 @@ class TestMakeWakeup:
         assert state.cancel_wakeup is None
         # And it dispatched automation.trigger with the
         # synthetic TIMER variables payload that the
-        # handler's service layer keys on.
+        # handler's service layer keys on. Variables are
+        # flat top-level (NOT nested under ``trigger.*``)
+        # because HA's automation.trigger service strips
+        # the ``trigger`` key from caller-supplied
+        # variables -- see _make_wakeup docstring.
         assert hass.services.calls == [
             (
                 "automation",
@@ -473,14 +477,16 @@ class TestMakeWakeup:
                     "entity_id": "automation.foo",
                     "skip_condition": True,
                     "variables": {
-                        "trigger": {
-                            "entity_id": handler._TIMER_TRIGGER_ENTITY_ID,
-                            "to_state": {"state": ""},
-                        },
+                        "trigger_entity_id": (handler._TIMER_TRIGGER_ENTITY_ID),
+                        "trigger_to_state": "",
                     },
                 },
             ),
         ]
+        # Regression guard against re-introducing the
+        # ``trigger.*`` namespace: HA strips it, so any
+        # value passed there would be silently lost.
+        assert "trigger" not in hass.services.calls[0][2]["variables"]
 
     @pytest.mark.asyncio
     async def test_does_not_propagate_caller_context(
@@ -538,14 +544,16 @@ class TestKickForRecovery:
                     "entity_id": "automation.foo",
                     "skip_condition": True,
                     "variables": {
-                        "trigger": {
-                            "entity_id": handler._TIMER_TRIGGER_ENTITY_ID,
-                            "to_state": {"state": ""},
-                        },
+                        "trigger_entity_id": (handler._TIMER_TRIGGER_ENTITY_ID),
+                        "trigger_to_state": "",
                     },
                 },
             ),
         ]
+        # Regression guard against re-introducing the
+        # ``trigger.*`` namespace -- see _make_wakeup
+        # docstring for why HA strips it.
+        assert "trigger" not in hass.services.calls[0][2]["variables"]
 
 
 # --------------------------------------------------------

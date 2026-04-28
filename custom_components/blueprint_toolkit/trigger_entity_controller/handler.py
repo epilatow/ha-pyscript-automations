@@ -608,6 +608,14 @@ def _make_wakeup(
         # turn_off propagates that context and the
         # logbook attributes the action to this specific
         # automation rather than to "blueprint_toolkit".
+        #
+        # Override variables are passed flat (NOT under
+        # ``trigger.*``) because HA's automation.trigger
+        # service unconditionally clobbers the ``trigger``
+        # key with ``{"platform": None}``. The blueprint
+        # action reads these via ``is defined`` checks,
+        # falling back to ``trigger.*`` for real state-
+        # trigger paths.
         await hass.services.async_call(
             "automation",
             "trigger",
@@ -615,10 +623,8 @@ def _make_wakeup(
                 "entity_id": instance_id,
                 "skip_condition": True,
                 "variables": {
-                    "trigger": {
-                        "entity_id": _TIMER_TRIGGER_ENTITY_ID,
-                        "to_state": {"state": ""},
-                    },
+                    "trigger_entity_id": _TIMER_TRIGGER_ENTITY_ID,
+                    "trigger_to_state": "",
                 },
             },
         )
@@ -644,9 +650,11 @@ async def _async_kick_for_recovery(
     """Fire one TIMER event so the catch-up branch arms its timer.
 
     The variables payload is TEC-specific: synthetic
-    ``trigger.entity_id == "timer"`` reaches the
+    ``trigger_entity_id == "timer"`` reaches the
     catch-up / expiration branch in
-    ``logic._handle_timer``.
+    ``logic._handle_timer``. Variables are flat (NOT
+    under ``trigger.*``); see ``_make_wakeup`` for the
+    full reasoning.
     """
     await hass.services.async_call(
         "automation",
@@ -655,10 +663,8 @@ async def _async_kick_for_recovery(
             "entity_id": entity_id,
             "skip_condition": True,
             "variables": {
-                "trigger": {
-                    "entity_id": _TIMER_TRIGGER_ENTITY_ID,
-                    "to_state": {"state": ""},
-                },
+                "trigger_entity_id": _TIMER_TRIGGER_ENTITY_ID,
+                "trigger_to_state": "",
             },
         },
     )
