@@ -11,16 +11,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-_SCRIPT_PATH = REPO_ROOT / "pyscript" / "modules" / "zwave_route_manager.py"
 
-sys.path.insert(0, str(_SCRIPT_PATH.parent))
+sys.path.insert(0, str(REPO_ROOT))
 
 from conftest import CodeQualityBase  # noqa: E402
-from zwave_js_ui_bridge import (  # noqa: E402
+
+from custom_components.blueprint_toolkit.zwave_route_manager.bridge import (  # noqa: E402, E501
     NodeInfo,
     RouteSpeed,
 )
-from zwave_route_manager import (  # noqa: E402
+from custom_components.blueprint_toolkit.zwave_route_manager.logic import (  # noqa: E402, E501
     CIRCUIT_BREAKER_COOLDOWN,
     CIRCUIT_BREAKER_THRESHOLD,
     CircuitBreakerState,
@@ -44,7 +44,6 @@ from zwave_route_manager import (  # noqa: E402
     parse_route_speed_value,
     resolve_entities,
     resolve_speed,
-    route_type_by_value,
     type_for_action_kind,
 )
 
@@ -1695,25 +1694,6 @@ class TestConfigError:
         assert e.reason == "not found"
 
 
-class TestRouteTypeByValue:
-    """``route_type_by_value`` exists so the wrapper can look up
-    a ``RouteType`` by its ``.value`` without iterating
-    ``zrm.RouteType`` from wrapper scope. Iteration over an
-    imported-module enum fails under pyscript's AST evaluator
-    (``TypeError: 'EvalLocalVar' object is not iterable``);
-    calling this helper moves the iteration into native-Python
-    scope.
-    """
-
-    def test_known_values(self) -> None:
-        assert route_type_by_value("priority_app") == RouteType.PRIORITY_APP
-        assert route_type_by_value("priority_suc") == RouteType.PRIORITY_SUC
-
-    def test_unknown_returns_none(self) -> None:
-        assert route_type_by_value("") is None
-        assert route_type_by_value("bogus") is None
-
-
 # -- Circuit breaker ---------------------------------------------
 
 
@@ -1910,15 +1890,20 @@ class TestCircuitBreakerNext:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/modules/zwave_route_manager.py",
-        "tests/test_zwave_route_manager.py",
+        "custom_components/blueprint_toolkit/zwave_route_manager/__init__.py",
+        "custom_components/blueprint_toolkit/zwave_route_manager/bridge.py",
+        "custom_components/blueprint_toolkit/zwave_route_manager/handler.py",
+        "custom_components/blueprint_toolkit/zwave_route_manager/logic.py",
+        "tests/test_zwave_route_manager_logic.py",
     ]
     mypy_targets = [
-        "pyscript/modules/zwave_route_manager.py",
+        "custom_components/blueprint_toolkit/zwave_route_manager/bridge.py",
+        "custom_components/blueprint_toolkit/zwave_route_manager/handler.py",
+        "custom_components/blueprint_toolkit/zwave_route_manager/logic.py",
     ]
 
 
 if __name__ == "__main__":
-    from conftest import run_tests
+    import pytest
 
-    run_tests(__file__, _SCRIPT_PATH, REPO_ROOT)
+    sys.exit(pytest.main([__file__, "-v", *sys.argv[1:]]))

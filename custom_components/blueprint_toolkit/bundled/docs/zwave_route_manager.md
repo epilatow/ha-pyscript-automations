@@ -39,7 +39,7 @@ addon v1.2.0 (bundling zwave-js-ui v11.16.0).
 
 ## Usage
 
-1. Install the blueprint + pyscript modules (see main README).
+1. Install the integration (see main README).
 2. Create `/config/zwave_route_manager.yaml` with your route
    definitions (see Configuration below).
 3. Go to **Settings -> Automations & Scenes -> Create Automation
@@ -232,8 +232,12 @@ category.)
 
 ### Entity attributes
 
-Attributes written to `pyscript.<automation_name>_state`:
+Attributes written to
+`blueprint_toolkit.zwave_route_manager_<slug>_state`,
+where `<slug>` is the automation's entity_id stripped of
+its `automation.` prefix:
 
+- `instance_id`: the automation entity_id
 - `last_run`: ISO timestamp of the most recent tick
 - `runtime`: evaluation time in seconds
 - `last_reconcile`: ISO timestamp of the last reconcile
@@ -349,9 +353,15 @@ Example:
 
 ### Reconcile trigger semantics
 
-The blueprint fires two triggers: `time_pattern` every minute
-and `homeassistant: start`. The service wrapper's gate
-decides whether each tick warrants a reconcile:
+The blueprint fires on `homeassistant: start`; periodic
+reconciles are scheduled by the integration via
+`async_track_time_interval` keyed off the
+`reconcile_interval_minutes` input, and fire
+`automation.trigger` with `trigger.id == "periodic"`. Manual
+triggers from developer tools (or the integration's
+restart-recovery kick) arrive as `trigger.id == "manual"`.
+The service handler's gate then decides whether each call
+warrants a full reconcile:
 
 | Signal | Action |
 |---|---|
@@ -376,9 +386,10 @@ for the upstream release chain.
 
 When zwave-js-server schema 47 ships and HA core surfaces
 priority-route services natively, migration is one file:
-`pyscript/modules/zwave_js_ui_bridge.py`. Its public API
-(ZwaveJsUiClient + typed methods) stays the same; the
-implementation swaps from socket.io to the HA client.
+`custom_components/blueprint_toolkit/zwave_route_manager/bridge.py`.
+Its public API (ZwaveJsUiClient + typed methods) stays the
+same; the implementation swaps from socket.io to the HA
+client.
 
 ### Known failure mode: controller serial-interface wedge
 
@@ -518,14 +529,15 @@ state; requires hardware access.
   5. Start the addon (`hassio.addon_start`).
   6. Poll the driver-ready signal; give up after ~60 s.
 
-  All of this is automatable from pyscript. The HA core
-  container has write access to
+  All of this is automatable from the integration's handler
+  (or a small companion automation). The HA core container
+  has write access to
   `/sys/bus/usb/devices/<port>/authorized` (confirmed
-  during debugging -- it's root-owned 0644, and pyscript
-  has `allow_all_imports: true`), and
-  `hassio.addon_stop`/`addon_start` are first-class
-  services. **Do not use `hassio.addon_restart`** -- that's
-  what we tried first and it made things worse.
+  during debugging -- it's root-owned 0644 and the
+  integration runs in-process), and `hassio.addon_stop` /
+  `hassio.addon_start` are first-class services.
+  **Do not use `hassio.addon_restart`** -- that's what we
+  tried first and it made things worse.
 
   Design sketch for the implementation:
 

@@ -1,9 +1,8 @@
 # This is AI generated code
 """Logic for declarative Z-Wave priority route management.
 
-Pure functions over dataclasses. No PyScript-injected globals,
-no HA registries, no socket.io. The service wrapper is
-responsible for:
+Pure functions over dataclasses. No HA registries, no
+socket.io. The handler module is responsible for:
 
 - Reading the config file from disk
 - Building the entity->device resolution map from HA registries
@@ -32,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 
-import zwave_js_ui_bridge as bridge
+from . import bridge
 
 # -- Config dataclasses ------------------------------------------
 
@@ -205,25 +204,6 @@ MANAGED_ROUTE_TYPES: list[RouteType] = [
     RouteType.PRIORITY_APP,
     RouteType.PRIORITY_SUC,
 ]
-
-
-# Lookup by the enum's ``.value`` string. Used by the wrapper's
-# ``_zrm_path_from_storage``: pyscript's AST evaluator wraps
-# imported modules in ``EvalLocalVar``, and iterating
-# ``zrm.RouteType`` from wrapper scope raises
-# ``TypeError: 'EvalLocalVar' object is not iterable``. The
-# wrapper calls this helper instead -- native-Python function
-# call through the module attribute works, and the iteration
-# happens inside the module's own scope where ``RouteType`` is
-# the raw enum class.
-_ROUTE_TYPE_BY_VALUE: "dict[str, RouteType]" = {
-    rt.value: rt for rt in RouteType
-}
-
-
-def route_type_by_value(value: str) -> "RouteType | None":
-    """Return the ``RouteType`` whose ``.value`` equals ``value``."""
-    return _ROUTE_TYPE_BY_VALUE.get(value)
 
 
 # -- Action + route-state dataclasses ---------------------------
@@ -747,7 +727,9 @@ def parse_config(yaml_text: str) -> tuple[Config, list[ConfigError]]:
     Empty input (empty string, missing ``routes`` key, empty
     file) is not an error -- returns an empty Config.
     """
-    import yaml  # noqa: PLC0415 - deferred; pyscript AST compat
+    # Deferred so the module imports cleanly in test
+    # environments that don't install PyYAML.
+    import yaml  # noqa: PLC0415
 
     try:
         data = yaml.safe_load(yaml_text)
@@ -864,16 +846,10 @@ def parse_config(yaml_text: str) -> tuple[Config, list[ConfigError]]:
 # -- Entity resolution + speed precedence ------------------------
 
 
-# Keyed by the enum's string ``.value`` rather than the enum
-# instance. PyScript's AST evaluator re-creates bridge.RouteSpeed
-# enum instances when values cross between AST-evaluated code
-# and native-Python (@pyscript_executor) code, which breaks
-# enum-identity-based dict lookups. String keys sidestep the
-# issue and hash identically regardless of import context.
-_SPEED_ORDINAL: dict[str, int] = {
-    bridge.RouteSpeed.RATE_9600.value: 0,
-    bridge.RouteSpeed.RATE_40K.value: 1,
-    bridge.RouteSpeed.RATE_100K.value: 2,
+_SPEED_ORDINAL: dict[bridge.RouteSpeed, int] = {
+    bridge.RouteSpeed.RATE_9600: 0,
+    bridge.RouteSpeed.RATE_40K: 1,
+    bridge.RouteSpeed.RATE_100K: 2,
 }
 
 
@@ -889,16 +865,14 @@ def _min_speed(
     """
     if not speeds:
         return None
-    # Generator expressions are banned under PyScript's AST
-    # evaluator; use a list comprehension + any() on the list.
-    if any([s is None for s in speeds]):
+    if any(s is None for s in speeds):
         return None
     # All non-None by the check above. Help mypy: narrow via
     # explicit cast-by-reconstruction.
     concrete: list[bridge.RouteSpeed] = [s for s in speeds if s is not None]
     best = concrete[0]
     for s in concrete[1:]:
-        if _SPEED_ORDINAL[s.value] < _SPEED_ORDINAL[best.value]:
+        if _SPEED_ORDINAL[s] < _SPEED_ORDINAL[best]:
             best = s
     return best
 
@@ -1128,12 +1102,7 @@ def _routes_equal(
     """Compare two route tuples by value.
 
     Accepts ``None`` as a speed (used for pending clears,
-    whose speed is meaningless). Avoids ``RouteSpeed``
-    enum-identity comparison: PyScript's AST evaluator may
-    produce ``RouteSpeed`` instances that compare unequal
-    by ``==`` across the AST / native-Python boundary even
-    when their ``.value`` strings match. Comparing by
-    ``.value`` + the repeaters list is stable.
+    whose speed is meaningless).
     """
     if a is None and b is None:
         return True
@@ -1143,11 +1112,7 @@ def _routes_equal(
     br, bs = b
     if list(ar) != list(br):
         return False
-    if as_ is None and bs is None:
-        return True
-    if as_ is None or bs is None:
-        return False
-    return as_.value == bs.value
+    return as_ == bs
 
 
 def _current_matches_desired(

@@ -140,15 +140,12 @@ blueprint:
         boolean: {}
 
 triggers:
-  - trigger: time_pattern
-    minutes: "/1"
-    id: periodic
   - trigger: homeassistant
     event: start
     id: ha_start
 
 actions:
-  - action: pyscript.zwave_route_manager_blueprint_entrypoint
+  - action: blueprint_toolkit.zwave_route_manager
     data:
       instance_id: "{{ this.entity_id }}"
       trigger_id: "{{ trigger.id | default('manual', true) }}"
@@ -163,8 +160,10 @@ actions:
       max_notifications_raw: !input max_notifications
       debug_logging_raw: !input debug_logging
 
-# Time-pattern fires every minute; an internal gate in the
-# service wrapper decides whether the tick warrants a full
-# reconcile. If one reconcile overlaps the next tick, the
-# newer one is dropped (mode: single).
+# Periodic reconciles are scheduled by the integration via
+# async_track_time_interval (interval = the
+# reconcile_interval_minutes input). The blueprint's
+# remaining triggers are HA-start (recovery) plus manual
+# trigger via dev tools or the integration's own
+# restart-recovery kick.
 mode: single

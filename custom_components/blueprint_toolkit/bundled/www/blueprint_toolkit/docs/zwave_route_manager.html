@@ -84,7 +84,7 @@ port 8091 is the automation's target -- tested against
 addon v1.2.0 (bundling zwave-js-ui v11.16.0).</p>
 <h2>Usage</h2>
 <ol>
-<li>Install the blueprint + pyscript modules (see main README).</li>
+<li>Install the integration (see main README).</li>
 <li>Create <code>/config/zwave_route_manager.yaml</code> with your route
 definitions (see Configuration below).</li>
 <li>Go to <strong>Settings -&gt; Automations &amp; Scenes -&gt; Create Automation
@@ -294,8 +294,14 @@ opt a device into one-way-only management -- devices that
 won't accept one of the two route types fall into this
 category.)</p>
 <h3>Entity attributes</h3>
-<p>Attributes written to <code>pyscript.&lt;automation_name&gt;_state</code>:</p>
+<p>Attributes written to
+<code>blueprint_toolkit.zwave_route_manager_&lt;slug&gt;_state</code>,
+where <code>&lt;slug&gt;</code> is the automation's entity_id stripped of
+its <code>automation.</code> prefix:</p>
 <ul>
+<li>
+<p><code>instance_id</code>: the automation entity_id</p>
+</li>
 <li>
 <p><code>last_run</code>: ISO timestamp of the most recent tick</p>
 </li>
@@ -421,9 +427,15 @@ Settings -&gt; System -&gt; Logs with the tag <code>[ZRM: &lt;automation alias&g
   errored=0 new_timeouts=0 actions_executed=2
 </code></pre>
 <h3>Reconcile trigger semantics</h3>
-<p>The blueprint fires two triggers: <code>time_pattern</code> every minute
-and <code>homeassistant: start</code>. The service wrapper's gate
-decides whether each tick warrants a reconcile:</p>
+<p>The blueprint fires on <code>homeassistant: start</code>; periodic
+reconciles are scheduled by the integration via
+<code>async_track_time_interval</code> keyed off the
+<code>reconcile_interval_minutes</code> input, and fire
+<code>automation.trigger</code> with <code>trigger.id == &quot;periodic&quot;</code>. Manual
+triggers from developer tools (or the integration's
+restart-recovery kick) arrive as <code>trigger.id == &quot;manual&quot;</code>.
+The service handler's gate then decides whether each call
+warrants a full reconcile:</p>
 <table>
 <thead>
 <tr>
@@ -470,9 +482,10 @@ its ZwaveClient. Shipping through zwave-js-ui avoids waiting
 for the upstream release chain.</p>
 <p>When zwave-js-server schema 47 ships and HA core surfaces
 priority-route services natively, migration is one file:
-<code>pyscript/modules/zwave_js_ui_bridge.py</code>. Its public API
-(ZwaveJsUiClient + typed methods) stays the same; the
-implementation swaps from socket.io to the HA client.</p>
+<code>custom_components/blueprint_toolkit/zwave_route_manager/bridge.py</code>.
+Its public API (ZwaveJsUiClient + typed methods) stays the
+same; the implementation swaps from socket.io to the HA
+client.</p>
 <h3>Known failure mode: controller serial-interface wedge</h3>
 <p>Observed once so far, 2026-04-23, after inclusion of two
 Zooz ZSE11 Q Sensors as Z-Wave Long Range nodes (IDs 273
@@ -615,14 +628,15 @@ above for why the off-window length appears to matter.</li>
 <li>Start the addon (<code>hassio.addon_start</code>).</li>
 <li>Poll the driver-ready signal; give up after ~60 s.</li>
 </ol>
-<p>All of this is automatable from pyscript. The HA core
-container has write access to
+<p>All of this is automatable from the integration's handler
+(or a small companion automation). The HA core container
+has write access to
 <code>/sys/bus/usb/devices/&lt;port&gt;/authorized</code> (confirmed
-during debugging -- it's root-owned 0644, and pyscript
-has <code>allow_all_imports: true</code>), and
-<code>hassio.addon_stop</code>/<code>addon_start</code> are first-class
-services. <strong>Do not use <code>hassio.addon_restart</code></strong> -- that's
-what we tried first and it made things worse.</p>
+during debugging -- it's root-owned 0644 and the
+integration runs in-process), and <code>hassio.addon_stop</code> /
+<code>hassio.addon_start</code> are first-class services.
+<strong>Do not use <code>hassio.addon_restart</code></strong> -- that's what we
+tried first and it made things worse.</p>
 <p>Design sketch for the implementation:</p>
 <ul>
 <li>Blueprint input <code>reset_wedged_controllers</code> (default
