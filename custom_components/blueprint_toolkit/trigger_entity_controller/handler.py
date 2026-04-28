@@ -242,7 +242,7 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
 # ``errors`` dismisses any prior config-error
 # notification for this instance, so this can be called
 # unconditionally on every successful argparse.
-_emit = make_emit_config_error(
+_emit_config_error = make_emit_config_error(
     service=_SERVICE,
     service_tag=_SERVICE_TAG,
 )
@@ -263,14 +263,14 @@ async def _async_argparse(
     try:
         data = _SCHEMA(raw)
     except vol.MultipleInvalid as err:
-        await _emit(
+        await _emit_config_error(
             hass,
             instance_id_for_config_error(raw),
             [f"schema: {sub}" for sub in err.errors],
         )
         return
     except vol.Invalid as err:
-        await _emit(
+        await _emit_config_error(
             hass,
             instance_id_for_config_error(raw),
             [f"schema: {err}"],
@@ -330,7 +330,7 @@ async def _async_argparse(
 
     # Emit unconditionally: empty ``errors`` dismisses any
     # prior config-error notification for this instance.
-    await _emit(hass, instance_id, errors)
+    await _emit_config_error(hass, instance_id, errors)
     if errors:
         return
 
