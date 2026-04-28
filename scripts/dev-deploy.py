@@ -3,49 +3,76 @@
 # requires-python = ">=3.11"
 # ///
 # This is AI generated code
-"""Deploy this repo to a Home Assistant host.
+"""Deploy this repo's integration to a Home Assistant host.
 
-Ships every git-tracked file to the install path on the HA
-host (default /root/ha-blueprint-toolkit), removes files
-the host has under owned top-level entries that git does
-not, runs scripts/dev-install.py on the host to reconcile
-the /config/... symlinks, then fires pyscript.reload and
-automation.reload via the HA REST API.
+Builds a fresh timestamped copy of the integration on the
+host under ``<workspace>/<YYYYMMDD_HHMMSS>/blueprint_toolkit/``
+(default workspace: ``/config/ha-blueprint-toolkit``),
+flips ``/config/custom_components/blueprint_toolkit`` to a
+symlink that points at the new build, runs the bundled
+``scripts/dev-install.py`` to refresh the
+``/config/blueprints/`` and ``/config/pyscript/`` symlinks,
+and restarts HA.
 
-Requires a clean working tree by default: refuses to run
-if ``git status --porcelain`` is non-empty. Pass
-``--allow-dirty`` to bypass that check and deploy
-working-tree content as-is (tracked files with local
-modifications ship as-is; untracked files matching
-``.gitignore`` remain excluded; untracked files not
-matching ship too). Without an API key the file deploy
-and dev-install run normally but the reload calls are
-skipped with a warning.
+The first run preserves the HACS-installed integration as
+``<workspace>/<vX.Y.Z>/blueprint_toolkit/`` (using the
+version from ``.storage/hacs.repositories``). Subsequent
+runs leave that snapshot alone and just add another
+timestamped build directory next to it.
 
-Use --dry-run to print the deploy + reload plan without
-touching the host.
+``--restore`` reverses the process: it reinstates the
+preserved HACS snapshot at
+``/config/custom_components/blueprint_toolkit`` and removes
+the workspace, leaving the host as if dev-deploy had never
+run.
+
+HA is always restarted after a deploy or restore. Integration
+code changes (custom_components/.../*.py) require a Python-level
+reload that the config-entry reload API does not provide; the
+restart is the only reliable way.
+
+By default the working tree must be clean. ``--allow-dirty``
+ships uncommitted edits; tracked-modified files go through
+unchanged, and untracked files not matching ``.gitignore`` are
+included.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
+import datetime as _dt
 import io
+import json
+import re
 import shlex
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 DEFAULT_HOST = "root@homeassistant"
-# Outside of /config/ so the clone never collides with the
-# HACS-installed tree under /config/custom_components/.
-DEFAULT_INSTALL_PATH = "/root/ha-blueprint-toolkit"
 DEFAULT_HA_CONFIG = "/config"
+DEFAULT_WORKSPACE = "/config/ha-blueprint-toolkit"
+INTEGRATION_NAME = "blueprint_toolkit"
+HACS_STORAGE_RELPATH = ".storage/hacs.repositories"
+HACS_REPO_FULL_NAME = "epilatow/ha-blueprint-toolkit"
 
 
-def git_root() -> Path:
+def _run_ssh(host: str, command: str, *, check: bool = True) -> str:
+    """Run a shell snippet on the host and return stdout."""
+    r = subprocess.run(
+        ["ssh", host, command],
+        capture_output=True,
+        text=True,
+    )
+    if check and r.returncode != 0:
+        raise RuntimeError(
+            f"ssh {host} {command!r} exited {r.returncode}: "
+            f"stderr={r.stderr.strip()!r}",
+        )
+    return r.stdout
+
+
+def _git_root() -> Path:
     out = subprocess.check_output(
         ["git", "rev-parse", "--show-toplevel"],
         text=True,
@@ -53,7 +80,7 @@ def git_root() -> Path:
     return Path(out.strip())
 
 
-def check_clean_tree(root: Path) -> None:
+def _check_clean_tree(root: Path) -> None:
     out = subprocess.check_output(
         ["git", "status", "--porcelain"],
         cwd=root,
@@ -68,168 +95,140 @@ def check_clean_tree(root: Path) -> None:
         sys.exit(1)
 
 
-def list_tracked(root: Path, *, include_untracked: bool = False) -> list[str]:
-    """List files to deploy.
+def _timestamp() -> str:
+    return _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    Normally tracked files only. With ``include_untracked``,
-    also returns untracked files that ``.gitignore`` does not
-    exclude -- ``git ls-files`` takes a matching ``--others
-    --exclude-standard`` for that.
+
+def _read_hacs_version(host: str, ha_config: str) -> str | None:
+    """Return the HACS-recorded version of this integration, if available.
+
+    Returns ``None`` when HACS is not installed, the
+    repository entry is absent, or the entry has no
+    version_installed / installed_commit. Callers fall
+    back to a generic ``"hacs"`` directory name when
+    nothing usable is found.
     """
-    args = ["git", "ls-files"]
-    if include_untracked:
-        args.extend(["--cached", "--others", "--exclude-standard"])
-    out = subprocess.check_output(args, cwd=root, text=True)
-    return sorted(p for p in out.splitlines() if p)
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def local_hashes(root: Path, tracked: list[str]) -> dict[str, str]:
-    """Return ``{path: sha256}`` for files present on disk.
-
-    Silently drops files that aren't on disk (staged deletes,
-    untracked-then-deleted entries). They fall through to the
-    "removed" bucket of the deploy diff because they're absent
-    from the returned mapping.
-    """
-    return {p: sha256_file(root / p) for p in tracked if (root / p).is_file()}
-
-
-def owned_top_level(tracked: list[str]) -> list[str]:
-    """Top-level path segments that this deploy owns.
-
-    These are the only parts of the remote install path
-    we scan and prune; anything else on the host (``.git/``,
-    ``.venv/``, editor droppings) is left untouched.
-    """
-    return sorted({p.split("/", 1)[0] for p in tracked})
-
-
-def remote_hashes(
-    host: str,
-    install_path: str,
-    owned: list[str],
-) -> dict[str, str]:
-    install_path = install_path.rstrip("/")
-    targets = " ".join(shlex.quote(f"{install_path}/{p}") for p in owned)
-    script = (
-        f"for t in {targets}; do "
-        f'  [ -e "$t" ] || continue; '
-        f'  find "$t" -type f -print0 | xargs -0 -r sha256sum; '
-        "done"
+    storage_path = f"{ha_config.rstrip('/')}/{HACS_STORAGE_RELPATH}"
+    out = _run_ssh(
+        host,
+        f"[ -f {shlex.quote(storage_path)} ] && "
+        f"cat {shlex.quote(storage_path)} || true",
     )
-    out = subprocess.check_output(
-        ["ssh", host, script],
-        text=True,
-    )
-    result: dict[str, str] = {}
-    prefix = f"{install_path}/"
-    for line in out.splitlines():
-        parts = line.split(None, 1)
-        if len(parts) != 2:
+    if not out.strip():
+        return None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    repos = data.get("data") or {}
+    for entry in repos.values():
+        if not isinstance(entry, dict):
             continue
-        digest, abspath = parts
-        if abspath.startswith(prefix):
-            result[abspath[len(prefix) :]] = digest
-    return result
+        if entry.get("full_name", "").lower() != HACS_REPO_FULL_NAME:
+            continue
+        version = entry.get("version_installed")
+        if isinstance(version, str) and version:
+            return version
+        commit = entry.get("installed_commit")
+        if isinstance(commit, str) and commit:
+            return commit
+        return None
+    return None
 
 
-def diff_files(
-    local: dict[str, str],
-    remote: dict[str, str],
-) -> tuple[list[str], list[str], list[str]]:
-    installed: list[str] = []
-    updated: list[str] = []
-    for p, h in local.items():
-        rh = remote.get(p)
-        if rh is None:
-            installed.append(p)
-        elif rh != h:
-            updated.append(p)
-    removed = [p for p in remote if p not in local]
-    return sorted(installed), sorted(updated), sorted(removed)
+def _list_workspace(host: str, workspace: str) -> list[str]:
+    """Return immediate child names of the workspace dir, or [] if absent."""
+    out = _run_ssh(
+        host,
+        f"[ -d {shlex.quote(workspace)} ] && "
+        f"ls -1 {shlex.quote(workspace)} || true",
+    )
+    return sorted(line for line in out.splitlines() if line.strip())
 
 
-# After the HACS migration, the on-host repo has symlinks
-# at its root (blueprints/, pyscript/, docs/) that resolve
-# into custom_components/blueprint_toolkit/bundled/.
-# Any file change under bundled/ affects HA's view via those
-# symlinks, so we always fire both reload services when
-# anything ships -- keeping the heuristic simple and
-# impossible to get wrong in a way that leaves HA serving
-# stale code.
-_BUNDLED_PREFIX = "custom_components/blueprint_toolkit/bundled/"
+def _existing_install_kind(host: str, install_path: str) -> str:
+    """Classify what's at ``/config/custom_components/blueprint_toolkit``.
 
-
-def plan_reloads(
-    changed: set[str],
-    *,
-    force_reloads: bool,
-    ha_restart: bool,
-) -> list[str]:
-    """Return a list of reload actions to run in order.
-
-    Actions: "pyscript.reload", "automation.reload",
-    "ha core restart".
+    Returns one of:
+    - ``"absent"``: nothing there.
+    - ``"symlink"``: already a symlink (presumably ours).
+    - ``"directory"``: a real directory (HACS install or
+      manual copy) that the first deploy must preserve.
+    - ``"file"``: an unexpected regular file; aborts caller.
     """
-    if ha_restart:
-        return ["ha core restart"]
-    if force_reloads:
-        return ["pyscript.reload", "automation.reload"]
-    # Any change under bundled/ or under the legacy top-
-    # level pyscript/ or blueprints/ triggers both reloads.
-    # Cheaper than trying to detect which kind of content
-    # changed -- both services are fast.
-    if any(
-        p.startswith(_BUNDLED_PREFIX)
-        or p.startswith("pyscript/")
-        or p.startswith("blueprints/")
-        for p in changed
-    ):
-        return ["pyscript.reload", "automation.reload"]
-    return []
+    out = _run_ssh(
+        host,
+        (
+            f"if [ -L {shlex.quote(install_path)} ]; then echo symlink; "
+            f"elif [ -d {shlex.quote(install_path)} ]; then echo directory; "
+            f"elif [ -e {shlex.quote(install_path)} ]; then echo file; "
+            f"else echo absent; fi"
+        ),
+    )
+    return out.strip()
 
 
-def print_plan(
-    installed: list[str],
-    updated: list[str],
-    removed: list[str],
-    run_dev_install: bool,
-    reloads: list[str],
-) -> None:
-    for p in installed:
-        print(f"installed: {p}")
-    for p in updated:
-        print(f"updated: {p}")
-    for p in removed:
-        print(f"removed: {p}")
-    if run_dev_install:
-        print("run: dev-install.py")
-    for action in reloads:
-        print(f"reload: {action}")
+def _local_integration_dir(root: Path) -> Path:
+    return root / "custom_components" / INTEGRATION_NAME
 
 
-def deploy_files(
+# dev-install.py lives inside the integration
+# (custom_components/blueprint_toolkit/scripts/) so each
+# deployed copy ships the matching installer/reconciler
+# implementation. The repo-root scripts/dev-install.py is
+# a symlink to it. Restore deliberately runs the snapshot's
+# copy, not the laptop's.
+_DEV_INSTALL_REL_PATH = "scripts/dev-install.py"
+
+
+def _filename_safe(name: str) -> str:
+    """Strip any character outside [A-Za-z0-9._-]; never empty."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "", name)
+    return cleaned or "hacs"
+
+
+def _build_remote_layout(
+    *,
+    workspace: str,
+    timestamp: str,
+) -> dict[str, str]:
+    build_dir = f"{workspace}/{timestamp}"
+    integration_dir = f"{build_dir}/{INTEGRATION_NAME}"
+    return {
+        "build_dir": build_dir,
+        "integration_dir": integration_dir,
+        "dev_install_path": f"{integration_dir}/{_DEV_INSTALL_REL_PATH}",
+    }
+
+
+def _ship_integration(
     host: str,
-    install_path: str,
     root: Path,
-    files: list[str],
+    *,
+    target_integration_dir: str,
+    allow_dirty: bool,
 ) -> None:
+    """Tar the local integration directory onto the host."""
+    src = _local_integration_dir(root)
+    if not src.is_dir():
+        raise RuntimeError(f"local integration dir missing: {src}")
+
+    files = _list_integration_files(root, allow_dirty=allow_dirty)
     if not files:
-        return
-    tar_cmd = ["tar", "-cf", "-", "-C", str(root), *files]
-    with subprocess.Popen(tar_cmd, stdout=subprocess.PIPE) as tar_proc:
-        remote = (
-            f"mkdir -p {shlex.quote(install_path)} && "
-            f"cd {shlex.quote(install_path)} && tar -xf -"
+        raise RuntimeError(
+            f"no integration files to ship from {src} -- "
+            "is custom_components/blueprint_toolkit/ on disk?",
         )
+
+    tar_cmd = ["tar", "-cf", "-", "-C", str(src), *files]
+    parent = target_integration_dir.rstrip("/").rsplit("/", 1)[0]
+    remote = (
+        f"rm -rf {shlex.quote(target_integration_dir)} && "
+        f"mkdir -p {shlex.quote(target_integration_dir)} && "
+        f"mkdir -p {shlex.quote(parent)} && "
+        f"cd {shlex.quote(target_integration_dir)} && tar -xf -"
+    )
+    with subprocess.Popen(tar_cmd, stdout=subprocess.PIPE) as tar_proc:
         result = subprocess.run(
             ["ssh", host, remote],
             stdin=tar_proc.stdout,
@@ -237,47 +236,93 @@ def deploy_files(
         )
         if tar_proc.stdout is not None:
             tar_proc.stdout.close()
-        tar_rc = tar_proc.wait()
-    if tar_rc != 0:
-        raise RuntimeError(f"local tar exited {tar_rc}")
+        rc = tar_proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"local tar exited {rc}")
     if result.returncode != 0:
         raise RuntimeError(
             f"remote tar extraction exited {result.returncode}",
         )
 
 
-def remove_remote(
-    host: str,
-    install_path: str,
-    paths: list[str],
-) -> None:
-    if not paths:
-        return
-    abs_paths = " ".join(
-        shlex.quote(f"{install_path.rstrip('/')}/{p}") for p in paths
-    )
-    subprocess.run(
-        ["ssh", host, f"rm -f {abs_paths}"],
-        check=True,
-    )
+def _list_integration_files(
+    root: Path,
+    *,
+    allow_dirty: bool,
+) -> list[str]:
+    """Return git-managed paths under custom_components/blueprint_toolkit/.
+
+    Paths are relative to that directory (so they extract
+    correctly into the remote integration dir). Honours
+    ``--allow-dirty`` by including untracked-and-not-ignored
+    files.
+    """
+    rel_root = f"custom_components/{INTEGRATION_NAME}"
+    args = ["git", "ls-files"]
+    if allow_dirty:
+        args.extend(["--cached", "--others", "--exclude-standard"])
+    args.extend(["--", rel_root])
+    out = subprocess.check_output(args, cwd=root, text=True)
+    prefix = f"{rel_root}/"
+    paths: list[str] = []
+    for line in out.splitlines():
+        if not line.startswith(prefix):
+            continue
+        rel = line[len(prefix) :]
+        if (root / line).is_file():
+            paths.append(rel)
+    return sorted(paths)
 
 
-def run_dev_install(
+def _swap_symlink(host: str, install_path: str, target: str) -> None:
+    """Atomically point ``install_path`` at ``target``.
+
+    Requires HA's container view of ``target`` to be a
+    real directory (per the empirical test, the symlink
+    target has to live under ``/config`` to be visible
+    inside the container).
+    """
+    cmd = (
+        f"if [ -L {shlex.quote(install_path)} ] || "
+        f"[ -e {shlex.quote(install_path)} ]; then "
+        f"rm -rf {shlex.quote(install_path)}; fi && "
+        f"ln -s {shlex.quote(target)} {shlex.quote(install_path)}"
+    )
+    _run_ssh(host, cmd)
+
+
+def _move_dir(host: str, src: str, dest: str) -> None:
+    parent = dest.rstrip("/").rsplit("/", 1)[0]
+    cmd = (
+        f"mkdir -p {shlex.quote(parent)} && "
+        f"mv {shlex.quote(src)} {shlex.quote(dest)}"
+    )
+    _run_ssh(host, cmd)
+
+
+def _rmtree_remote(host: str, path: str) -> None:
+    if not path.startswith("/") or path in {"/", "/config"}:
+        raise RuntimeError(f"refusing to rm -rf {path!r}")
+    _run_ssh(host, f"rm -rf {shlex.quote(path)}")
+
+
+def _run_dev_install(
     host: str,
-    install_path: str,
+    *,
+    dev_install_path: str,
     ha_config: str,
     cli_symlink_dir: str | None,
 ) -> None:
-    """Invoke scripts/dev-install.py on the host.
+    """Run the deployed dev-install.py over ssh.
 
-    dev-install.py reconciles /config/... symlinks against
-    the shipped bundle. Always run after a file change;
-    it is idempotent and fast.
+    The script auto-discovers its integration dir from
+    ``__file__``, so the only required arg is ``--ha-config``.
+    Restore deliberately invokes the snapshot's copy of
+    dev-install.py; treat its CLI as the stable contract
+    documented in dev-install.py.
     """
-    script = f"{install_path.rstrip('/')}/scripts/dev-install.py"
     cmd = (
-        f"{shlex.quote(script)} "
-        f"--repo-dir {shlex.quote(install_path)} "
+        f"python3 {shlex.quote(dev_install_path)} "
         f"--ha-config {shlex.quote(ha_config)}"
     )
     if cli_symlink_dir is not None:
@@ -285,56 +330,210 @@ def run_dev_install(
     subprocess.run(["ssh", host, cmd], check=True)
 
 
-def host_only(host: str) -> str:
-    return host.split("@", 1)[-1]
+def _ha_restart(host: str, restart_cmd: str) -> None:
+    subprocess.run(["ssh", host, restart_cmd], check=True)
 
 
-def call_service_reload(host: str, api_key: str, service: str) -> None:
-    domain, action = service.split(".", 1)
-    url = f"http://{host_only(host)}:8123/api/services/{domain}/{action}"
-    req = urllib.request.Request(
-        url,
-        data=b"",
-        method="POST",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30):
-            pass
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(
-            f"{service} returned HTTP {e.code}: {e.reason}",
-        ) from e
+# ---- High-level operations -----------------------------------
 
 
-def do_ha_restart(host: str) -> None:
-    subprocess.run(
-        ["ssh", host, "ha core restart"],
-        check=True,
-    )
-
-
-def execute_reloads(
+def _plan_deploy(
     host: str,
-    api_key: str | None,
-    reloads: list[str],
+    *,
+    workspace: str,
+    install_path: str,
+    ha_config: str,
+    timestamp: str,
+) -> dict[str, str | None]:
+    """Compute the actions a deploy will take, without doing them."""
+    layout = _build_remote_layout(workspace=workspace, timestamp=timestamp)
+    existing_kind = _existing_install_kind(host, install_path)
+    workspace_entries = _list_workspace(host, workspace)
+    has_version_dir = any(name.startswith("v") for name in workspace_entries)
+
+    preserve_to: str | None = None
+    if existing_kind == "directory" and not has_version_dir:
+        # First-time setup: snapshot the HACS install.
+        version = _read_hacs_version(host, ha_config) or "hacs"
+        version_safe = _filename_safe(version)
+        preserve_to = f"{workspace}/{version_safe}/{INTEGRATION_NAME}"
+
+    return {
+        "existing_kind": existing_kind,
+        "preserve_to": preserve_to,
+        "build_dir": layout["build_dir"],
+        "integration_dir": layout["integration_dir"],
+        "dev_install_path": layout["dev_install_path"],
+    }
+
+
+def _print_deploy_plan(
+    *,
+    install_path: str,
+    workspace: str,
+    plan: dict[str, str | None],
 ) -> None:
-    for action in reloads:
-        if action == "ha core restart":
-            do_ha_restart(host)
-            continue
-        if api_key is None:
-            sys.stderr.write(
-                f"warning: skipping '{action}' -- no api key provided\n",
-            )
-            continue
-        call_service_reload(host, api_key, action)
+    existing = plan["existing_kind"]
+    preserve_to = plan["preserve_to"]
+    build_dir = plan["build_dir"]
+    integration_dir = plan["integration_dir"]
+    dev_install_path = plan["dev_install_path"]
+    if existing == "file":
+        sys.stderr.write(
+            f"error: {install_path} is a regular file; refusing to "
+            "overwrite. Investigate manually.\n",
+        )
+        sys.exit(1)
+    print(f"workspace: {workspace}")
+    print(f"existing install: {existing}")
+    if preserve_to is not None:
+        print(f"preserve HACS install -> {preserve_to}")
+    print(f"build: {build_dir}")
+    print(f"ship integration -> {integration_dir}")
+    print(f"symlink {install_path} -> {integration_dir}")
+    print(f"run: {dev_install_path}")
+    print("ha core restart")
 
 
-def parse_args() -> argparse.Namespace:
+def _do_deploy(
+    host: str,
+    *,
+    root: Path,
+    workspace: str,
+    install_path: str,
+    ha_config: str,
+    cli_symlink_dir: str | None,
+    plan: dict[str, str | None],
+    allow_dirty: bool,
+    ha_restart_cmd: str,
+) -> None:
+    preserve_to = plan["preserve_to"]
+    build_dir = plan["build_dir"]
+    integration_dir = plan["integration_dir"]
+    dev_install_path = plan["dev_install_path"]
+    if preserve_to is not None:
+        _move_dir(host, install_path, preserve_to)
+    assert build_dir is not None
+    assert integration_dir is not None
+    assert dev_install_path is not None
+    _ship_integration(
+        host,
+        root,
+        target_integration_dir=integration_dir,
+        allow_dirty=allow_dirty,
+    )
+    # dev-install.py rides along inside the integration tar
+    # at <integration>/scripts/dev-install.py; no separate
+    # ship step needed.
+    _swap_symlink(host, install_path, integration_dir)
+    _run_dev_install(
+        host,
+        dev_install_path=dev_install_path,
+        ha_config=ha_config,
+        cli_symlink_dir=cli_symlink_dir,
+    )
+    _ha_restart(host, ha_restart_cmd)
+
+
+def _plan_restore(
+    host: str,
+    *,
+    workspace: str,
+    install_path: str,
+) -> dict[str, str]:
+    """Compute the actions a restore will take, without doing them."""
+    entries = _list_workspace(host, workspace)
+    if not entries:
+        sys.stderr.write(
+            f"error: workspace {workspace} is missing or empty; "
+            "nothing to restore.\n",
+        )
+        sys.exit(1)
+    version_dirs = sorted(name for name in entries if name.startswith("v"))
+    if not version_dirs:
+        # Fall back to any non-timestamp dir (e.g. "hacs").
+        version_dirs = sorted(
+            name
+            for name in entries
+            if not re.fullmatch(r"\d{8}_\d{6}", name)
+            and name != "dev-install.py"
+        )
+    if not version_dirs:
+        sys.stderr.write(
+            f"error: no preserved HACS snapshot found in {workspace}; "
+            "expected a vX.Y.Z (or 'hacs') subdirectory.\n",
+        )
+        sys.exit(1)
+    snapshot = version_dirs[-1]  # newest
+    snapshot_path = f"{workspace}/{snapshot}/{INTEGRATION_NAME}"
+    return {
+        "snapshot": snapshot,
+        "snapshot_path": snapshot_path,
+        "install_path": install_path,
+    }
+
+
+def _print_restore_plan(
+    *,
+    workspace: str,
+    plan: dict[str, str],
+) -> None:
+    print(f"workspace: {workspace}")
+    print(f"snapshot: {plan['snapshot']}")
+    print(f"remove symlink: {plan['install_path']}")
+    print(f"restore: {plan['snapshot_path']} -> {plan['install_path']}")
+    print(f"run: {plan['install_path']}/{_DEV_INSTALL_REL_PATH}")
+    print(f"remove workspace: {workspace}")
+    print("ha core restart")
+
+
+def _do_restore(
+    host: str,
+    *,
+    workspace: str,
+    install_path: str,
+    ha_config: str,
+    cli_symlink_dir: str | None,
+    plan: dict[str, str],
+    ha_restart_cmd: str,
+) -> None:
+    snapshot_path = plan["snapshot_path"]
+    # Remove the symlink (if any) before moving the
+    # snapshot into its place.
+    _run_ssh(
+        host,
+        f"if [ -L {shlex.quote(install_path)} ] || "
+        f"[ -e {shlex.quote(install_path)} ]; then "
+        f"rm -rf {shlex.quote(install_path)}; fi",
+    )
+    _move_dir(host, snapshot_path, install_path)
+    # Re-run dev-install against the restored integration so
+    # the bundled symlinks at /config/blueprints/ etc. point
+    # at the HACS-installed bundle (and not at the workspace
+    # that we are about to delete). Deliberately uses the
+    # snapshot's own dev-install.py (now at
+    # <install_path>/scripts/dev-install.py); see
+    # dev-install.py's backward-compat comment.
+    dev_install_remote = f"{install_path}/{_DEV_INSTALL_REL_PATH}"
+    _run_dev_install(
+        host,
+        dev_install_path=dev_install_remote,
+        ha_config=ha_config,
+        cli_symlink_dir=cli_symlink_dir,
+    )
+    _rmtree_remote(host, workspace)
+    _ha_restart(host, ha_restart_cmd)
+
+
+# ---- argparse + main -----------------------------------------
+
+
+def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
-            "Deploy this repo to a Home Assistant host and run needed reloads."
+            "Deploy this repo's blueprint_toolkit integration "
+            "to a Home Assistant host (or restore the "
+            "preserved HACS install with --restore)."
         ),
     )
     p.add_argument(
@@ -343,11 +542,12 @@ def parse_args() -> argparse.Namespace:
         help=f"ssh target user@host (default: {DEFAULT_HOST})",
     )
     p.add_argument(
-        "--install-path",
-        default=DEFAULT_INSTALL_PATH,
+        "--workspace",
+        default=DEFAULT_WORKSPACE,
         help=(
-            "absolute path of the repo clone on the host "
-            f"(default: {DEFAULT_INSTALL_PATH})"
+            "directory on the host that holds the build "
+            "snapshots and the on-host dev-install.py "
+            f"(default: {DEFAULT_WORKSPACE})"
         ),
     )
     p.add_argument(
@@ -355,8 +555,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_HA_CONFIG,
         help=(
             "absolute path of HA's config dir on the host "
-            f"(default: {DEFAULT_HA_CONFIG}). Passed to "
-            "dev-install.py --ha-config."
+            f"(default: {DEFAULT_HA_CONFIG})"
         ),
     )
     p.add_argument(
@@ -364,106 +563,111 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "passed to dev-install.py --cli-symlink-dir. "
-            "If unset, the CLI script is not symlinked anywhere."
+            "If unset, the CLI script is not symlinked "
+            "anywhere on the host."
         ),
     )
     p.add_argument(
-        "--api-key-file",
-        type=Path,
-        default=None,
-        help=(
-            "file containing the HA long-lived access token; "
-            "required to run pyscript.reload / automation.reload"
-        ),
-    )
-    p.add_argument(
-        "--force-reloads",
-        action="store_true",
-        help="run both pyscript.reload and automation.reload unconditionally",
-    )
-    p.add_argument(
-        "--ha-restart",
+        "--restore",
         action="store_true",
         help=(
-            "run 'ha core restart' after file changes (via ssh); "
-            "replaces pyscript.reload / automation.reload"
+            "restore the preserved HACS snapshot to "
+            "/config/custom_components/blueprint_toolkit "
+            "and remove the workspace"
         ),
     )
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help=(
-            "print the deploy + reload plan and exit without touching the host"
-        ),
+        help="print the plan and exit without touching the host",
     )
     p.add_argument(
         "--allow-dirty",
         action="store_true",
         help=(
-            "skip the clean-tree check and deploy working-tree content; "
-            "tracked files with local modifications ship as-is, and "
-            "untracked files not matching .gitignore are included. "
-            "intended for iterative dev -- avoid for production deploys."
+            "skip the clean-tree check and ship working-tree "
+            "content (tracked files with local mods + "
+            "untracked files not matching .gitignore)"
         ),
     )
-    args = p.parse_args()
-    if args.force_reloads and args.ha_restart:
-        p.error("--force-reloads and --ha-restart are mutually exclusive")
-    return args
+    p.add_argument(
+        "--ha-restart-cmd",
+        default="ha core restart",
+        help=(
+            "shell command run on the host to restart HA "
+            "after the deploy or restore. Override for test "
+            "environments that don't ship the supervisor "
+            "CLI (default: 'ha core restart')."
+        ),
+    )
+    return p.parse_args()
 
 
 def main() -> int:
-    # Line-buffer stdout so our plan header reliably prints
+    # Line-buffer stdout so the plan reliably prints
     # before any subprocess output (tar, ssh, dev-install.py)
     # when stdout is piped.
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(line_buffering=True)
 
-    args = parse_args()
-    root = git_root()
+    args = _parse_args()
+    install_path = (
+        f"{args.ha_config.rstrip('/')}/custom_components/{INTEGRATION_NAME}"
+    )
+
+    if args.restore:
+        plan = _plan_restore(
+            args.host,
+            workspace=args.workspace,
+            install_path=install_path,
+        )
+        _print_restore_plan(workspace=args.workspace, plan=plan)
+        if args.dry_run:
+            return 0
+        _do_restore(
+            args.host,
+            workspace=args.workspace,
+            install_path=install_path,
+            ha_config=args.ha_config,
+            cli_symlink_dir=args.cli_symlink_dir,
+            plan=plan,
+            ha_restart_cmd=args.ha_restart_cmd,
+        )
+        return 0
+
+    root = _git_root()
     if args.allow_dirty:
         sys.stderr.write(
             "warning: --allow-dirty set; deploying working-tree content\n",
         )
     else:
-        check_clean_tree(root)
+        _check_clean_tree(root)
 
-    tracked = list_tracked(root, include_untracked=args.allow_dirty)
-    owned = owned_top_level(tracked)
-    local = local_hashes(root, tracked)
-    remote = remote_hashes(args.host, args.install_path, owned)
-    installed, updated, removed = diff_files(local, remote)
-
-    changed = set(installed) | set(updated) | set(removed)
-    reloads = plan_reloads(
-        changed,
-        force_reloads=args.force_reloads,
-        ha_restart=args.ha_restart,
+    deploy_plan = _plan_deploy(
+        args.host,
+        workspace=args.workspace,
+        install_path=install_path,
+        ha_config=args.ha_config,
+        timestamp=_timestamp(),
     )
-    # dev-install.py runs whenever any file changed on the
-    # host. It is idempotent and fast; no heuristic skip.
-    run_install = bool(changed)
-
-    print_plan(installed, updated, removed, run_install, reloads)
-
+    _print_deploy_plan(
+        install_path=install_path,
+        workspace=args.workspace,
+        plan=deploy_plan,
+    )
     if args.dry_run:
         return 0
-
-    api_key: str | None = None
-    if args.api_key_file is not None:
-        api_key = args.api_key_file.read_text().strip()
-
-    to_deploy = installed + updated
-    deploy_files(args.host, args.install_path, root, to_deploy)
-    remove_remote(args.host, args.install_path, removed)
-    if run_install:
-        run_dev_install(
-            args.host,
-            args.install_path,
-            args.ha_config,
-            args.cli_symlink_dir,
-        )
-    execute_reloads(args.host, api_key, reloads)
+    _do_deploy(
+        args.host,
+        root=root,
+        workspace=args.workspace,
+        install_path=install_path,
+        ha_config=args.ha_config,
+        cli_symlink_dir=args.cli_symlink_dir,
+        plan=deploy_plan,
+        allow_dirty=args.allow_dirty,
+        ha_restart_cmd=args.ha_restart_cmd,
+    )
     return 0
 
 

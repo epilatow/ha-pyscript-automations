@@ -2,10 +2,12 @@
 # This is AI generated code
 """HA-node-side installer for blueprint_toolkit.
 
-Runs directly on the HA host (invoked remotely by
-``scripts/dev-deploy.py``) to reconcile the checked-out
-repo's bundled payload into the user-visible
-``/config/...`` paths via symlinks.
+Lives inside the integration (``custom_components/
+blueprint_toolkit/scripts/``) so each deployed copy of the
+integration ships with the matching installer / reconciler
+implementation. ``scripts/dev-deploy.py`` invokes this
+script remotely on the HA host; ``--restore`` runs the copy
+inside the preserved HACS snapshot.
 
 Not a ``uv run --script`` target; HA nodes are not expected
 to have ``uv`` installed. Python 3.11+ stdlib only.
@@ -13,17 +15,44 @@ to have ``uv`` installed. Python 3.11+ stdlib only.
 Usage
 -----
 
-    dev-install.py --repo-dir /root/ha-blueprint-toolkit \
-                   --ha-config /config \
+    dev-install.py [--ha-config /config] \
                    [--cli-symlink-dir /root/] \
                    [--dry-run]
 
-The script runs the reconciler in ``MANUAL`` mode so
-symlinks pointing into any clone of this repo's bundled
-subtree are treated as ours. That lets a developer reinstall
-from a different clone location (e.g., switching from
-``/root/old`` to ``/root/new``) without tripping the
+The script discovers the integration directory from
+``__file__`` -- it lives at
+``<integration>/scripts/dev-install.py``, so the integration
+root is one level up. The reconciler imports the integration
+package off ``<integration>/..``; the integration's
+``__init__.py`` keeps its module-level imports HA-free for
+exactly this case.
+
+The reconciler runs in ``MANUAL`` mode so symlinks pointing
+into any deployed copy of the integration's bundled subtree
+are treated as ours. That lets the developer redeploy from a
+different build directory without tripping the
 unknown-symlink conflict path.
+
+Backward-compatibility contract
+-------------------------------
+
+Because ``--restore`` invokes the dev-install.py inside the
+HACS snapshot (which can be older than the installed
+dev-deploy.py), this script's CLI is treated as a stable
+contract:
+
+- New flags MUST be optional and have a sensible default;
+  older copies of dev-install.py will not understand them
+  and dev-deploy must not pass them unconditionally.
+- Existing flags MUST keep their meaning. Don't repurpose,
+  rename, or remove a flag without ratcheting through a
+  release cycle.
+- Existing exit-code semantics MUST stay (0=ok, 1=error,
+  2=usage error, 3=conflicts).
+
+dev-deploy is allowed to assume the modern shape only when
+it invokes the dev-install.py inside the *current* build
+(not the snapshot copy used by --restore).
 
 State
 -----
@@ -42,21 +71,13 @@ import json
 import sys
 from pathlib import Path
 
-# The reconciler + installer live under custom_components/;
-# make the repo root importable so we can pull them in as a
-# package. This script is always invoked from inside a clone
-# of this repo, so the path to sys.path is well-defined.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_REPO_ROOT))
-
-from custom_components.blueprint_toolkit import installer  # noqa: E402
-from custom_components.blueprint_toolkit.reconciler import (  # noqa: E402
-    ActionKind,
-    Mode,
-    plan,
-)
-
 MANIFEST_FILENAME = ".blueprint_toolkit.manifest.json"
+
+# This file lives at <integration>/scripts/dev-install.py;
+# resolved so a symlink in the repo (scripts/dev-install.py
+# -> ../custom_components/.../scripts/dev-install.py) still
+# points discovery at the real integration directory.
+_INTEGRATION_DIR = Path(__file__).resolve().parent.parent
 
 
 def _load_manifest(ha_config: Path) -> frozenset[Path]:
@@ -85,17 +106,8 @@ def _write_manifest(ha_config: Path, manifest: frozenset[Path]) -> None:
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
-            "Reconcile this repo's bundled payload into the "
-            "HA config dir via symlinks."
-        ),
-    )
-    p.add_argument(
-        "--repo-dir",
-        type=Path,
-        required=True,
-        help=(
-            "Absolute path to the ha-blueprint-toolkit "
-            "clone on this host (not the HA config dir)."
+            "Reconcile this integration's bundled payload into "
+            "the HA config dir via symlinks."
         ),
     )
     p.add_argument(
@@ -121,28 +133,44 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _bundled_root(repo_dir: Path) -> Path:
-    return repo_dir / "custom_components" / "blueprint_toolkit" / "bundled"
-
-
 def main() -> int:
     args = _parse_args()
-    repo_dir = args.repo_dir.resolve()
     ha_config = args.ha_config.resolve()
 
-    if not repo_dir.is_dir():
-        sys.stderr.write(f"error: --repo-dir not a directory: {repo_dir}\n")
+    if _INTEGRATION_DIR.name != "blueprint_toolkit":
+        # Sanity check on the auto-discovery: this script
+        # has to be moved under another integration's
+        # scripts/ dir for this to fire.
+        sys.stderr.write(
+            f"error: integration dir basename must be "
+            f"'blueprint_toolkit'; got: {_INTEGRATION_DIR.name}\n"
+        )
         return 2
     if not ha_config.is_dir():
         sys.stderr.write(f"error: --ha-config not a directory: {ha_config}\n")
         return 2
 
-    bundled_root = _bundled_root(repo_dir)
+    bundled_root = _INTEGRATION_DIR / "bundled"
     if not bundled_root.is_dir():
         sys.stderr.write(
             f"error: bundled payload not found under {bundled_root}\n"
         )
         return 2
+
+    # Importing the reconciler + installer requires
+    # ``blueprint_toolkit`` to be importable as a package.
+    # The integration's ``__init__.py`` keeps its module-level
+    # imports HA-free for exactly this case; putting the
+    # parent of the integration dir on sys.path makes
+    # ``from .reconciler import ...`` inside installer.py
+    # resolve correctly.
+    sys.path.insert(0, str(_INTEGRATION_DIR.parent))
+    from blueprint_toolkit import installer  # noqa: PLC0415
+    from blueprint_toolkit.reconciler import (  # noqa: PLC0415
+        ActionKind,
+        Mode,
+        plan,
+    )
 
     prior_manifest = _load_manifest(ha_config)
     the_plan = plan(

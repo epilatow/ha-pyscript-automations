@@ -65,3 +65,11 @@ ignore_missing_imports = true
 module = ["voluptuous"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# scripts/dev-install.py imports the integration package
+# off a runtime sys.path entry built from the deployed
+# build dir; the host dev environment does not have the
+# blueprint_toolkit package on its default sys.path.
+module = ["blueprint_toolkit", "blueprint_toolkit.*"]
+ignore_missing_imports = true
+
