@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,16 +26,43 @@ import pytest
 from conftest import CodeQualityBase
 
 REPO_ROOT = Path(__file__).parent.parent
-DEV_INSTALL = REPO_ROOT / "scripts" / "dev-install.py"
+INTEGRATION_SRC = REPO_ROOT / "custom_components" / "blueprint_toolkit"
+DEV_INSTALL_REL = "scripts/dev-install.py"
 MANIFEST_FILENAME = ".blueprint_toolkit.manifest.json"
 
 
 # ---- Helpers --------------------------------------------------
 
 
-def _make_fake_repo(root: Path) -> Path:
-    """Build a minimal bundled/ tree and return the repo root."""
-    bundled = root / "custom_components" / "blueprint_toolkit" / "bundled"
+def _make_fake_integration(root: Path) -> Path:
+    """Build a minimal blueprint_toolkit/ layout and return the integration dir.
+
+    Copies the real integration's top-level Python sources
+    (so dev-install.py can import installer / reconciler)
+    plus the real ``scripts/dev-install.py``, then replaces
+    ``bundled/`` with a fake fixture tree. The returned
+    path is the integration directory itself; tests invoke
+    ``<integration>/scripts/dev-install.py`` directly so
+    auto-discovery resolves to this fake integration.
+    """
+    integration_dir = root / "blueprint_toolkit"
+    integration_dir.mkdir(parents=True)
+
+    # Real Python sources (HA-free at module level, so they
+    # import outside of HA via dev-install.py's sys.path
+    # injection).
+    for name in ("__init__.py", "installer.py", "reconciler.py", "const.py"):
+        shutil.copy2(INTEGRATION_SRC / name, integration_dir / name)
+
+    scripts_dir = integration_dir / "scripts"
+    scripts_dir.mkdir()
+    shutil.copy2(
+        INTEGRATION_SRC / "scripts" / "dev-install.py",
+        scripts_dir / "dev-install.py",
+    )
+    (scripts_dir / "dev-install.py").chmod(0o755)
+
+    bundled = integration_dir / "bundled"
     (bundled / "blueprints" / "automation" / "blueprint_toolkit").mkdir(
         parents=True
     )
@@ -57,20 +85,18 @@ def _make_fake_repo(root: Path) -> Path:
     (bundled / "cli" / "demo_cli.py").write_text(
         "#!/usr/bin/env python3\n",
     )
-    return root
+    return integration_dir
 
 
 def _run_dev_install(
     *,
-    repo_dir: Path,
+    integration_dir: Path,
     ha_config: Path,
     cli_symlink_dir: Path | None = None,
     dry_run: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
-        str(DEV_INSTALL),
-        "--repo-dir",
-        str(repo_dir),
+        str(integration_dir / DEV_INSTALL_REL),
         "--ha-config",
         str(ha_config),
     ]
@@ -98,11 +124,11 @@ def _load_manifest(ha_config: Path) -> list[str]:
 
 class TestFreshInstall:
     def test_creates_expected_symlinks(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
 
-        r = _run_dev_install(repo_dir=repo, ha_config=config)
+        r = _run_dev_install(integration_dir=integration, ha_config=config)
         assert r.returncode == 0, (
             f"dev-install failed: stdout={r.stdout} stderr={r.stderr}"
         )
@@ -118,31 +144,25 @@ class TestFreshInstall:
         }
 
     def test_symlinks_resolve_to_bundled(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
 
-        _run_dev_install(repo_dir=repo, ha_config=config)
+        _run_dev_install(integration_dir=integration, ha_config=config)
         src = config / "pyscript/modules/demo.py"
         assert src.is_symlink()
         assert os.path.realpath(src) == str(
             (
-                repo
-                / "custom_components"
-                / "blueprint_toolkit"
-                / "bundled"
-                / "pyscript"
-                / "modules"
-                / "demo.py"
+                integration / "bundled" / "pyscript" / "modules" / "demo.py"
             ).resolve()
         )
 
     def test_manifest_persisted(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
 
-        _run_dev_install(repo_dir=repo, ha_config=config)
+        _run_dev_install(integration_dir=integration, ha_config=config)
         paths = _load_manifest(config)
         assert (
             len(paths) == 3
@@ -156,12 +176,12 @@ class TestFreshInstall:
 
 class TestIdempotent:
     def test_second_run_no_changes(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
 
-        _run_dev_install(repo_dir=repo, ha_config=config)
-        r = _run_dev_install(repo_dir=repo, ha_config=config)
+        _run_dev_install(integration_dir=integration, ha_config=config)
+        r = _run_dev_install(integration_dir=integration, ha_config=config)
         assert r.returncode == 0
         # No install/update/remove lines in stdout (all KEEP).
         for marker in ("install:", "update:", "remove:"):
@@ -175,14 +195,14 @@ class TestIdempotent:
 
 class TestCliSymlinkDir:
     def test_cli_installed_when_option_set(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
         cli_dir = tmp_path / "root"
         cli_dir.mkdir()
 
         _run_dev_install(
-            repo_dir=repo,
+            integration_dir=integration,
             ha_config=config,
             cli_symlink_dir=cli_dir,
         )
@@ -190,11 +210,11 @@ class TestCliSymlinkDir:
         assert expected.is_symlink()
 
     def test_cli_skipped_by_default(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
 
-        _run_dev_install(repo_dir=repo, ha_config=config)
+        _run_dev_install(integration_dir=integration, ha_config=config)
         # No CLI files should have been produced anywhere
         # under config (dev-install without cli-dir does not
         # install cli into /config either).
@@ -207,11 +227,15 @@ class TestCliSymlinkDir:
 
 class TestDryRun:
     def test_dry_run_creates_nothing(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
 
-        r = _run_dev_install(repo_dir=repo, ha_config=config, dry_run=True)
+        r = _run_dev_install(
+            integration_dir=integration,
+            ha_config=config,
+            dry_run=True,
+        )
         assert r.returncode == 0
         assert not _installed_paths(config)
         assert not (config / MANIFEST_FILENAME).exists()
@@ -227,7 +251,7 @@ class TestConflicts:
         self,
         tmp_path: Path,
     ) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
         # Pre-seed a user file at a destination.
@@ -235,7 +259,7 @@ class TestConflicts:
         conflict_path.parent.mkdir(parents=True)
         conflict_path.write_text("# user content\n")
 
-        r = _run_dev_install(repo_dir=repo, ha_config=config)
+        r = _run_dev_install(integration_dir=integration, ha_config=config)
         assert r.returncode == 3  # conflicts exit code
         assert "conflict:" in r.stdout
         assert "regular_file" in r.stdout
@@ -255,26 +279,18 @@ class TestStaleRemoval:
         self,
         tmp_path: Path,
     ) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         config = tmp_path / "config"
         config.mkdir()
 
-        _run_dev_install(repo_dir=repo, ha_config=config)
+        _run_dev_install(integration_dir=integration, ha_config=config)
         victim = config / "pyscript/modules/demo.py"
         assert victim.is_symlink()
 
         # Remove the source from bundled and re-run.
-        (
-            repo
-            / "custom_components"
-            / "blueprint_toolkit"
-            / "bundled"
-            / "pyscript"
-            / "modules"
-            / "demo.py"
-        ).unlink()
+        (integration / "bundled" / "pyscript" / "modules" / "demo.py").unlink()
 
-        r = _run_dev_install(repo_dir=repo, ha_config=config)
+        r = _run_dev_install(integration_dir=integration, ha_config=config)
         assert r.returncode == 0
         assert not victim.exists(), "stale symlink should have been removed"
 
@@ -283,20 +299,23 @@ class TestStaleRemoval:
 
 
 class TestArgErrors:
-    def test_missing_repo_dir(self, tmp_path: Path) -> None:
+    def test_integration_dir_basename_must_match(self, tmp_path: Path) -> None:
+        # Auto-discovery uses Path(__file__).resolve().parent.parent;
+        # putting dev-install.py one level deep under a
+        # mis-named directory triggers the basename guard.
+        integration = _make_fake_integration(tmp_path / "build")
+        wrong_name = tmp_path / "build" / "wrong_name"
+        integration.rename(wrong_name)
         config = tmp_path / "config"
         config.mkdir()
-        r = _run_dev_install(
-            repo_dir=tmp_path / "does-not-exist",
-            ha_config=config,
-        )
+        r = _run_dev_install(integration_dir=wrong_name, ha_config=config)
         assert r.returncode == 2
-        assert "--repo-dir not a directory" in r.stderr
+        assert "basename must be 'blueprint_toolkit'" in r.stderr
 
     def test_missing_ha_config(self, tmp_path: Path) -> None:
-        repo = _make_fake_repo(tmp_path / "repo")
+        integration = _make_fake_integration(tmp_path / "build")
         r = _run_dev_install(
-            repo_dir=repo,
+            integration_dir=integration,
             ha_config=tmp_path / "no-such-config",
         )
         assert r.returncode == 2
@@ -305,11 +324,11 @@ class TestArgErrors:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "scripts/dev-install.py",
+        "custom_components/blueprint_toolkit/scripts/dev-install.py",
         "tests/test_dev_install.py",
     ]
     mypy_targets = [
-        "scripts/dev-install.py",
+        "custom_components/blueprint_toolkit/scripts/dev-install.py",
     ]
 
 

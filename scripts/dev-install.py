@@ -1,0 +1,1 @@
+../custom_components/blueprint_toolkit/scripts/dev-install.py

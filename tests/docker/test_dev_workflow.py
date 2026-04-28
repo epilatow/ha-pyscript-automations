@@ -29,6 +29,23 @@ from conftest import (
 
 pytestmark = pytest.mark.docker
 
+# Workspace path used by the new dev-deploy. Same as the
+# script's DEFAULT_WORKSPACE; hard-coded here so the
+# assertion is independent of dev-deploy's import surface.
+WORKSPACE = "/config/ha-blueprint-toolkit"
+INSTALL_PATH = "/config/custom_components/blueprint_toolkit"
+# dev-install.py now lives inside the integration; each
+# deployed copy ships its own dev-install.py at this path
+# under <integration>.
+DEV_INSTALL_REL = "scripts/dev-install.py"
+
+# Test stub for `ha core restart`. The HA container shipped
+# in this harness does not include the supervisor CLI, and
+# even if it did we can't restart HA from inside its own
+# container. dev-deploy ships the stub command verbatim
+# over ssh so the value just has to be a noop on the host.
+NOOP_RESTART = "echo restart-stub"
+
 # The five blueprint entrypoint services registered by
 # pyscript/blueprint_toolkit.py. Verifying all five
 # appear is our "load succeeded" signal. (Trigger Entity
@@ -65,8 +82,12 @@ EXPECTED_BLUEPRINTS = frozenset(
     },
 )
 
-# Matches scripts/dev-deploy.py DEFAULT_INSTALL_PATH.
-REPO_ON_HOST = "/root/ha-blueprint-toolkit"
+# Where dev-install.py reads the integration from in the
+# TestDevInstallEndToEnd standalone scenario. Mirrors the
+# layout dev-deploy.py creates so dev-install.py's
+# auto-discovery (Path(__file__).resolve().parent.parent)
+# resolves to the integration in this dir.
+TEST_INTEGRATION_DIR = f"{WORKSPACE}/test_install/blueprint_toolkit"
 
 
 def _registered_blueprints(docker_ha: DockerHA) -> set[str]:
@@ -126,21 +147,55 @@ def _clear_installed_symlinks(docker_ha: DockerHA) -> None:
     )
 
 
+def _full_workspace_reset(docker_ha: DockerHA) -> None:
+    """Wipe everything dev-deploy / dev-install can touch."""
+    _clear_installed_symlinks(docker_ha)
+    docker_ha.exec_shell(
+        f"rm -rf {WORKSPACE} {INSTALL_PATH}",
+    )
+
+
+def _seed_repo_into_container(staging: str) -> None:
+    """Land the working tree inside the container at ``staging``."""
+    copy_repo_into_container(staging)
+
+
+def _seed_test_integration(docker_ha: DockerHA, source_clone: str) -> None:
+    """Stage a fresh integration copy at TEST_INTEGRATION_DIR.
+
+    The integration tree includes ``scripts/dev-install.py``
+    so the staged copy is self-contained.
+    """
+    parent = TEST_INTEGRATION_DIR.rsplit("/", 1)[0]
+    docker_ha.exec_shell(
+        f"mkdir -p {parent} && "
+        f"rm -rf {TEST_INTEGRATION_DIR} && "
+        f"cp -a {source_clone}/custom_components/blueprint_toolkit "
+        f"{TEST_INTEGRATION_DIR}",
+    )
+
+
 class TestDevInstallEndToEnd:
-    """Run dev-install.py against a live HA container."""
+    """Run dev-install.py against a live HA container.
+
+    Deploys the integration to a dev-deploy-style workspace
+    layout (``<workspace>/<build>/blueprint_toolkit/``) and
+    invokes the dev-install.py inside that staged copy --
+    the same shape dev-deploy.py uses in production.
+    """
 
     def test_install_creates_symlinks_and_services_register(
         self,
         docker_ha: DockerHA,
     ) -> None:
-        _clear_installed_symlinks(docker_ha)
-        copy_repo_into_container(REPO_ON_HOST)
+        _full_workspace_reset(docker_ha)
+        source_clone = "/root/source"
+        _seed_repo_into_container(source_clone)
+        _seed_test_integration(docker_ha, source_clone)
 
         r = docker_ha.exec_capture(
             "python3",
-            f"{REPO_ON_HOST}/scripts/dev-install.py",
-            "--repo-dir",
-            REPO_ON_HOST,
+            f"{TEST_INTEGRATION_DIR}/{DEV_INSTALL_REL}",
             "--ha-config",
             "/config",
         )
@@ -210,59 +265,26 @@ class TestDevInstallEndToEnd:
 class TestDevDeployEndToEnd:
     """Exercise scripts/dev-deploy.py inside the container.
 
-    Models the common iterative-dev cycle: source and target
-    both start at HEAD, an edit is made locally, dev-deploy
-    diffs, ships the changed file, runs dev-install.py on the
-    host, and triggers reload.
+    Verifies the full deploy machinery: first run preserves
+    a pre-existing HACS-style install at
+    ``/config/custom_components/blueprint_toolkit`` as a
+    versioned snapshot under the workspace, every run
+    creates a new timestamped build, the install symlink
+    points at the latest build, dev-install runs against
+    the deployed integration, and ``--restore`` reverses
+    the process.
+
+    The HA test container has no supervisor CLI, so the
+    deploy script's restart step is stubbed via
+    ``--ha-restart-cmd``. HA itself is not restarted; this
+    test exercises the deploy workflow, not the
+    integration's runtime behavior.
     """
 
-    def test_dev_deploy_ships_edit_and_reloads(
-        self,
-        docker_ha: DockerHA,
-    ) -> None:
-        _clear_installed_symlinks(docker_ha)
+    SOURCE_CLONE = "/root/source"
 
-        # Target: /root/ha-blueprint-toolkit (matches
-        # dev-deploy's default install path).
-        copy_repo_into_container(REPO_ON_HOST)
-        # Source: /root/source (separate clone we can edit
-        # without touching the target).
-        copy_repo_into_container("/root/source")
-
-        # git 2.35+ refuses cross-uid repos without this.
-        docker_ha.exec_shell(
-            "git config --global --add safe.directory '*'",
-        )
-
-        # Initial install on the target so /config symlinks
-        # exist before we deploy edits.
-        r = docker_ha.exec_capture(
-            "python3",
-            f"{REPO_ON_HOST}/scripts/dev-install.py",
-            "--repo-dir",
-            REPO_ON_HOST,
-            "--ha-config",
-            "/config",
-        )
-        assert r.returncode == 0, (
-            f"initial dev-install on target failed: {r.stdout}{r.stderr}"
-        )
-
-        # Edit a file in source to give dev-deploy
-        # something to ship.
-        marker = "# dev-deploy-test-marker\n"
-        edited_path = (
-            "custom_components/blueprint_toolkit/bundled/"
-            "pyscript/modules/helpers.py"
-        )
-        docker_ha.exec_shell(
-            f"printf '%s' '{marker}' >> /root/source/{edited_path}",
-        )
-
-        # ssh setup for dev-deploy. The ssh client inside
-        # the container reaches sshd on the same container
-        # at port 22; the 127.0.0.1:2222 host-side map is
-        # only for host-initiated ssh and is not used here.
+    def _setup_ssh(self, docker_ha: DockerHA) -> None:
+        """Provision a localhost ssh login for dev-deploy.py."""
         docker_ha.exec_shell(
             "mkdir -p /root/.ssh && "
             "cp /test/id_ed25519 /root/.ssh/id_ed25519 && "
@@ -271,67 +293,170 @@ class TestDevDeployEndToEnd:
             "> /root/.ssh/known_hosts 2>/dev/null",
         )
 
+    def _seed_fake_hacs_install(self, docker_ha: DockerHA) -> None:
+        """Place a directory at INSTALL_PATH so deploy must preserve it.
+
+        Uses the integration tree from the source clone so
+        the snapshot is a faithful copy of "what HACS would
+        have installed" minus the .storage entry. Without
+        the entry, dev-deploy falls back to a "hacs" dir
+        name; the test exercises that fallback path.
+        """
         docker_ha.exec_shell(
-            f"printf '%s' '{docker_ha.token}' > /root/.ha_api_key "
-            "&& chmod 600 /root/.ha_api_key",
+            f"mkdir -p $(dirname {INSTALL_PATH}) && "
+            f"rm -rf {INSTALL_PATH} && "
+            f"cp -a {self.SOURCE_CLONE}/custom_components/"
+            f"blueprint_toolkit {INSTALL_PATH}",
         )
 
-        # Run dev-deploy with cwd=/root/source so git
-        # rev-parse --show-toplevel returns that path.
+    def _list_workspace(self, docker_ha: DockerHA) -> set[str]:
+        r = docker_ha.exec_shell(
+            f"ls -1 {WORKSPACE} 2>/dev/null || true",
+            check=False,
+        )
+        return {line for line in r.stdout.splitlines() if line.strip()}
+
+    def _readlink(self, docker_ha: DockerHA, path: str) -> str:
+        r = docker_ha.exec_shell(f"readlink {path}", check=False)
+        return r.stdout.strip()
+
+    def _run_deploy(
+        self,
+        docker_ha: DockerHA,
+        *extra_args: str,
+    ) -> str:
+        """Run dev-deploy from the source clone; return stdout."""
         r = docker_ha.exec_capture(
             "python3",
-            "/root/source/scripts/dev-deploy.py",
+            f"{self.SOURCE_CLONE}/scripts/dev-deploy.py",
             "--host",
             "root@localhost",
-            "--install-path",
-            REPO_ON_HOST,
+            "--workspace",
+            WORKSPACE,
             "--ha-config",
             "/config",
-            "--api-key-file",
-            "/root/.ha_api_key",
+            "--ha-restart-cmd",
+            NOOP_RESTART,
             "--allow-dirty",
-            cwd="/root/source",
+            *extra_args,
+            cwd=self.SOURCE_CLONE,
         )
         assert r.returncode == 0, (
-            f"dev-deploy.py failed: stdout={r.stdout} stderr={r.stderr}"
-        )
-        assert f"updated: {edited_path}" in r.stdout, (
-            f"expected edited file in plan; got: {r.stdout}"
-        )
-        assert "run: dev-install.py" in r.stdout, (
-            f"expected dev-install.py invocation in plan; got: {r.stdout}"
-        )
-        assert "reload: pyscript.reload" in r.stdout, (
-            f"expected pyscript.reload in plan; got: {r.stdout}"
-        )
-
-        # Verify the target's copy now contains the marker
-        # we appended to source.
-        r = docker_ha.exec_capture(
-            "grep",
-            "-c",
-            marker.rstrip(),
-            f"{REPO_ON_HOST}/{edited_path}",
-        )
-        assert r.returncode == 0 and r.stdout.strip() == "1", (
-            "marker did not propagate to target: "
+            f"dev-deploy {extra_args} failed: "
             f"stdout={r.stdout!r} stderr={r.stderr!r}"
         )
+        return r.stdout
 
-        # The /config symlink should resolve to the same
-        # file (through the repo-root symlink) and thus
-        # pick up the same content.
-        via_symlink = docker_ha.exec_capture(
-            "grep",
-            "-c",
-            marker.rstrip(),
-            "/config/pyscript/modules/helpers.py",
+    def test_deploy_preserves_hacs_then_supports_restore(
+        self,
+        docker_ha: DockerHA,
+    ) -> None:
+        _full_workspace_reset(docker_ha)
+        _seed_repo_into_container(self.SOURCE_CLONE)
+        # git 2.35+ refuses cross-uid repos without this.
+        docker_ha.exec_shell(
+            "git config --global --add safe.directory '*'",
         )
-        assert (
-            via_symlink.returncode == 0 and via_symlink.stdout.strip() == "1"
-        ), (
-            "edit did not reach HA via /config symlink: "
-            f"stdout={via_symlink.stdout!r} stderr={via_symlink.stderr!r}"
+        self._setup_ssh(docker_ha)
+        self._seed_fake_hacs_install(docker_ha)
+
+        # ---- First deploy -----------------------------------
+        out1 = self._run_deploy(docker_ha)
+        assert "preserve HACS install" in out1, (
+            f"expected preserve-on-first-deploy in plan; got: {out1}"
+        )
+        assert "ha core restart" in out1, out1
+
+        ws_after_first = self._list_workspace(docker_ha)
+        # Expect: hacs/ (snapshot) + one timestamped build.
+        # dev-install.py is NOT at workspace root anymore;
+        # it ships inside each integration tree.
+        version_dirs = {n for n in ws_after_first if not n[0].isdigit()}
+        ts_dirs_first = {n for n in ws_after_first if n[0].isdigit()}
+        assert version_dirs == {"hacs"}, (
+            f"expected single 'hacs' snapshot; got: {ws_after_first}"
+        )
+        assert len(ts_dirs_first) == 1, (
+            f"expected one timestamped build; got: {ws_after_first}"
+        )
+        first_ts = next(iter(ts_dirs_first))
+        check = docker_ha.exec_shell(
+            f"test -x {WORKSPACE}/{first_ts}/blueprint_toolkit/"
+            f"{DEV_INSTALL_REL}",
+            check=False,
+        )
+        assert check.returncode == 0, (
+            "expected dev-install.py inside the build's integration tree"
+        )
+
+        # The install path is a symlink pointing at the new build.
+        symlink_target = self._readlink(docker_ha, INSTALL_PATH)
+        assert symlink_target == (
+            f"{WORKSPACE}/{first_ts}/blueprint_toolkit"
+        ), f"symlink target wrong: {symlink_target}"
+
+        # The dev-install symlinks should now exist under
+        # /config/blueprints/ etc.
+        check = docker_ha.exec_shell(
+            "test -L /config/blueprints/automation/"
+            "blueprint_toolkit/trigger_entity_controller.yaml",
+            check=False,
+        )
+        assert check.returncode == 0, (
+            "dev-install did not create blueprint symlinks after first deploy"
+        )
+
+        # The HACS snapshot was actually moved (it's a
+        # directory under <ws>/hacs/blueprint_toolkit/).
+        check = docker_ha.exec_shell(
+            f"test -f {WORKSPACE}/hacs/blueprint_toolkit/manifest.json",
+            check=False,
+        )
+        assert check.returncode == 0, "HACS snapshot manifest missing"
+
+        # ---- Second deploy (no edit) ------------------------
+        # Sleep so the second timestamp is distinct from the
+        # first (deploys at second-resolution).
+        time.sleep(1)
+        out2 = self._run_deploy(docker_ha)
+        assert "preserve HACS install" not in out2, (
+            f"second deploy must not re-preserve HACS; got: {out2}"
+        )
+
+        ws_after_second = self._list_workspace(docker_ha)
+        ts_dirs_second = {n for n in ws_after_second if n[0].isdigit()}
+        assert len(ts_dirs_second) == 2, (
+            f"expected two timestamped builds; got: {ws_after_second}"
+        )
+        new_ts = (ts_dirs_second - ts_dirs_first).pop()
+        symlink_target = self._readlink(docker_ha, INSTALL_PATH)
+        assert symlink_target == (f"{WORKSPACE}/{new_ts}/blueprint_toolkit"), (
+            f"symlink not updated to new build: {symlink_target}"
+        )
+
+        # ---- Restore ----------------------------------------
+        out_restore = self._run_deploy(docker_ha, "--restore")
+        assert "snapshot: hacs" in out_restore, out_restore
+        assert "ha core restart" in out_restore, out_restore
+
+        # The install path should once again be a real
+        # directory holding the original integration.
+        check = docker_ha.exec_shell(
+            f"test -d {INSTALL_PATH} && test ! -L {INSTALL_PATH} && "
+            f"test -f {INSTALL_PATH}/manifest.json",
+            check=False,
+        )
+        assert check.returncode == 0, (
+            f"restore did not put a real directory back at {INSTALL_PATH}"
+        )
+
+        # And the workspace should be gone.
+        check = docker_ha.exec_shell(
+            f"test ! -e {WORKSPACE}",
+            check=False,
+        )
+        assert check.returncode == 0, (
+            f"restore did not remove the workspace at {WORKSPACE}"
         )
 
 
