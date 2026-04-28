@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import functools
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import installer, reconciler
 from .const import (
@@ -40,6 +41,29 @@ _ISSUE_INSTALL_FAILURE = "install_failure"
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+
+
+@dataclass
+class IntegrationData:
+    """Per-config-entry runtime state.
+
+    Lives at ``entry.runtime_data``; HA auto-clears the
+    attribute on entry unload, but our explicit
+    ``async_unload_entry`` still walks ``handlers`` to
+    cancel pending wakeups + unsubscribe bus listeners
+    before that happens. ``handlers[<service>]`` is the
+    per-port bucket the shared lifecycle helpers in
+    ``helpers.py`` populate.
+
+    Cross-reload state (the Repairs-flow handoff for
+    force-confirmed destinations) lives separately in
+    ``hass.data[DOMAIN]`` because it must survive the
+    unload between Repairs flow completion and the
+    triggered config-entry reload.
+    """
+
+    handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -270,6 +294,10 @@ async def async_setup_entry(
     entry: ConfigEntry,
 ) -> bool:
     """Plan + apply the bundled payload's symlinks."""
+    # Initialise per-entry runtime state. Subpackage
+    # handler buckets land under ``entry.runtime_data.handlers``
+    # via the shared lifecycle helpers in ``helpers.py``.
+    entry.runtime_data = IntegrationData()
     config_root = Path(hass.config.config_dir)
     cli_symlink_dir = _coerce_cli_symlink_dir(
         entry.options.get(OPTION_CLI_SYMLINK_DIR),
@@ -343,6 +371,13 @@ async def async_setup_entry(
 
     _register_docs_static_route(hass)
 
+    # trigger_entity_controller service handler.
+    # Lazy-imported because the handler module pulls in
+    # ``voluptuous`` and ``homeassistant`` at module scope.
+    from .trigger_entity_controller import handler as tec_handler
+
+    await tec_handler.async_register(hass, entry)
+
     # Conflicts surface to the user via Repairs rather
     # than by failing the setup. Real install errors raise
     # an OSError inside the executor job which propagates
@@ -354,7 +389,17 @@ async def async_unload_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> bool:
-    """Unload the config entry. No filesystem side effects."""
+    """Unload the config entry. No filesystem side effects.
+
+    Tears down the TEC handler so a reload (e.g.
+    after ``_async_options_updated`` fires from an
+    options-flow save) doesn't leak service
+    registrations, bus listeners, or pending
+    ``async_call_later`` wakeups.
+    """
+    from .trigger_entity_controller import handler as tec_handler
+
+    await tec_handler.async_unregister(hass, entry)
     return True
 
 

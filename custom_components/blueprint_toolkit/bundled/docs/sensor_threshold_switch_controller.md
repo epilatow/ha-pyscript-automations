@@ -21,16 +21,6 @@ override protection, auto-off functionality, and notification support.
 - **Notifications**: Optionally sends notifications for all actions via
   a configurable notification service.
 
-## Requirements
-
-PyScript must be configured with:
-
-```yaml
-pyscript:
-  allow_all_imports: true
-  hass_is_global: true
-```
-
 ## Usage
 
 1. Go to **Settings > Automations & Scenes > Blueprints**.

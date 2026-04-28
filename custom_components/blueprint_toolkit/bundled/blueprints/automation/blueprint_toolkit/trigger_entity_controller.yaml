@@ -205,22 +205,28 @@ triggers:
   - id: trigger_disabling_change
     trigger: state
     entity_id: !input trigger_disabling_entities
-  - id: timer
-    trigger: time_pattern
-    minutes: "/1"
 
 actions:
-  - action: pyscript.trigger_entity_controller_blueprint_entrypoint
+  - action: blueprint_toolkit.trigger_entity_controller
     data:
       instance_id: "{{ this.entity_id }}"
       controlled_entities_raw: !input controlled_entities
+      # Synthetic invocations from the integration (auto-off
+      # wakeup, restart-recovery kick) pass these as flat
+      # top-level variables since HA's automation.trigger
+      # service strips the ``trigger`` key from caller
+      # variables. Real state-trigger firings reach the
+      # ``else`` branches via the native ``trigger.*`` context.
       trigger_entity_id: >-
-        {{ trigger.entity_id
-           | default('timer', true) }}
+        {{ trigger_entity_id
+           if trigger_entity_id is defined
+           else (trigger.entity_id | default('timer', true)) }}
       trigger_to_state: >-
-        {{ trigger.to_state.state
-           if trigger.to_state is defined
-           else '' }}
+        {{ trigger_to_state
+           if trigger_to_state is defined
+           else (trigger.to_state.state
+                 if trigger.to_state is defined
+                 else '') }}
       auto_off_minutes_raw: !input auto_off_minutes
       auto_off_disabling_entities_raw: !input auto_off_disabling_entities
       trigger_entities_raw: !input trigger_entities
@@ -234,5 +240,10 @@ actions:
       notification_events_raw: !input notification_events
       debug_logging_raw: !input debug_logging
 
+# ``queued`` + ``max: 10`` lets up to 10 trigger events
+# (motion bursts, controlled-state flips) stack up and run
+# in order. Beyond 10, HA drops new events with a warning
+# in the log. Bump if your setup has unusually bursty
+# triggers.
 mode: queued
 max: 10

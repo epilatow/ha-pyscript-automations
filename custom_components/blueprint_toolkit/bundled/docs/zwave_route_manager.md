@@ -32,17 +32,10 @@ unreachable API, and apply failures as persistent notifications.
 
 ## Requirements
 
-- Home Assistant **Z-Wave JS** addon (`core_zwave_js`), which
-  bundles `zwave-js-ui`. The socket.io backend on port 8091 is
-  the automation's target -- tested against addon v1.2.0
-  (bundling zwave-js-ui v11.16.0).
-- PyScript configured with:
-
-  ```yaml
-  pyscript:
-    allow_all_imports: true
-    hass_is_global: true
-  ```
+Home Assistant **Z-Wave JS** addon (`core_zwave_js`),
+which bundles `zwave-js-ui`. The socket.io backend on
+port 8091 is the automation's target -- tested against
+addon v1.2.0 (bundling zwave-js-ui v11.16.0).
 
 ## Usage
 

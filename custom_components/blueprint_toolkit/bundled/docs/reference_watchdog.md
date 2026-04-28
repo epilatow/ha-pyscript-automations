@@ -53,16 +53,6 @@ page for deletion.
   notifications
 - Optional debug logging
 
-## Requirements
-
-PyScript must be configured with:
-
-```yaml
-pyscript:
-  allow_all_imports: true
-  hass_is_global: true
-```
-
 ## Usage
 
 1. Install the automation (see main README)

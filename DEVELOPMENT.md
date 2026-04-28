@@ -299,34 +299,39 @@ after its argparse function is defined. The expected-
 kwargs frozenset is inlined in the registry entry:
 
 ```python
-_TEC_SERVICE_LABEL = "Trigger Entity Controller"
+_DW_SERVICE_LABEL = "Device Watchdog"
 
 
-def trigger_entity_controller_blueprint_argparse(...):
+def device_watchdog_blueprint_argparse(...):
     notif_prefix = _notification_prefix(
-        _TEC_SERVICE_LABEL, instance_id,
+        _DW_SERVICE_LABEL, instance_id,
     )
     config_error = _build_config_error_notification(
-        errors, instance_id, _TEC_SERVICE_LABEL,
+        errors, instance_id, _DW_SERVICE_LABEL,
     )
     ...
 
 
-_BLUEPRINT_SERVICES[_TEC_SERVICE_LABEL] = (
-    "trigger_entity_controller.yaml",
+_BLUEPRINT_SERVICES[_DW_SERVICE_LABEL] = (
+    "device_watchdog.yaml",
     frozenset([
         "instance_id",
-        "controlled_entities_raw",
+        "watched_integrations_raw",
         # ...
     ]),
-    trigger_entity_controller_blueprint_argparse,
+    device_watchdog_blueprint_argparse,
 )
 
 
 @service
-async def trigger_entity_controller_blueprint_entrypoint(**kwargs):
-    await _dispatch_blueprint_service(_TEC_SERVICE_LABEL, kwargs)
+async def device_watchdog_blueprint_entrypoint(**kwargs):
+    await _dispatch_blueprint_service(_DW_SERVICE_LABEL, kwargs)
 ```
+
+(Trigger Entity Controller used to follow this pattern but
+was ported to a native HA service handler -- see
+``custom_components/blueprint_toolkit/trigger_entity_controller/`` for the new
+shape that future ports should adopt.)
 
 The entrypoint is ``async def`` because ``_dispatch_blueprint_service``
 awaits the module-reload read lock. See "Module reload coordination" in

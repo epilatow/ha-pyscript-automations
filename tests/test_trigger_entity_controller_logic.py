@@ -4,7 +4,7 @@
 # dependencies = ["pytest", "pytest-cov", "ruff", "mypy"]
 # ///
 # This is AI generated code
-"""Tests for trigger_entity_controller module."""
+"""Tests for the TEC logic module."""
 
 import sys
 from datetime import datetime, timedelta
@@ -12,14 +12,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
-_SCRIPT_PATH = (
-    REPO_ROOT / "pyscript" / "modules" / "trigger_entity_controller.py"
-)
+sys.path.insert(0, str(REPO_ROOT))
 
-sys.path.insert(0, str(_SCRIPT_PATH.parent))
-
+import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
-from trigger_entity_controller import (  # noqa: E402
+
+from custom_components.blueprint_toolkit.trigger_entity_controller.logic import (  # noqa: E402, E501
     ActionType,
     Config,
     EventType,
@@ -106,9 +104,11 @@ class TestParsePeriod:
     def test_whitespace(self) -> None:
         assert parse_period("  always  ") == Period.ALWAYS
 
-    def test_unknown_defaults_to_always(self) -> None:
-        assert parse_period("bogus") == Period.ALWAYS
-        assert parse_period("") == Period.ALWAYS
+    def test_unknown_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown period"):
+            parse_period("bogus")
+        with pytest.raises(ValueError, match="unknown period"):
+            parse_period("")
 
 
 # -- parse_notification_events --
@@ -132,11 +132,9 @@ class TestParseNotificationEvents:
             NotificationEvent.AUTO_OFF,
         ]
 
-    def test_unknown_ignored(self) -> None:
-        result = parse_notification_events(
-            ["triggered-on", "bogus"],
-        )
-        assert result == [NotificationEvent.TRIGGERED_ON]
+    def test_unknown_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown notification event"):
+            parse_notification_events(["triggered-on", "bogus"])
 
 
 # -- determine_event_type --
@@ -1303,15 +1301,18 @@ class TestEndToEndScenarios:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/modules/trigger_entity_controller.py",
-        "tests/test_trigger_entity_controller.py",
+        "tests/test_trigger_entity_controller_logic.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/logic.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/__init__.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/handler.py",
+        "custom_components/blueprint_toolkit/helpers.py",
     ]
-    mypy_targets = [
-        "pyscript/modules/trigger_entity_controller.py",
+    mypy_targets: list[str] = [
+        "custom_components/blueprint_toolkit/trigger_entity_controller/logic.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/handler.py",
+        "custom_components/blueprint_toolkit/helpers.py",
     ]
 
 
 if __name__ == "__main__":
-    from conftest import run_tests
-
-    run_tests(__file__, _SCRIPT_PATH, REPO_ROOT)
+    sys.exit(pytest.main([__file__, "-v", *sys.argv[1:]]))

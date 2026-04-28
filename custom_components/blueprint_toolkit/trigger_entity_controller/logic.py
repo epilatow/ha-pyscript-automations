@@ -1,10 +1,13 @@
 # This is AI generated code
 """Business logic for trigger entity controller.
 
-Does not use PyScript-injected globals.
+Pure-function decision tree: ``evaluate(config, inputs)``
+returns a ``Result`` describing what should happen, with
+no side effects. The HA-facing wiring lives in
+``handler.py``.
 
 Controls entities with optional trigger-based activation
-and auto-off timer.  Supports time-of-day restrictions,
+and auto-off timer. Supports time-of-day restrictions,
 disabling entities, and force-on behavior.
 """
 
@@ -12,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum, auto
 
-import helpers
+from .. import helpers
 
 
 class EventType(Enum):
@@ -105,25 +108,37 @@ class Result:
 
 
 def parse_period(value: str) -> Period:
-    """Parse a period string from blueprint input."""
+    """Parse a period string from blueprint input.
+
+    Raises ``ValueError`` on unknown values. Argparse
+    is the only validator and rejects bad values
+    before they reach here, so the lookup must succeed.
+    """
     normalized = value.strip().lower()
     for p in Period:
         if p.value == normalized:
             return p
-    return Period.ALWAYS
+    raise ValueError(f"unknown period {value!r}")
+
+
+_NOTIFICATION_EVENTS_BY_VALUE = {evt.value: evt for evt in NotificationEvent}
 
 
 def parse_notification_events(
     values: list[str],
 ) -> list[NotificationEvent]:
-    """Parse notification event strings."""
+    """Parse notification event strings.
+
+    Raises ``ValueError`` on unknown values. Argparse
+    is the only validator and rejects bad values
+    before they reach here, so every entry must map.
+    """
     result: list[NotificationEvent] = []
     for v in values:
         normalized = str(v).strip().lower()
-        for evt in NotificationEvent:
-            if evt.value == normalized:
-                result.append(evt)
-                break
+        if normalized not in _NOTIFICATION_EVENTS_BY_VALUE:
+            raise ValueError(f"unknown notification event {v!r}")
+        result.append(_NOTIFICATION_EVENTS_BY_VALUE[normalized])
     return result
 
 
@@ -141,7 +156,11 @@ def determine_event_type(
     disabling_entities: combined list of all disabling
       entity IDs (trigger + auto-off).
     """
-    if entity_id in ("", "timer", "None", "none"):
+    # Empty entity_id is the blueprint default
+    # (``trigger.entity_id | default('timer', true)``);
+    # ``"timer"`` is the sentinel the handler synthesises
+    # in its restart-recovery + auto-off wakeup paths.
+    if entity_id in ("", "timer"):
         return EventType.TIMER
     if to_state not in ("on", "off"):
         return None
@@ -234,7 +253,7 @@ def _friendly_list(
     names: dict[str, str],
 ) -> str:
     """Comma-separated friendly names."""
-    return ", ".join([_friendly(eid, names) for eid in entity_ids])
+    return ", ".join(_friendly(eid, names) for eid in entity_ids)
 
 
 def _compute_auto_off_at(
