@@ -316,8 +316,9 @@ its <code>automation.</code> prefix:</p>
 file-change detection)</p>
 </li>
 <li>
-<p><code>last_trigger</code>: trigger ID (<code>&quot;periodic&quot;</code>, <code>&quot;ha_start&quot;</code>,
-<code>&quot;manual&quot;</code>)</p>
+<p><code>last_trigger</code>: trigger ID (<code>&quot;periodic&quot;</code> for integration-
+scheduled ticks, <code>&quot;manual&quot;</code> for everything else: dev-tools
+calls, the integration's startup + reload kicks)</p>
 </li>
 <li>
 <p><code>reconcile_pending</code>: true when a reconcile is deferred
@@ -427,15 +428,17 @@ Settings -&gt; System -&gt; Logs with the tag <code>[ZRM: &lt;automation alias&g
   errored=0 new_timeouts=0 actions_executed=2
 </code></pre>
 <h3>Reconcile trigger semantics</h3>
-<p>The blueprint fires on <code>homeassistant: start</code>; periodic
-reconciles are scheduled by the integration via
-<code>async_track_time_interval</code> keyed off the
+<p>The blueprint has no triggers of its own -- the integration
+owns scheduling and recovery. Periodic reconciles are
+scheduled via <code>async_track_time_interval</code> keyed off the
 <code>reconcile_interval_minutes</code> input, and fire
 <code>automation.trigger</code> with <code>trigger.id == &quot;periodic&quot;</code>. Manual
-triggers from developer tools (or the integration's
-restart-recovery kick) arrive as <code>trigger.id == &quot;manual&quot;</code>.
-The service handler's gate then decides whether each call
-warrants a full reconcile:</p>
+triggers from developer tools, the integration's
+restart-recovery kick (<code>EVENT_HOMEASSISTANT_STARTED</code>), and
+its reload-recovery kick (<code>EVENT_AUTOMATION_RELOADED</code>) all
+arrive as <code>trigger.id == &quot;manual&quot;</code>. The service handler's
+gate then decides whether each call warrants a full
+reconcile:</p>
 <table>
 <thead>
 <tr>
@@ -445,11 +448,7 @@ warrants a full reconcile:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>trigger.id == &quot;ha_start&quot;</code></td>
-<td>Reconcile</td>
-</tr>
-<tr>
-<td><code>trigger.id == &quot;manual&quot;</code> (service tool / dev tools)</td>
+<td><code>trigger.id == &quot;manual&quot;</code> (dev tools, startup, reload)</td>
 <td>Reconcile</td>
 </tr>
 <tr>

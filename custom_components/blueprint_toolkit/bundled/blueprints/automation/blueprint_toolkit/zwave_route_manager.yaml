@@ -139,10 +139,7 @@ blueprint:
       selector:
         boolean: {}
 
-triggers:
-  - trigger: homeassistant
-    event: start
-    id: ha_start
+triggers: []
 
 actions:
   - action: blueprint_toolkit.zwave_route_manager
@@ -160,10 +157,14 @@ actions:
       max_notifications_raw: !input max_notifications
       debug_logging_raw: !input debug_logging
 
-# Periodic reconciles are scheduled by the integration via
-# async_track_time_interval (interval = the
-# reconcile_interval_minutes input). The blueprint's
-# remaining triggers are HA-start (recovery) plus manual
-# trigger via dev tools or the integration's own
-# restart-recovery kick.
+# Periodic reconciles, restart recovery, and reload
+# recovery are all owned by the integration -- no
+# blueprint-side triggers needed. The integration's
+# async_track_time_interval handles the periodic cadence
+# (interval = the reconcile_interval_minutes input);
+# recover_at_startup kicks every discovered automation
+# on EVENT_HOMEASSISTANT_STARTED and again on
+# EVENT_AUTOMATION_RELOADED. Manual triggers (dev tools,
+# the integration's restart-recovery kick) reach the
+# action via automation.trigger directly.
 mode: single

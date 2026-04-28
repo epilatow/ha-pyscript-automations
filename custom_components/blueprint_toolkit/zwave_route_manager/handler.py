@@ -26,8 +26,8 @@ additions:
 State persistence: in-memory only. On HA restart, pending
 and applied dicts re-derive from the controller's actual
 route state on the first reconcile (driven by the
-ha_start trigger from the blueprint plus
-``recover_at_startup``).
+integration's ``recover_at_startup`` kick once HA fires
+``EVENT_HOMEASSISTANT_STARTED``).
 """
 
 from __future__ import annotations
@@ -103,14 +103,13 @@ _BRIDGE_TIMEOUT = 30.0
 _DEFAULT_SPEED_VALUES = frozenset(
     {"auto", *(s.value for s in bridge.RouteSpeed)},
 )
-# trigger_id values supplied by the blueprint:
-# - "ha_start" from the homeassistant trigger
+# trigger_id values supplied by the blueprint action:
 # - "periodic" from the integration-owned timer (we set
 #   variables={trigger:{id:"periodic"}} when firing
 #   automation.trigger from the timer)
 # - "manual" default when no trigger is set (dev tools call,
-#   restart-recovery kick)
-_TRIGGER_VALUES = ("ha_start", "periodic", "manual")
+#   restart-recovery kick, automation_reload kick)
+_TRIGGER_VALUES = ("periodic", "manual")
 
 
 # --------------------------------------------------------
@@ -124,8 +123,8 @@ class ZrmInstanceState:
 
     Lost on HA restart; re-derived from the controller's
     actual route state on the first reconcile (driven by
-    the ha_start blueprint trigger + the integration's
-    ``recover_at_startup`` kick).
+    the integration's ``recover_at_startup`` kick once
+    HA fires ``EVENT_HOMEASSISTANT_STARTED``).
     """
 
     instance_id: str
@@ -459,7 +458,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         )
         return
 
-    triggered_by_ha_start = trigger_id == "ha_start"
     mtime_changed = current_mtime != state.last_config_mtime
     interval_elapsed = True
     if state.last_reconcile_dt is not None:
@@ -469,8 +467,7 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     manual_trigger = trigger_id == "manual"
 
     should_reconcile = (
-        triggered_by_ha_start
-        or mtime_changed
+        mtime_changed
         or interval_elapsed
         or state.reconcile_pending
         or manual_trigger

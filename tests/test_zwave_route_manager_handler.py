@@ -373,7 +373,8 @@ class TestPeriodicCallback:
         assert "context" not in h.services.kwargs[0]
         # And the trigger.id must be "periodic" so the
         # service handler can distinguish integration-fired
-        # ticks from manual / ha_start invocations.
+        # ticks from manual invocations (dev tools, the
+        # restart-recovery and reload-recovery kicks).
         _domain, _name, data = h.services.calls[0]
         assert data["variables"] == {"trigger": {"id": "periodic"}}
 

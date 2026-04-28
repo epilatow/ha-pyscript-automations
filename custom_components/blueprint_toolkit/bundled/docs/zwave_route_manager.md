@@ -243,8 +243,9 @@ its `automation.` prefix:
 - `last_reconcile`: ISO timestamp of the last reconcile
 - `last_config_mtime`: the mtime seen last run (drives
   file-change detection)
-- `last_trigger`: trigger ID (`"periodic"`, `"ha_start"`,
-  `"manual"`)
+- `last_trigger`: trigger ID (`"periodic"` for integration-
+  scheduled ticks, `"manual"` for everything else: dev-tools
+  calls, the integration's startup + reload kicks)
 - `reconcile_pending`: true when a reconcile is deferred
   (config error, API unreachable, controller not ready, or
   the previous reconcile had apply failures)
@@ -353,20 +354,21 @@ Example:
 
 ### Reconcile trigger semantics
 
-The blueprint fires on `homeassistant: start`; periodic
-reconciles are scheduled by the integration via
-`async_track_time_interval` keyed off the
+The blueprint has no triggers of its own -- the integration
+owns scheduling and recovery. Periodic reconciles are
+scheduled via `async_track_time_interval` keyed off the
 `reconcile_interval_minutes` input, and fire
 `automation.trigger` with `trigger.id == "periodic"`. Manual
-triggers from developer tools (or the integration's
-restart-recovery kick) arrive as `trigger.id == "manual"`.
-The service handler's gate then decides whether each call
-warrants a full reconcile:
+triggers from developer tools, the integration's
+restart-recovery kick (`EVENT_HOMEASSISTANT_STARTED`), and
+its reload-recovery kick (`EVENT_AUTOMATION_RELOADED`) all
+arrive as `trigger.id == "manual"`. The service handler's
+gate then decides whether each call warrants a full
+reconcile:
 
 | Signal | Action |
 |---|---|
-| `trigger.id == "ha_start"` | Reconcile |
-| `trigger.id == "manual"` (service tool / dev tools) | Reconcile |
+| `trigger.id == "manual"` (dev tools, startup, reload) | Reconcile |
 | Config file mtime changed since last run | Reconcile |
 | `now - last_reconcile > reconcile_interval_minutes` | Reconcile |
 | `reconcile_pending == true` from prior tick | Reconcile |
