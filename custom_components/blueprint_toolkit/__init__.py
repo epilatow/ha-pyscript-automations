@@ -372,9 +372,9 @@ async def async_setup_entry(
     _register_docs_static_route(hass)
 
     # trigger_entity_controller service handler.
-    # Lazy-imported because ``tec.handler`` pulls in
+    # Lazy-imported because the handler module pulls in
     # ``voluptuous`` and ``homeassistant`` at module scope.
-    from .tec import handler as tec_handler
+    from .trigger_entity_controller import handler as tec_handler
 
     await tec_handler.async_register(hass, entry)
 
@@ -397,7 +397,7 @@ async def async_unload_entry(
     registrations, bus listeners, or pending
     ``async_call_later`` wakeups.
     """
-    from .tec import handler as tec_handler
+    from .trigger_entity_controller import handler as tec_handler
 
     await tec_handler.async_unregister(hass, entry)
     return True

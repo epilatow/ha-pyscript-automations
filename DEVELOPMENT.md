@@ -330,7 +330,7 @@ async def device_watchdog_blueprint_entrypoint(**kwargs):
 
 (Trigger Entity Controller used to follow this pattern but
 was ported to a native HA service handler -- see
-``custom_components/blueprint_toolkit/tec/`` for the new
+``custom_components/blueprint_toolkit/trigger_entity_controller/`` for the new
 shape that future ports should adopt.)
 
 The entrypoint is ``async def`` because ``_dispatch_blueprint_service``

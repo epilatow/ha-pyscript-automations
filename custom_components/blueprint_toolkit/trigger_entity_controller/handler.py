@@ -129,7 +129,7 @@ class TecInstanceState:
 # Wire format matches the blueprint's ``data:`` block in
 # ``trigger_entity_controller.yaml`` -- enforced by the
 # ``TestBlueprintSchemaDrift`` test in
-# ``tests/test_tec_handler.py``. The schema covers
+# ``tests/test_trigger_entity_controller_handler.py``. The schema covers
 # field-shape validation only; cross-field rules (no
 # overlapping entity sets) and HA-state validation
 # (entity exists in hass.states, notification service is

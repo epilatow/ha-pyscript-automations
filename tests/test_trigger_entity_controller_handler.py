@@ -133,17 +133,20 @@ sys.modules["homeassistant.util.dt"] = _ha_util_dt
 # would fail the test loudly -- which is the right
 # behaviour, since the handler genuinely needs it.
 
-from custom_components.blueprint_toolkit.tec import handler  # noqa: E402
+from custom_components.blueprint_toolkit.trigger_entity_controller import (  # noqa: E402
+    handler,
+)
 
 # When this file is invoked via ``pytest.main([__file__])``
 # (the script's self-invocation path) it ends up loaded
-# twice -- once as ``__main__`` and once as
-# ``test_tec_handler``. ``handler`` is imported during the
-# first load, so its ``async_call_later`` binding refers
-# to the ``__main__``-side stub; the test methods running
-# under the second load inspect ``test_tec_handler._ACL_CALLS``,
-# which is a different list. Re-bind on the handler module
-# now so both sides observe the same capture state.
+# twice -- once as ``__main__`` and once as the
+# test module. ``handler`` is imported during the first
+# load, so its ``async_call_later`` binding refers to the
+# ``__main__``-side stub; the test methods running under
+# the second load inspect the test module's own
+# ``_ACL_CALLS`` capture list, which is a different
+# list. Re-bind on the handler module now so both sides
+# observe the same capture state.
 handler.async_call_later = _async_call_later  # type: ignore[attr-defined]
 
 
@@ -638,7 +641,7 @@ class TestBlueprintSchemaDrift:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "tests/test_tec_handler.py",
+        "tests/test_trigger_entity_controller_handler.py",
     ]
     mypy_targets: list[str] = []
 

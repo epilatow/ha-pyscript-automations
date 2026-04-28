@@ -13,7 +13,7 @@
 """Integration-level tests for the native TEC handler.
 
 Exercises the parts that the in-process unit tests
-(``tests/test_tec_handler.py``) deliberately don't cover:
+(``tests/test_trigger_entity_controller_handler.py``) deliberately don't cover:
 the live ``vol.Schema`` argparse, cross-field + state
 validation, the full ``_async_service_layer`` build-and-
 apply loop against ``hass.states`` / ``hass.services``,
@@ -567,7 +567,7 @@ class TestReloadListener:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "tests/test_tec_integration.py",
+        "tests/test_trigger_entity_controller_integration.py",
     ]
     mypy_targets: list[str] = []
 

@@ -17,7 +17,7 @@ sys.path.insert(0, str(REPO_ROOT))
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
 
-from custom_components.blueprint_toolkit.tec.logic import (  # noqa: E402
+from custom_components.blueprint_toolkit.trigger_entity_controller.logic import (  # noqa: E402, E501
     ActionType,
     Config,
     EventType,
@@ -1301,15 +1301,15 @@ class TestEndToEndScenarios:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "tests/test_tec_logic.py",
-        "custom_components/blueprint_toolkit/tec/logic.py",
-        "custom_components/blueprint_toolkit/tec/__init__.py",
-        "custom_components/blueprint_toolkit/tec/handler.py",
+        "tests/test_trigger_entity_controller_logic.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/logic.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/__init__.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/handler.py",
         "custom_components/blueprint_toolkit/helpers.py",
     ]
     mypy_targets: list[str] = [
-        "custom_components/blueprint_toolkit/tec/logic.py",
-        "custom_components/blueprint_toolkit/tec/handler.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/logic.py",
+        "custom_components/blueprint_toolkit/trigger_entity_controller/handler.py",
         "custom_components/blueprint_toolkit/helpers.py",
     ]
 

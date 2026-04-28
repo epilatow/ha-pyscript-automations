@@ -30,7 +30,7 @@ from __future__ import annotations
 # ``handler`` imports voluptuous + homeassistant at
 # module scope, so it's lazy-imported by callers rather
 # than re-exported here -- otherwise ``import
-# custom_components.blueprint_toolkit.tec.logic`` from
+# custom_components.blueprint_toolkit.trigger_entity_controller.logic`` from
 # pure-Python test environments would pull HA in
 # transitively. See
 # ``custom_components/blueprint_toolkit/__init__.py`` for
