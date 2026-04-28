@@ -67,6 +67,7 @@ from ..helpers import (
     PersistentNotification,
     automation_friendly_name,
     instance_id_for_config_error,
+    make_config_error_notification,
     make_emit_config_error,
     md_escape,
     prepare_notifications,
@@ -99,7 +100,9 @@ _AWAKE_APPLY_TIMEOUT = 15.0
 # our asyncio.wait_for cancellation.
 _BRIDGE_TIMEOUT = 30.0
 
-_DEFAULT_SPEED_VALUES = ("auto", "100k", "40k", "9600")
+_DEFAULT_SPEED_VALUES = frozenset(
+    {"auto", *(s.value for s in bridge.RouteSpeed)},
+)
 # trigger_id values supplied by the blueprint:
 # - "ha_start" from the homeassistant trigger
 # - "periodic" from the integration-owned timer (we set
@@ -235,7 +238,7 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
 # Per-port closure over the shared ``emit_config_error``
 # helper. Saves repeating ``service=_SERVICE,
 # service_tag=_SERVICE_TAG`` at every call site.
-_emit = make_emit_config_error(
+_emit_config_error = make_emit_config_error(
     service=_SERVICE,
     service_tag=_SERVICE_TAG,
 )
@@ -251,14 +254,14 @@ async def _async_argparse(
     try:
         data = _SCHEMA(raw)
     except vol.MultipleInvalid as err:
-        await _emit(
+        await _emit_config_error(
             hass,
             instance_id_for_config_error(raw),
             [f"schema: {sub}" for sub in err.errors],
         )
         return
     except vol.Invalid as err:
-        await _emit(
+        await _emit_config_error(
             hass,
             instance_id_for_config_error(raw),
             [f"schema: {err}"],
@@ -267,30 +270,22 @@ async def _async_argparse(
 
     instance_id: str = data["instance_id"]
 
-    # Default speed: "auto" means None.
+    # Default speed: "auto" means None. The schema's
+    # vol.In(_DEFAULT_SPEED_VALUES) already rejected anything
+    # outside the legal set, so RouteSpeed(...) is total here.
     default_speed_raw: str = data["default_route_speed_raw"].strip()
-    default_route_speed: bridge.RouteSpeed | None
-    if default_speed_raw == "auto":
-        default_route_speed = None
-    else:
-        default_route_speed, speed_err = logic.parse_route_speed_value(
-            default_speed_raw,
-            "blueprint input: default_route_speed",
-        )
-        if speed_err is not None:
-            await _emit(
-                hass,
-                instance_id,
-                [_format_config_error(speed_err)],
-            )
-            return
+    default_route_speed: bridge.RouteSpeed | None = (
+        None
+        if default_speed_raw == "auto"
+        else bridge.RouteSpeed(default_speed_raw)
+    )
 
     # Argparse passed; clear any stale config-error
     # notification before handing off to the service layer.
     # The service layer owns its own notification dispatch
     # (api_unavailable, apply_*, timeout_*) plus its own
     # config-error category for YAML / resolve errors.
-    await _emit(hass, instance_id, [])
+    await _emit_config_error(hass, instance_id, [])
 
     await _async_service_layer(
         hass,
@@ -414,6 +409,56 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         abs_config_path,
     )
 
+    # Read + parse config FIRST, before the should_reconcile
+    # and circuit-breaker gates. Parsing is a local file read +
+    # YAML decode -- it doesn't touch the controller -- so we
+    # can surface config errors immediately even when the
+    # breaker is open or the periodic interval hasn't elapsed.
+    # Without this hoist, a user editing YAML while the
+    # controller is wedged would get no feedback on parse
+    # errors until the breaker closed, which can be hours.
+    # Missing or empty file -> empty Config.
+    text, read_err = await hass.async_add_executor_job(
+        _read_config_text,
+        abs_config_path,
+    )
+    config_errors: list[logic.ConfigError] = []
+    if read_err is not None:
+        config_errors.append(
+            logic.ConfigError(
+                location="(file)",
+                entity_id=None,
+                reason=read_err,
+            ),
+        )
+        config = logic.Config()
+    else:
+        config, config_errors = logic.parse_config(text)
+
+    if config_errors:
+        config_error_notif = make_config_error_notification(
+            service=_SERVICE,
+            service_tag=_SERVICE_TAG,
+            instance_id=instance_id,
+            errors=[_format_config_error(e) for e in config_errors],
+        )
+        await _dispatch_terminal_notifications(
+            hass,
+            [config_error_notif],
+            notif_prefix,
+        )
+        state.last_config_errors = len(config_errors)
+        _persist_diagnostic(
+            hass,
+            state,
+            now=now,
+            started=started,
+            current_mtime=current_mtime,
+            trigger_id=trigger_id,
+            mark_pending=True,
+        )
+        return
+
     triggered_by_ha_start = trigger_id == "ha_start"
     mtime_changed = current_mtime != state.last_config_mtime
     interval_elapsed = True
@@ -467,42 +512,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             )
         return
 
-    # Read + parse config. Missing or empty -> empty Config.
-    text, read_err = await hass.async_add_executor_job(
-        _read_config_text,
-        abs_config_path,
-    )
-    config_errors: list[logic.ConfigError] = []
-    if read_err is not None:
-        config_errors.append(
-            logic.ConfigError(
-                location="(file)",
-                entity_id=None,
-                reason=read_err,
-            ),
-        )
-        config = logic.Config()
-    else:
-        config, config_errors = logic.parse_config(text)
-
-    if config_errors:
-        await _emit(
-            hass,
-            instance_id,
-            [_format_config_error(e) for e in config_errors],
-        )
-        state.last_config_errors = len(config_errors)
-        _persist_diagnostic(
-            hass,
-            state,
-            now=now,
-            started=started,
-            current_mtime=current_mtime,
-            trigger_id=trigger_id,
-            mark_pending=True,
-        )
-        return
-
     # Fetch nodes via bridge.
     bridge_result = await _bridge_get_nodes(host, port, token)
     bridge_error = bridge_result.error
@@ -534,6 +543,12 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         notifs.append(
             _api_notification(notif_prefix, instance_id, bridge_error),
         )
+        # Bare dispatcher (NOT sweep): when we lose contact
+        # with the controller, prior ``apply_<node>`` /
+        # ``apply_*`` notifications might still be true, and
+        # sweeping them away would lose real diagnostic info
+        # during the outage. The next successful reconcile's
+        # sweep cleans up everything that's no longer true.
         if notifs:
             await process_persistent_notifications(hass, notifs)
         state.last_bridge_error = str(bridge_error)
@@ -571,9 +586,10 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     if err_msg is None and bridge_result.api_result is None:
         err_msg = "zwave-js-ui did not respond to getNodes"
     if err_msg is not None:
-        await process_persistent_notifications(
+        await _dispatch_terminal_notifications(
             hass,
             [_api_notification(notif_prefix, instance_id, err_msg)],
+            notif_prefix,
         )
         state.last_api_error = err_msg
         _persist_diagnostic(
@@ -598,9 +614,10 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     entity_map, controller = _build_entity_to_resolution(hass, nodes)
     if controller is None:
         err_msg = "controller (node 1) not found in getNodes() response"
-        await process_persistent_notifications(
+        await _dispatch_terminal_notifications(
             hass,
             [_api_notification(notif_prefix, instance_id, err_msg)],
+            notif_prefix,
         )
         state.last_api_error = err_msg
         _persist_diagnostic(
@@ -622,10 +639,16 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         controller,
     )
     if resolve_errors:
-        await _emit(
+        resolve_error_notif = make_config_error_notification(
+            service=_SERVICE,
+            service_tag=_SERVICE_TAG,
+            instance_id=instance_id,
+            errors=[_format_config_error(e) for e in resolve_errors],
+        )
+        await _dispatch_terminal_notifications(
             hass,
-            instance_id,
-            [_format_config_error(e) for e in resolve_errors],
+            [resolve_error_notif],
+            notif_prefix,
         )
         state.last_resolve_errors = len(resolve_errors)
         _persist_diagnostic(
@@ -639,7 +662,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         )
         return
 
-    # Diff + plan (pure).
     reconcile = logic.diff_and_plan(
         resolved,
         nodes_by_id,
@@ -666,7 +688,11 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         )
         # Connect failure mid-reconcile: collapse to one
         # api_unavailable notification rather than N
-        # per-action failure notifications.
+        # per-action failure notifications. Bare dispatcher
+        # (NOT sweep): same reasoning as the bridge_error
+        # path above -- losing contact mid-apply means we
+        # can't trust prior ``apply_<node>`` notifications
+        # are stale, so don't sweep them.
         if isinstance(apply_outcome, _ApplyConnectError):
             err_msg = f"connection lost during apply: {apply_outcome.message}"
             await process_persistent_notifications(
@@ -690,9 +716,10 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         mismatch = _api_echo_mismatch(apply_results)
         if mismatch is not None:
             _mismatch_action, err_msg = mismatch
-            await process_persistent_notifications(
+            await _dispatch_terminal_notifications(
                 hass,
                 [_api_notification(notif_prefix, instance_id, err_msg)],
+                notif_prefix,
             )
             state.last_api_error = err_msg
             _persist_diagnostic(
@@ -806,20 +833,11 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         instance_id=instance_id,
     )
 
-    # Dispatch with sweep so notifications from prior runs
-    # that this run isn't re-emitting (e.g. apply_<node>
-    # for a node that was failing last run but isn't in
-    # the failures this run, or for a node that's been
-    # removed from the config entirely) get dismissed.
-    # ``__timeout_`` IDs are kept across sweeps -- each
-    # retry creates a unique attempt-timestamped ID, the
-    # user wants the history.
-    await process_persistent_notifications_with_sweep(
-        hass,
-        capped,
-        sweep_prefix=notif_prefix,
-        keep_pattern="__timeout_",
-    )
+    # Successful reconcile asserts the complete per-instance
+    # notification state -- prior runs' apply_<node>,
+    # api_unavailable, etc. that this run isn't re-emitting
+    # get dismissed by the sweep.
+    await _dispatch_terminal_notifications(hass, capped, notif_prefix)
 
     # Persist diagnostic state.
     routes_in_config = len(resolved) * len(logic.MANAGED_ROUTE_TYPES)
@@ -1110,6 +1128,37 @@ def _timeout_notification(
         title=title,
         message=body,
         instance_id=instance_id,
+    )
+
+
+async def _dispatch_terminal_notifications(
+    hass: HomeAssistant,
+    notifs: list[PersistentNotification],
+    notif_prefix: str,
+) -> None:
+    """Dispatch a final notification batch + sweep stale prior runs.
+
+    Used by terminal error paths in ``_do_reconcile`` that
+    produce a known, complete notification subset (config_errors,
+    resolve_errors, api_echo failures, etc) and want to dismiss
+    every prior notification under the per-instance prefix that
+    this run isn't re-emitting. The ``__timeout_`` keep_pattern
+    preserves per-attempt timeout notifications -- each retry
+    creates a unique attempt-timestamped ID, the user wants the
+    history.
+
+    Bridge-connection failure paths (initial getNodes failed to
+    connect, mid-apply connect drop) deliberately use the bare
+    dispatcher rather than this helper -- when we lose contact
+    with the controller, prior ``apply_<node>`` notifications
+    might still be true, and sweeping them away loses real
+    diagnostic info during the outage.
+    """
+    await process_persistent_notifications_with_sweep(
+        hass,
+        notifs,
+        sweep_prefix=notif_prefix,
+        keep_pattern="__timeout_",
     )
 
 

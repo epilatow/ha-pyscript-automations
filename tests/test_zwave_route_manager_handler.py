@@ -161,8 +161,13 @@ sys.modules["homeassistant.helpers.event"] = _ha_helpers_event
 sys.modules["homeassistant.util"] = _ha_util
 sys.modules["homeassistant.util.dt"] = _ha_util_dt
 
+from custom_components.blueprint_toolkit.helpers import (  # noqa: E402
+    make_config_error_notification,
+)
 from custom_components.blueprint_toolkit.zwave_route_manager import (  # noqa: E402
+    bridge,
     handler,
+    logic,
 )
 
 # Re-bind so the handler module sees the test module's
@@ -468,6 +473,228 @@ class TestPeriodicCallback:
         cb = handler._make_periodic_callback(h, "automation.never_seen")  # type: ignore[arg-type]
         asyncio.run(cb(_FrozenNow.value))
         assert h.services.calls == []
+
+
+# --------------------------------------------------------
+# Notification builders
+# --------------------------------------------------------
+
+
+class TestConfigErrorBullet:
+    """``_format_config_error`` renders one ConfigError as one bullet body."""
+
+    def test_no_entity_falls_back_to_location(self) -> None:
+        err = logic.ConfigError(
+            location="(file)",
+            entity_id=None,
+            reason="read failed",
+        )
+        assert handler._format_config_error(err) == "`(file)`: read failed"
+
+    def test_entity_with_device_link(self) -> None:
+        err = logic.ConfigError(
+            location="routes[0].clients[2]",
+            entity_id="binary_sensor.window_front_left",
+            device_id="abc123",
+            reason=(
+                "Device does not support routing: "
+                "configured to use Z-Wave Long Range (vs Mesh)"
+            ),
+        )
+        # ``[``/``]`` in the YAML location are md-escaped --
+        # they're rendered inside backticks so the escaping is
+        # cosmetic-only, but ``_format_config_error`` runs
+        # ``md_escape`` on every interpolated string regardless.
+        assert handler._format_config_error(err) == (
+            "[`binary_sensor.window_front_left`]"
+            "(/config/devices/device/abc123) "
+            "(`routes\\[0\\].clients\\[2\\]`): "
+            "Device does not support routing: "
+            "configured to use Z-Wave Long Range (vs Mesh)"
+        )
+
+    def test_entity_without_device_id_unlinked(self) -> None:
+        # "Entity not found" errors carry an entity_id but no
+        # DeviceResolution, so device_id is None. The bullet
+        # renders entity_id as plain backticked text -- the
+        # entity isn't in HA so a device-page link wouldn't
+        # resolve.
+        err = logic.ConfigError(
+            location="routes[1].clients[0]",
+            entity_id="lock.missing",
+            reason="entity not found",
+        )
+        bullet = handler._format_config_error(err)
+        expected = (
+            "`lock.missing` (`routes\\[1\\].clients\\[0\\]`): entity not found"
+        )
+        assert bullet == expected
+        assert "/config/devices/device/" not in bullet
+
+
+class TestConfigErrorNotification:
+    """End-to-end: ZRM bullets -> ``make_config_error_notification``.
+
+    Exercises the integration of ``_format_config_error`` with the
+    shared helpers.make_config_error_notification builder that
+    ``emit_config_error`` (and thus ``_emit_config_error`` on the
+    handler) ultimately dispatches.
+    """
+
+    def _build(
+        self,
+        errors: list[logic.ConfigError],
+        instance_id: str = "automation.zrm_test",
+    ) -> Any:
+        bullets = [handler._format_config_error(e) for e in errors]
+        return make_config_error_notification(
+            service=handler._SERVICE,
+            service_tag=handler._SERVICE_TAG,
+            instance_id=instance_id,
+            errors=bullets,
+        )
+
+    def test_inactive_when_no_errors(self) -> None:
+        notif = self._build([])
+        assert notif.active is False
+        assert notif.message == ""
+
+    def test_title_includes_service_tag_and_instance_id(self) -> None:
+        notif = self._build(
+            [
+                logic.ConfigError(
+                    location="routes[0]", entity_id=None, reason="x"
+                )
+            ],
+            instance_id="automation.zrm_test",
+        )
+        assert (
+            notif.title
+            == "Blueprint Toolkit -- ZRM config error: automation.zrm_test"
+        )
+
+    def test_multiple_errors_all_listed(self) -> None:
+        errors = [
+            logic.ConfigError(
+                location=f"routes[0].clients[{i}]",
+                entity_id=f"binary_sensor.lr{i}",
+                device_id=f"dev{i}",
+                reason=(
+                    "Device does not support routing:"
+                    " configured to use Z-Wave Long Range (vs Mesh)"
+                ),
+            )
+            for i in range(3)
+        ]
+        notif = self._build(errors)
+        for i in range(3):
+            assert f"binary_sensor.lr{i}" in notif.message
+            assert f"/config/devices/device/dev{i}" in notif.message
+        assert notif.message.count("- ") == 3
+
+
+def _make_action(
+    *,
+    kind: logic.RouteActionKind = logic.RouteActionKind.SET_APPLICATION_ROUTE,
+    node_id: int = 42,
+    repeaters: list[int] | None = None,
+    client_entity_id: str = "lock.x",
+) -> logic.RouteAction:
+    return logic.RouteAction(
+        kind=kind,
+        node_id=node_id,
+        repeaters=list(repeaters or []),
+        route_speed=None,
+        client_entity_id=client_entity_id,
+    )
+
+
+def _make_api_result(message: str) -> bridge.ApiResult:
+    return bridge.ApiResult(
+        success=False,
+        message=message,
+        api_echo=None,
+        result=None,
+    )
+
+
+class TestApiNotification:
+    def test_title_plain(self) -> None:
+        notif = handler._api_notification(
+            "zrm__", "automation.zrm", "connection refused"
+        )
+        assert notif.title == "Z-Wave Route Manager: API unavailable"
+
+    def test_brackets_escaped(self) -> None:
+        notif = handler._api_notification(
+            "zrm__", "automation.zrm", "bad response: [foo]"
+        )
+        assert "bad response: \\[foo\\]" in notif.message
+        assert "bad response: [foo]" not in notif.message
+
+    def test_inactive_when_error_empty(self) -> None:
+        # Empty error string yields an inactive notification --
+        # ``api_unavailable`` notifications are dismissed by
+        # passing through an empty error rather than building
+        # a separate dismiss spec.
+        notif = handler._api_notification("zrm__", "automation.zrm", "")
+        assert notif.active is False
+
+
+class TestApplyNotification:
+    def test_title_includes_node_id(self) -> None:
+        notif = handler._apply_notification(
+            "zrm__",
+            "automation.zrm",
+            _make_action(node_id=42),
+            _make_api_result("timeout"),
+        )
+        assert notif.title == "Z-Wave Route Manager: apply failed for node 42"
+
+    def test_server_response_brackets_escaped(self) -> None:
+        notif = handler._apply_notification(
+            "zrm__",
+            "automation.zrm",
+            _make_action(),
+            _make_api_result("ack [partial]"),
+        )
+        assert "Server response: ack \\[partial\\]" in notif.message
+        assert "Server response: ack [partial]" not in notif.message
+
+    def test_id_keyed_to_node(self) -> None:
+        notif = handler._apply_notification(
+            "zrm__",
+            "automation.zrm",
+            _make_action(node_id=17),
+            _make_api_result("oops"),
+        )
+        assert notif.notification_id == "zrm__apply_17"
+
+
+class TestTimeoutNotification:
+    """Per-attempt timeout-id stability + body content."""
+
+    def test_id_per_attempt(self) -> None:
+        from datetime import UTC
+        from datetime import datetime as _datetime
+
+        old_ts = _datetime(2026, 4, 22, 1, 23, 45, tzinfo=UTC)
+        notif = handler._timeout_notification(
+            "zwm__",
+            "automation.zrm",
+            42,
+            logic.RouteType.PRIORITY_APP,
+            old_ts,
+            3,
+            24,
+        )
+        assert "timeout_42_priority_app" in notif.notification_id
+        assert "2026-04-22T01_23_45" in notif.notification_id
+        # User-facing message names the route type, the retry
+        # count, and the way to stop further retries.
+        assert "priority_app" in notif.message
+        assert "timeout #3" in notif.message
+        assert "Remove the device from the YAML config" in notif.message
 
 
 # --------------------------------------------------------
