@@ -371,6 +371,50 @@ async def emit_config_error(
     await process_persistent_notifications(hass, [spec])
 
 
+def instance_id_for_config_error(raw_data: dict[str, Any]) -> str:
+    """Best-effort instance_id extraction for a config-error path.
+
+    Handlers fall back to this when schema validation
+    fails before the ``instance_id`` field could be
+    parsed; the sentinel keeps the resulting
+    notification ID from colliding with a real instance.
+    """
+    candidate = raw_data.get("instance_id")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    return "unknown"
+
+
+def make_emit_config_error(
+    *,
+    service: str,
+    service_tag: str,
+) -> Callable[[HomeAssistant, str, list[str]], Awaitable[None]]:
+    """Return an ``emit_config_error`` closure bound to a port's identifiers.
+
+    Saves repeating ``service=_SERVICE,
+    service_tag=_SERVICE_TAG`` at every call site in a
+    handler. Equivalent to a `functools.partial`, but
+    typed-for-handler-callers (positional ``hass``,
+    ``instance_id``, ``errors``).
+    """
+
+    async def emit(
+        hass: HomeAssistant,
+        instance_id: str,
+        errors: list[str],
+    ) -> None:
+        await emit_config_error(
+            hass,
+            service=service,
+            service_tag=service_tag,
+            instance_id=instance_id,
+            errors=errors,
+        )
+
+    return emit
+
+
 # --------------------------------------------------------
 # Per-instance diagnostic state
 # --------------------------------------------------------

@@ -50,7 +50,6 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -67,8 +66,9 @@ from homeassistant.util import dt as dt_util
 from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
-    emit_config_error,
     format_notification,
+    instance_id_for_config_error,
+    make_emit_config_error,
     parse_notification_service,
     register_blueprint_handler,
     spec_bucket,
@@ -235,39 +235,16 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
 # --------------------------------------------------------
 
 
-def _instance_id_for_error(raw_data: dict[str, Any]) -> str:
-    """Best-effort extraction of instance_id for a config error.
-
-    If schema validation failed and the call genuinely
-    has no instance_id, fall back to a sentinel so the
-    notification ID doesn't collide with a real one.
-    """
-    candidate = raw_data.get("instance_id")
-    if isinstance(candidate, str) and candidate:
-        return candidate
-    return "unknown"
-
-
-async def _emit(
-    hass: HomeAssistant,
-    instance_id: str,
-    errors: list[str],
-) -> None:
-    """Dispatch a TEC config-error spec via the shared helper.
-
-    Wraps ``emit_config_error`` with our subsystem
-    constants so the call sites stay short. Empty
-    ``errors`` dismisses any prior config-error
-    notification for this instance, so this can be
-    called unconditionally on every successful argparse.
-    """
-    await emit_config_error(
-        hass,
-        service=_SERVICE,
-        service_tag=_SERVICE_TAG,
-        instance_id=instance_id,
-        errors=errors,
-    )
+# Per-port closure over the shared ``emit_config_error``
+# helper. Saves repeating ``service=_SERVICE,
+# service_tag=_SERVICE_TAG`` at every call site. Empty
+# ``errors`` dismisses any prior config-error
+# notification for this instance, so this can be called
+# unconditionally on every successful argparse.
+_emit = make_emit_config_error(
+    service=_SERVICE,
+    service_tag=_SERVICE_TAG,
+)
 
 
 async def _async_argparse(
@@ -287,14 +264,14 @@ async def _async_argparse(
     except vol.MultipleInvalid as err:
         await _emit(
             hass,
-            _instance_id_for_error(raw),
+            instance_id_for_config_error(raw),
             [f"schema: {sub}" for sub in err.errors],
         )
         return
     except vol.Invalid as err:
         await _emit(
             hass,
-            _instance_id_for_error(raw),
+            instance_id_for_config_error(raw),
             [f"schema: {err}"],
         )
         return

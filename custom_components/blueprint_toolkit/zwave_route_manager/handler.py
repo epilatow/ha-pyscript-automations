@@ -64,7 +64,8 @@ from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
     PersistentNotification,
-    emit_config_error,
+    instance_id_for_config_error,
+    make_emit_config_error,
     md_escape,
     process_persistent_notifications,
     register_blueprint_handler,
@@ -227,26 +228,13 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
 # --------------------------------------------------------
 
 
-def _instance_id_for_error(raw_data: dict[str, Any]) -> str:
-    candidate = raw_data.get("instance_id")
-    if isinstance(candidate, str) and candidate:
-        return candidate
-    return "unknown"
-
-
-async def _emit(
-    hass: HomeAssistant,
-    instance_id: str,
-    errors: list[str],
-) -> None:
-    """Dispatch a config-error spec via the shared helper."""
-    await emit_config_error(
-        hass,
-        service=_SERVICE,
-        service_tag=_SERVICE_TAG,
-        instance_id=instance_id,
-        errors=errors,
-    )
+# Per-port closure over the shared ``emit_config_error``
+# helper. Saves repeating ``service=_SERVICE,
+# service_tag=_SERVICE_TAG`` at every call site.
+_emit = make_emit_config_error(
+    service=_SERVICE,
+    service_tag=_SERVICE_TAG,
+)
 
 
 async def _async_argparse(
@@ -261,14 +249,14 @@ async def _async_argparse(
     except vol.MultipleInvalid as err:
         await _emit(
             hass,
-            _instance_id_for_error(raw),
+            instance_id_for_config_error(raw),
             [f"schema: {sub}" for sub in err.errors],
         )
         return
     except vol.Invalid as err:
         await _emit(
             hass,
-            _instance_id_for_error(raw),
+            instance_id_for_config_error(raw),
             [f"schema: {err}"],
         )
         return
@@ -661,13 +649,34 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     ] = {}
 
     if reconcile.actions:
-        apply_results = await _bridge_apply_actions(
+        apply_outcome = await _bridge_apply_actions(
             host,
             port,
             token,
             reconcile.actions,
             sleepy_node_ids,
         )
+        # Connect failure mid-reconcile: collapse to one
+        # api_unavailable notification rather than N
+        # per-action failure notifications.
+        if isinstance(apply_outcome, _ApplyConnectError):
+            err_msg = f"connection lost during apply: {apply_outcome.message}"
+            await process_persistent_notifications(
+                hass,
+                [_api_notification(notif_prefix, instance_id, err_msg)],
+            )
+            state.last_api_error = err_msg
+            _persist_diagnostic(
+                hass,
+                state,
+                now=now,
+                started=started,
+                current_mtime=current_mtime,
+                trigger_id=trigger_id,
+                mark_pending=True,
+            )
+            return
+        apply_results = apply_outcome
         # Per-action api_echo / success check. Mismatch
         # means zwave-js-ui can't run the write api; bail.
         mismatch = _api_echo_mismatch(apply_results)
@@ -1126,6 +1135,23 @@ class _GetNodesResult:
     error: str  # empty string on success
 
 
+@dataclass
+class _ApplyConnectError:
+    """Sentinel: bridge connect failed during the apply phase.
+
+    Returned by ``_bridge_apply_actions`` when
+    ``client.connect()`` blows up (the connection died
+    between the get_nodes call earlier this reconcile and
+    the apply call). The caller surfaces a single
+    ``api_unavailable`` notification rather than N
+    per-action ``apply_*`` notifications, since the
+    failure is a single connectivity event, not N
+    independent route-write rejections.
+    """
+
+    message: str
+
+
 def _format_bridge_exception(exc: BaseException) -> str:
     """Always include the exception class name.
 
@@ -1200,11 +1226,15 @@ async def _bridge_apply_actions(
     token: str,
     actions: list[logic.RouteAction],
     sleepy_node_ids: frozenset[int],
-) -> list[tuple[logic.RouteAction, bridge.ApiResult]]:
+) -> list[tuple[logic.RouteAction, bridge.ApiResult]] | _ApplyConnectError:
     """Apply RouteActions concurrently.
 
     Sleepy nodes get short fire-and-forget; awake nodes
-    must ACK within ``_AWAKE_APPLY_TIMEOUT``.
+    must ACK within ``_AWAKE_APPLY_TIMEOUT``. Returns
+    ``_ApplyConnectError`` if the bridge connect fails
+    between phases (e.g. addon restart mid-reconcile),
+    so the caller can collapse N per-action failures into
+    one ``api_unavailable`` notification.
     """
     timeout_excs = _bridge_timeout_excs()
 
@@ -1279,18 +1309,10 @@ async def _bridge_apply_actions(
     try:
         await client.connect()
     except timeout_excs as e:
-        # Already passed the get_nodes call this reconcile, so
-        # the connection just died between phases. Surface the
-        # error as a per-action failure so the caller can
-        # treat it like any other apply failure.
-        msg = _format_bridge_exception(e)
-        fake_result = bridge.ApiResult(
-            success=False,
-            message=msg,
-            api_echo=None,
-            result=None,
-        )
-        return [(a, fake_result) for a in actions]
+        # Bridge died between phases. Return a sentinel so
+        # the caller can surface one api_unavailable
+        # notification rather than N per-action ones.
+        return _ApplyConnectError(message=_format_bridge_exception(e))
     try:
         coros = [_one(client, a) for a in actions]
         responses = await asyncio.gather(*coros)
