@@ -1,0 +1,8 @@
+# blueprint_toolkit registers services that are intended
+# to be invoked exclusively by the integration's bundled
+# blueprints. End users configure those blueprints through
+# the HA UI; the underlying services are implementation
+# details (their schemas live in each handler.py). They
+# are not documented here -- this otherwise-empty file
+# only exists to silence HA's "Failed to load
+# services.yaml" warning at startup.
