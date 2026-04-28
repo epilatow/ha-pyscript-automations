@@ -336,7 +336,12 @@ class TestKickForRecovery:
         assert (domain, name) == ("automation", "trigger")
         assert data["entity_id"] == "automation.zrm"
         assert data["skip_condition"] is True
-        assert data["variables"] == {"trigger": {"id": "manual"}}
+        # Flat top-level variable, NOT under ``trigger.*`` --
+        # HA's automation.trigger service strips the
+        # ``trigger`` key. See _make_periodic_callback for
+        # the full reasoning.
+        assert data["variables"] == {"trigger_id": "manual"}
+        assert "trigger" not in data["variables"]
 
     def test_does_not_propagate_caller_context(self) -> None:
         # Regression guard: ``automation.trigger`` must NOT
@@ -371,12 +376,15 @@ class TestPeriodicCallback:
 
         assert len(h.services.kwargs) == 1
         assert "context" not in h.services.kwargs[0]
-        # And the trigger.id must be "periodic" so the
+        # And ``trigger_id`` must be "periodic" so the
         # service handler can distinguish integration-fired
         # ticks from manual invocations (dev tools, the
-        # restart-recovery and reload-recovery kicks).
+        # restart-recovery and reload-recovery kicks). The
+        # variable is flat (NOT nested under ``trigger.*``);
+        # HA's automation.trigger service strips that key.
         _domain, _name, data = h.services.calls[0]
-        assert data["variables"] == {"trigger": {"id": "periodic"}}
+        assert data["variables"] == {"trigger_id": "periodic"}
+        assert "trigger" not in data["variables"]
 
     def test_no_op_when_instance_state_gone(self) -> None:
         # If the automation has been removed between

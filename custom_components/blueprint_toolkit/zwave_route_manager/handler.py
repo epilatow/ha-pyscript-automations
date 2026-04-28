@@ -104,11 +104,13 @@ _DEFAULT_SPEED_VALUES = frozenset(
     {"auto", *(s.value for s in bridge.RouteSpeed)},
 )
 # trigger_id values supplied by the blueprint action:
-# - "periodic" from the integration-owned timer (we set
-#   variables={trigger:{id:"periodic"}} when firing
-#   automation.trigger from the timer)
-# - "manual" default when no trigger is set (dev tools call,
-#   restart-recovery kick, automation_reload kick)
+# - "periodic" from the integration-owned timer (we pass
+#   ``variables={"trigger_id":"periodic"}`` -- flat key,
+#   NOT under ``trigger.*`` which HA's automation.trigger
+#   service strips)
+# - "manual" default when nothing overrides (dev tools call,
+#   restart-recovery + automation_reload kicks both pass
+#   ``trigger_id="manual"`` explicitly)
 _TRIGGER_VALUES = ("periodic", "manual")
 
 
@@ -1553,13 +1555,18 @@ def _make_periodic_callback(
         # removed between scheduling and firing.
         if instance_id not in _instances(hass):
             return
+        # Override variable is flat (NOT under ``trigger.*``)
+        # because HA's automation.trigger service
+        # unconditionally clobbers the ``trigger`` key with
+        # ``{"platform": None}``. The blueprint action reads
+        # ``trigger_id`` directly.
         await hass.services.async_call(
             "automation",
             "trigger",
             {
                 "entity_id": instance_id,
                 "skip_condition": True,
-                "variables": {"trigger": {"id": "periodic"}},
+                "variables": {"trigger_id": "periodic"},
             },
         )
 
@@ -1575,14 +1582,18 @@ async def _async_kick_for_recovery(
     hass: HomeAssistant,
     entity_id: str,
 ) -> None:
-    """Fire a manual reconcile so the instance bootstraps its timer."""
+    """Fire a manual reconcile so the instance bootstraps its timer.
+
+    Override variable is flat (NOT under ``trigger.*``);
+    see ``_make_periodic_callback`` for the full reasoning.
+    """
     await hass.services.async_call(
         "automation",
         "trigger",
         {
             "entity_id": entity_id,
             "skip_condition": True,
-            "variables": {"trigger": {"id": "manual"}},
+            "variables": {"trigger_id": "manual"},
         },
     )
 

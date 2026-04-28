@@ -358,17 +358,20 @@ The blueprint has no triggers of its own -- the integration
 owns scheduling and recovery. Periodic reconciles are
 scheduled via `async_track_time_interval` keyed off the
 `reconcile_interval_minutes` input, and fire
-`automation.trigger` with `trigger.id == "periodic"`. Manual
-triggers from developer tools, the integration's
-restart-recovery kick (`EVENT_HOMEASSISTANT_STARTED`), and
-its reload-recovery kick (`EVENT_AUTOMATION_RELOADED`) all
-arrive as `trigger.id == "manual"`. The service handler's
+`automation.trigger` with the override variable
+`trigger_id == "periodic"`. Manual triggers from developer
+tools, the integration's restart-recovery kick
+(`EVENT_HOMEASSISTANT_STARTED`), and its reload-recovery
+kick (`EVENT_AUTOMATION_RELOADED`) all arrive as
+`trigger_id == "manual"` (the integration kicks pass it
+explicitly; dev-tools calls fall through to the blueprint
+action's `default('manual', true)`). The service handler's
 gate then decides whether each call warrants a full
 reconcile:
 
 | Signal | Action |
 |---|---|
-| `trigger.id == "manual"` (dev tools, startup, reload) | Reconcile |
+| `trigger_id == "manual"` (dev tools, startup, reload) | Reconcile |
 | Config file mtime changed since last run | Reconcile |
 | `now - last_reconcile > reconcile_interval_minutes` | Reconcile |
 | `reconcile_pending == true` from prior tick | Reconcile |

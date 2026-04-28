@@ -145,7 +145,13 @@ actions:
   - action: blueprint_toolkit.zwave_route_manager
     data:
       instance_id: "{{ this.entity_id }}"
-      trigger_id: "{{ trigger.id | default('manual', true) }}"
+      # All invocations are synthetic (the integration's
+      # periodic timer + restart/reload-recovery kicks);
+      # ``trigger_id`` is passed as a flat top-level
+      # variable since HA's automation.trigger service
+      # strips the ``trigger`` key from caller variables.
+      # Default covers ad-hoc dev-tools manual calls.
+      trigger_id: "{{ trigger_id | default('manual', true) }}"
       config_file_path: !input config_file_path
       zwave_js_ui_host_raw: !input zwave_js_ui_host
       zwave_js_ui_port_raw: !input zwave_js_ui_port

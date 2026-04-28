@@ -432,11 +432,14 @@ Settings -&gt; System -&gt; Logs with the tag <code>[ZRM: &lt;automation alias&g
 owns scheduling and recovery. Periodic reconciles are
 scheduled via <code>async_track_time_interval</code> keyed off the
 <code>reconcile_interval_minutes</code> input, and fire
-<code>automation.trigger</code> with <code>trigger.id == &quot;periodic&quot;</code>. Manual
-triggers from developer tools, the integration's
-restart-recovery kick (<code>EVENT_HOMEASSISTANT_STARTED</code>), and
-its reload-recovery kick (<code>EVENT_AUTOMATION_RELOADED</code>) all
-arrive as <code>trigger.id == &quot;manual&quot;</code>. The service handler's
+<code>automation.trigger</code> with the override variable
+<code>trigger_id == &quot;periodic&quot;</code>. Manual triggers from developer
+tools, the integration's restart-recovery kick
+(<code>EVENT_HOMEASSISTANT_STARTED</code>), and its reload-recovery
+kick (<code>EVENT_AUTOMATION_RELOADED</code>) all arrive as
+<code>trigger_id == &quot;manual&quot;</code> (the integration kicks pass it
+explicitly; dev-tools calls fall through to the blueprint
+action's <code>default('manual', true)</code>). The service handler's
 gate then decides whether each call warrants a full
 reconcile:</p>
 <table>
@@ -448,7 +451,7 @@ reconcile:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>trigger.id == &quot;manual&quot;</code> (dev tools, startup, reload)</td>
+<td><code>trigger_id == &quot;manual&quot;</code> (dev tools, startup, reload)</td>
 <td>Reconcile</td>
 </tr>
 <tr>
