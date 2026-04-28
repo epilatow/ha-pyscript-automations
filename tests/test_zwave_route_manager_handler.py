@@ -32,7 +32,6 @@ imports resolve) plus a small mock ``hass``.
 from __future__ import annotations
 
 import sys
-import types
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -43,64 +42,16 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
+from _handler_stubs import install_homeassistant_stubs  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
 
-# --------------------------------------------------------
-# homeassistant.* stubs so the handler module imports
-# --------------------------------------------------------
 
-_ha = types.ModuleType("homeassistant")
-_ha_components = types.ModuleType("homeassistant.components")
-_ha_components_automation = types.ModuleType(
-    "homeassistant.components.automation",
-)
-_ha_components_automation.EVENT_AUTOMATION_RELOADED = (  # type: ignore[attr-defined]
-    "automation_reloaded"
-)
-_ha_components_automation.DATA_COMPONENT = (  # type: ignore[attr-defined]
-    "automation_data_component"
-)
-_ha_config_entries = types.ModuleType("homeassistant.config_entries")
-_ha_config_entries.ConfigEntry = type(  # type: ignore[attr-defined]
-    "ConfigEntry", (), {}
-)
-_ha_const = types.ModuleType("homeassistant.const")
-_ha_const.EVENT_HOMEASSISTANT_STARTED = (  # type: ignore[attr-defined]
-    "homeassistant_started"
-)
+class _FrozenNow:
+    value = datetime(2026, 4, 27, 12, 0, 0)
 
 
-def _noop_decorator(f: Any) -> Any:
-    return f
+_stubs = install_homeassistant_stubs(frozen_now=_FrozenNow.value)
 
-
-_ha_core = types.ModuleType("homeassistant.core")
-_ha_core.callback = _noop_decorator  # type: ignore[attr-defined]
-_ha_core.HomeAssistant = type(  # type: ignore[attr-defined]
-    "HomeAssistant", (), {}
-)
-_ha_core.ServiceCall = type("ServiceCall", (), {})  # type: ignore[attr-defined]
-_ha_core.Context = type("Context", (), {})  # type: ignore[attr-defined]
-_ha_core.Event = type("Event", (), {})  # type: ignore[attr-defined]
-_ha_helpers = types.ModuleType("homeassistant.helpers")
-_ha_helpers_cv = types.ModuleType(
-    "homeassistant.helpers.config_validation",
-)
-_ha_helpers_cv.entity_id = lambda v: str(v)  # type: ignore[attr-defined]
-_ha_helpers_cv.boolean = lambda v: bool(v)  # type: ignore[attr-defined]
-_ha_helpers_cv.ensure_list = lambda v: (  # type: ignore[attr-defined]
-    list(v) if v else []
-)
-_ha_helpers_dr = types.ModuleType("homeassistant.helpers.device_registry")
-_ha_helpers_dr.async_get = lambda _hass: None  # type: ignore[attr-defined]
-_ha_helpers_er = types.ModuleType(
-    "homeassistant.helpers.entity_registry",
-)
-_ha_helpers_er.EVENT_ENTITY_REGISTRY_UPDATED = (  # type: ignore[attr-defined]
-    "entity_registry_updated"
-)
-_ha_helpers_er.async_get = lambda _hass: None  # type: ignore[attr-defined]
-_ha_helpers_event = types.ModuleType("homeassistant.helpers.event")
 # Capture every async_track_time_interval invocation; tests
 # inspect.
 _ATI_CALLS: list[tuple[timedelta, Callable[..., Any]]] = []
@@ -121,45 +72,9 @@ def _async_track_time_interval(
     return _cancel
 
 
-_ha_helpers_event.async_track_time_interval = (  # type: ignore[attr-defined]
+_stubs.event.async_track_time_interval = (  # type: ignore[attr-defined]
     _async_track_time_interval
 )
-# async_call_later isn't imported by the ZRM handler, but
-# helpers.py touches it; install a no-op stub.
-_ha_helpers_event.async_call_later = (  # type: ignore[attr-defined]
-    lambda _h, _d, _c: lambda: None
-)
-_ha_util = types.ModuleType("homeassistant.util")
-_ha_util_dt = types.ModuleType("homeassistant.util.dt")
-
-
-class _FrozenNow:
-    value = datetime(2026, 4, 27, 12, 0, 0)
-
-
-def _now() -> datetime:
-    return _FrozenNow.value
-
-
-def _utcnow() -> datetime:
-    return _FrozenNow.value
-
-
-_ha_util_dt.now = _now  # type: ignore[attr-defined]
-_ha_util_dt.utcnow = _utcnow  # type: ignore[attr-defined]
-sys.modules["homeassistant"] = _ha
-sys.modules["homeassistant.components"] = _ha_components
-sys.modules["homeassistant.components.automation"] = _ha_components_automation
-sys.modules["homeassistant.config_entries"] = _ha_config_entries
-sys.modules["homeassistant.const"] = _ha_const
-sys.modules["homeassistant.core"] = _ha_core
-sys.modules["homeassistant.helpers"] = _ha_helpers
-sys.modules["homeassistant.helpers.config_validation"] = _ha_helpers_cv
-sys.modules["homeassistant.helpers.device_registry"] = _ha_helpers_dr
-sys.modules["homeassistant.helpers.entity_registry"] = _ha_helpers_er
-sys.modules["homeassistant.helpers.event"] = _ha_helpers_event
-sys.modules["homeassistant.util"] = _ha_util
-sys.modules["homeassistant.util.dt"] = _ha_util_dt
 
 from custom_components.blueprint_toolkit.helpers import (  # noqa: E402
     make_config_error_notification,
