@@ -460,6 +460,87 @@ class TestArgparseMultilineRegex:
 
 
 # --------------------------------------------------------
+# Argparse: int-input rejection (schema-level)
+# --------------------------------------------------------
+#
+# Pre-port pyscript ``TestRwIntInputValidation`` covered
+# user-facing error messages for non-numeric and
+# out-of-range integer inputs. The native schema replaces
+# the pyscript hand-rolled validation with
+# ``vol.All(vol.Coerce(int), vol.Range(...))``; rejections
+# flow through ``vol.MultipleInvalid`` and the
+# ``schema:`` prefix in the emit-config-error call. These
+# tests recover that explicit coverage at the native API
+# surface.
+
+
+class TestArgparseIntValidation:
+    def setup_method(self) -> None:
+        # Re-use the same capture pattern
+        # ``TestArgparseMultilineRegex`` uses.
+        self.capture = _ArgparseCapture()
+        self._real_service_layer = handler._async_service_layer
+        handler._async_service_layer = self.capture  # type: ignore[assignment]
+        self.config_errors: list[list[str]] = []
+
+        async def _capture_errors(
+            _hass: Any,
+            _instance_id: str,
+            errors: list[str],
+        ) -> None:
+            self.config_errors.append(errors)
+
+        self._real_emit = handler._emit_config_error
+        handler._emit_config_error = _capture_errors  # type: ignore[assignment]
+
+    def teardown_method(self) -> None:
+        handler._async_service_layer = self._real_service_layer  # type: ignore[assignment]
+        handler._emit_config_error = self._real_emit  # type: ignore[assignment]
+
+    def test_non_numeric_check_interval_minutes_rejected(self) -> None:
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                check_interval_minutes_raw="not-a-number",
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == [], (
+            "service layer must NOT run when schema rejects an input"
+        )
+        assert len(self.config_errors) == 1
+        joined = "\n".join(self.config_errors[0])
+        assert "check_interval_minutes_raw" in joined
+        # ``vol.Coerce(int)`` produces this phrasing on
+        # bad-int input; if voluptuous changes the message
+        # in the future this assertion may need a softer
+        # match.
+        assert "expected int" in joined
+
+    def test_out_of_range_max_source_notifications_rejected(self) -> None:
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                max_source_notifications_raw=9999,
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == []
+        assert len(self.config_errors) == 1
+        joined = "\n".join(self.config_errors[0])
+        assert "max_source_notifications_raw" in joined
+        # ``vol.Range(min=0, max=1000)`` -> "value must be
+        # at most 1000".
+        assert "at most 1000" in joined
+
+
+# --------------------------------------------------------
 # Restart-recovery kick payload
 # --------------------------------------------------------
 

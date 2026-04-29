@@ -1,8 +1,6 @@
 # This is AI generated code
 """Business logic for reference-integrity watchdog.
 
-Does not use PyScript-injected globals.
-
 Scans YAML and storage JSON sources for references to Home
 Assistant entities and devices, validates them against live
 HA state, and reports broken references grouped by the
@@ -264,6 +262,13 @@ class Config:
     # the service wrapper's orphan sweep can safely scope
     # dismissals to one instance.
     notification_prefix: str = ""
+    # Automation entity_id (``automation.<slug>``). Stamped
+    # onto every active ``PersistentNotification`` this
+    # module returns so the dispatcher can prepend the
+    # ``Automation: [name](edit-link)\n`` header. Optional
+    # so that pure-Python tests (no live HA registry to
+    # resolve a friendly name) don't have to supply it.
+    instance_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -497,6 +502,14 @@ class OwnerResult:
     refs_disabled: int
     refs_broken: int
     refs_service_skipped: int
+    # Stamped at construction time (in
+    # ``_build_owner_result``) from ``Config.instance_id``
+    # so ``to_notification`` can hand the dispatcher the
+    # automation entity_id it needs to prepend the
+    # ``Automation: [name](edit-link)\n`` header. ``None``
+    # in pure-Python tests where Config carries no
+    # instance_id; the dispatcher then skips the header.
+    instance_id: str | None = None
 
     def to_notification(
         self,
@@ -507,6 +520,7 @@ class OwnerResult:
             notification_id=self.notification_id,
             title=self.notification_title,
             message=self.notification_message,
+            instance_id=self.instance_id,
         )
 
 
@@ -1568,6 +1582,7 @@ def _build_owner_result(
         refs_disabled=stats.refs_disabled,
         refs_broken=stats.refs_broken,
         refs_service_skipped=stats.refs_service_skipped,
+        instance_id=config.instance_id,
     )
 
 
@@ -2193,9 +2208,19 @@ def _build_source_orphans_notification(
 ) -> PersistentNotification:
     """One summary notification listing every orphan.
 
-    Grouped by platform, each entity ID rendered as a
-    clickable link to the entities page filtered by the
-    orphan's platform integration (see ``_orphan_url``).
+    Grouped by ``platform`` (the registry-side
+    integration that owns the entity), each entity ID
+    rendered as a clickable link to the entities page
+    filtered by the orphan's platform integration (see
+    ``_orphan_url``). The ``platform`` here is
+    intentionally NOT integration-filterable via the
+    blueprint's ``exclude_integrations`` field --
+    ``exclude_integrations`` filters the SOURCE side
+    (which owner block holds the broken reference);
+    orphans don't have a source by definition (their
+    backing definer is what's missing). To silence
+    specific orphans, use ``exclude_entities`` or
+    ``exclude_entity_regex``.
 
     When ``orphans`` is empty, an inactive notification
     is returned so a previously-active summary gets
@@ -2258,6 +2283,7 @@ def _build_source_orphans_notification(
         notification_id=nid,
         title=f"Reference watchdog: source orphans ({len(orphans)})",
         message="\n".join(lines).rstrip() + "\n",
+        instance_id=config.instance_id,
     )
 
 
@@ -2449,13 +2475,17 @@ def run_evaluation(
         ]
     )
 
-    # Build notifications.
+    # Build notifications. ``instance_id`` is threaded
+    # through so the cap-summary spec (built inside the
+    # helper) carries it; the per-owner specs are stamped
+    # at construction time in ``_build_owner_result``.
     notifications = prepare_notifications(
         results,
         max_notifications=max_notifications,
         cap_notification_id=f"{config.notification_prefix}cap",
         cap_title="Reference watchdog: notification cap reached",
         cap_item_label="owners with broken references",
+        instance_id=config.instance_id,
     )
     # The orphan summary sits outside the per-owner cap --
     # it's a single notification regardless of orphan

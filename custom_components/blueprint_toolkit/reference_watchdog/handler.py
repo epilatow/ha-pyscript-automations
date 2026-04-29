@@ -17,11 +17,14 @@ zwave_route_manager ports. RW-specific shape:
   YAML parsing, jinja AST extraction, notification
   building) runs in HA's executor via
   ``hass.async_add_executor_job(logic.run_evaluation, ...)``.
-- Two notification categories: per-owner findings (capped
-  by ``max_source_notifications`` via
-  ``helpers.prepare_notifications``) plus a single
-  source-orphans summary slot. The complete per-instance
-  notification set is sweep-dispatched via
+- Three notification slots: per-owner findings (capped by
+  ``max_source_notifications`` via
+  ``helpers.prepare_notifications``), the cap-summary slot
+  the helper always emits (active when the cap is reached,
+  inactive otherwise so a previously-active summary
+  clears), and a single source-orphans summary slot. The
+  complete per-instance notification set is
+  sweep-dispatched via
   ``process_persistent_notifications_with_sweep`` so
   prior-run notifications no longer present this run get
   cleaned up.
@@ -199,8 +202,7 @@ async def _async_argparse(
     if errors:
         return
 
-    # Parse the multi-line exclude_paths input the way
-    # pyscript did: one path per line, stripped, empty
+    # Multi-line: one path per line, stripped, empty
     # lines dropped.
     exclude_paths: list[str] = [
         p.strip() for p in data["exclude_paths_raw"].splitlines() if p.strip()
@@ -265,6 +267,7 @@ async def _async_service_layer(
         exclude_entity_regex=exclude_entity_regex,
         check_disabled_entities=check_disabled_entities,
         notification_prefix=notif_prefix,
+        instance_id=instance_id,
     )
 
     # Build the truth set on the event loop -- the

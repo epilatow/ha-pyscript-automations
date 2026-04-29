@@ -2572,6 +2572,7 @@ class TestCodeQuality(CodeQualityBase):
     ]
     mypy_targets = [
         "custom_components/blueprint_toolkit/reference_watchdog/logic.py",
+        "custom_components/blueprint_toolkit/reference_watchdog/handler.py",
     ]
 
 
