@@ -8,7 +8,8 @@ future: DW, EDW, RW, STSC, ZWRM).
 Three flavours of symbol live here:
 
 - **Pure** (no HA imports): ``format_timestamp``,
-  ``format_notification``, ``PersistentNotification``,
+  ``format_notification``, ``md_escape``, ``slugify``,
+  ``matches_pattern``, ``PersistentNotification``,
   ``make_config_error_notification``,
   ``parse_entity_registry_update``. Safe to import from
   non-HA test environments.
@@ -21,7 +22,8 @@ Three flavours of symbol live here:
 - **Lifecycle** (late-imports HA inside the function):
   ``discover_automations_using_blueprint``,
   ``register_blueprint_handler``,
-  ``unregister_blueprint_handler``. Module import still
+  ``unregister_blueprint_handler``,
+  ``schedule_periodic_with_jitter``. Module import still
   succeeds outside HA; calling these forces the late
   import.
 
@@ -45,10 +47,11 @@ in the HA persistent-notification namespace.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .const import DOMAIN
@@ -159,6 +162,55 @@ def md_escape(s: str) -> str:
             ord("]"): "\\]",
         },
     )
+
+
+# --------------------------------------------------------
+# Slugify + regex helpers (pure)
+# --------------------------------------------------------
+
+
+def slugify(text: str) -> str:
+    """Return a Home Assistant-compatible slug from ``text``.
+
+    Mirrors ``homeassistant.util.slugify(text, separator="_")``
+    for the ASCII-only common case: NFKD decomposition,
+    drop non-ASCII characters, lowercase, collapse runs of
+    non-alphanumeric characters into a single underscore,
+    and strip leading and trailing underscores. Empty input
+    returns ``""``; non-empty input that collapses to an
+    empty slug (e.g. emoji-only, punctuation-only) returns
+    ``"unknown"``, matching HA's fallback.
+    """
+    import re  # noqa: PLC0415
+    import unicodedata  # noqa: PLC0415
+
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", ascii_text).strip("_")
+    return slug or "unknown"
+
+
+def matches_pattern(text: str, pattern: str) -> bool:
+    """Return True if ``text`` matches the case-insensitive regex ``pattern``.
+
+    Empty pattern returns False (no match -- callers can
+    short-circuit at the call site if they want
+    "no pattern means match-all"). Invalid pattern returns
+    False rather than raising; callers that need to
+    surface invalid regex errors should validate the
+    pattern explicitly at config-parse time via
+    ``re.compile``.
+    """
+    import re  # noqa: PLC0415
+
+    if not pattern:
+        return False
+    try:
+        return bool(re.search(pattern, text, re.IGNORECASE))
+    except re.error:
+        return False
 
 
 # --------------------------------------------------------
@@ -876,6 +928,92 @@ async def recover_at_startup(
                 entity_id,
                 e,
             )
+
+
+# --------------------------------------------------------
+# Periodic scheduling with per-instance jitter
+# --------------------------------------------------------
+
+
+def schedule_periodic_with_jitter(
+    hass: HomeAssistant,
+    *,
+    interval: timedelta,
+    instance_id: str,
+    action: Callable[[datetime], Awaitable[Any]],
+) -> Callable[[], None]:
+    """Schedule ``action`` every ``interval`` with a deterministic
+    per-instance offset.
+
+    Multiple instances sharing the same interval would
+    otherwise all fire on the exact same wall-clock tick
+    (HA boot, integration reload arms every per-instance
+    timer at the same instant). The jitter spreads them
+    across the interval window to avoid a thundering-herd
+    on shared registries / file systems / external APIs.
+
+    The offset is derived from a stable hash of
+    ``instance_id`` (preserving pyscript's algorithm:
+    first 4 bytes of SHA-1, big-endian, mod the interval
+    in seconds), so a given automation always lands on
+    the same per-interval slot across restarts -- handy
+    for log readers correlating across days. Mechanically:
+
+    1. Schedule the first call via ``async_call_later``
+       at ``now + jitter_seconds``.
+    2. When that one-shot fires, arm
+       ``async_track_time_interval`` for steady-state
+       and run ``action`` once now.
+
+    Returns a single unsubscribe callable that cancels
+    whichever timer is currently active. Imported lazily
+    to keep module import safe in non-HA test
+    environments.
+
+    ``action`` must be a coroutine function; it's invoked
+    via ``hass.async_create_task``.
+    """
+    from homeassistant.core import callback  # noqa: PLC0415
+    from homeassistant.helpers.event import (  # noqa: PLC0415
+        async_call_later,
+        async_track_time_interval,
+    )
+
+    interval_seconds = max(1, int(interval.total_seconds()))
+    digest = hashlib.sha1(instance_id.encode("utf-8")).digest()
+    jitter_seconds = int.from_bytes(digest[:4], "big") % interval_seconds
+
+    # Single-slot mutable holder so the unsub closure can
+    # see whichever timer is currently armed (initial
+    # one-shot or steady-state interval).
+    cancel_holder: dict[str, Callable[[], None] | None] = {"current": None}
+
+    @callback  # type: ignore[untyped-decorator]
+    def _on_first_fire(now: datetime) -> None:
+        # The one-shot fired and HA already removed it.
+        # Arm the steady-state tracker before kicking off
+        # the action so an early teardown still cancels
+        # subsequent ticks.
+        cancel_holder["current"] = async_track_time_interval(
+            hass,
+            action,
+            interval,
+        )
+        hass.async_create_task(action(now))
+
+    cancel_holder["current"] = async_call_later(
+        hass,
+        jitter_seconds,
+        _on_first_fire,
+    )
+
+    def _unsub() -> None:
+        cur = cancel_holder["current"]
+        if cur is not None:
+            cur()
+            cancel_holder["current"] = None
+
+    return _unsub
 
 
 # --------------------------------------------------------

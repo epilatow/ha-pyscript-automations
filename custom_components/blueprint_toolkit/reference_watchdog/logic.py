@@ -120,9 +120,15 @@ from collections.abc import Callable, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 
-import helpers
 import jinja2
 import jinja2.nodes
+
+from ..helpers import (
+    PersistentNotification,
+    matches_pattern,
+    md_escape,
+    prepare_notifications,
+)
 
 _JINJA_ENV = jinja2.Environment(autoescape=False)
 
@@ -495,8 +501,8 @@ class OwnerResult:
     def to_notification(
         self,
         suppress: bool = False,
-    ) -> helpers.PersistentNotification:
-        return helpers.PersistentNotification(
+    ) -> PersistentNotification:
+        return PersistentNotification(
             active=self.has_issue and not suppress,
             notification_id=self.notification_id,
             title=self.notification_title,
@@ -757,7 +763,7 @@ def _is_entity_excluded(
     """
     if value in exclude_list:
         return True
-    if exclude_regex and helpers.matches_pattern(value, exclude_regex):
+    if exclude_regex and matches_pattern(value, exclude_regex):
         return True
     return False
 
@@ -1439,7 +1445,7 @@ def _build_notification_body(
     actively misleading.
     """
     lines: list[str] = []
-    header_label = helpers.md_escape(_owner_header_label(owner))
+    header_label = md_escape(_owner_header_label(owner))
     if owner.url_path:
         header = f"Owner: [{header_label}]({owner.url_path})"
     else:
@@ -1646,10 +1652,9 @@ def _evaluate_sources(
 # -- YAML source discovery ----------------------------------------------
 #
 # These functions handle YAML file parsing and include-
-# following for source discovery. They are called via
-# @pyscript_executor (native Python in a worker thread)
-# but must still follow PyScript AST constraints since
-# the module is loaded by PyScript's evaluator.
+# following for source discovery. They run in HA's
+# executor thread (via ``hass.async_add_executor_job``)
+# because they do blocking file I/O.
 
 # Relative path -> source_type dispatch key.
 _DEDICATED_SOURCE_TYPES: dict[str, str] = {
@@ -2185,7 +2190,7 @@ def _orphan_url(platform: str) -> str:
 def _build_source_orphans_notification(
     config: Config,
     orphans: list[SourceOrphan],
-) -> helpers.PersistentNotification:
+) -> PersistentNotification:
     """One summary notification listing every orphan.
 
     Grouped by platform, each entity ID rendered as a
@@ -2198,7 +2203,7 @@ def _build_source_orphans_notification(
     """
     nid = _source_orphans_notification_id(config)
     if not orphans:
-        return helpers.PersistentNotification(
+        return PersistentNotification(
             active=False,
             notification_id=nid,
             title="",
@@ -2242,13 +2247,13 @@ def _build_source_orphans_notification(
         ]
         plat_label = platform or "(no platform)"
         url = _orphan_url(platform)
-        lines.append(f"**{helpers.md_escape(plat_label)}** ({len(entries)}):")
+        lines.append(f"**{md_escape(plat_label)}** ({len(entries)}):")
         for o in entries:
             tag = " *(disabled)*" if o.disabled else ""
             lines.append(f"- [`{o.entity_id}`]({url}){tag}")
         lines.append("")
 
-    return helpers.PersistentNotification(
+    return PersistentNotification(
         active=True,
         notification_id=nid,
         title=f"Reference watchdog: source orphans ({len(orphans)})",
@@ -2355,7 +2360,7 @@ class EvaluationResult:
     """
 
     results: list[OwnerResult]
-    notifications: list[helpers.PersistentNotification]
+    notifications: list[PersistentNotification]
     paths_included: int
     paths_excluded: int
     owners_total: int
@@ -2391,9 +2396,9 @@ def run_evaluation(
 
     The caller (service wrapper) is responsible for:
     - Building the truth set (requires HA registries,
-      must run on the main thread)
-    - Processing the returned notifications (PyScript
-      service calls, must run on the main thread)
+      must run on the event loop)
+    - Processing the returned notifications (HA service
+      calls, must run on the event loop)
     - Saving state attributes
     """
     yaml_sources = _discover_yaml_sources(config_dir)
@@ -2444,13 +2449,13 @@ def run_evaluation(
         ]
     )
 
-    # Build notifications
-    notifications = helpers.prepare_notifications(
+    # Build notifications.
+    notifications = prepare_notifications(
         results,
-        max_notifications,
-        f"{config.notification_prefix}cap",
-        "Reference watchdog: notification cap reached",
-        "owners with broken references",
+        max_notifications=max_notifications,
+        cap_notification_id=f"{config.notification_prefix}cap",
+        cap_title="Reference watchdog: notification cap reached",
+        cap_item_label="owners with broken references",
     )
     # The orphan summary sits outside the per-owner cap --
     # it's a single notification regardless of orphan
@@ -2461,49 +2466,32 @@ def run_evaluation(
         _build_source_orphans_notification(config, orphans),
     )
 
-    # Compute stats (list comprehensions, not generators --
-    # PyScript bans generators in all pyscript/ files).
+    # Compute summary stats.
     owners_total = len(results)
-    owners_with_refs = sum(
-        [1 for r in results if r.refs_total > 0],
-    )
-    owners_without_refs = sum(
-        [1 for r in results if r.refs_total == 0],
-    )
-    owners_with_issues = sum(
-        [1 for r in results if r.has_issue],
-    )
-    total_findings = sum(
-        [len(r.findings) for r in results],
-    )
+    owners_with_refs = sum(1 for r in results if r.refs_total > 0)
+    owners_without_refs = sum(1 for r in results if r.refs_total == 0)
+    owners_with_issues = sum(1 for r in results if r.has_issue)
+    total_findings = sum(len(r.findings) for r in results)
     broken_entity_count = sum(
-        [
-            1
-            for r in results
-            for f in r.findings
-            if not f.disabled and f.ref.kind == "entity"
-        ],
+        1
+        for r in results
+        for f in r.findings
+        if not f.disabled and f.ref.kind == "entity"
     )
     broken_device_count = sum(
-        [
-            1
-            for r in results
-            for f in r.findings
-            if not f.disabled and f.ref.kind == "device"
-        ],
+        1
+        for r in results
+        for f in r.findings
+        if not f.disabled and f.ref.kind == "device"
     )
     disabled_entity_count = sum(
-        [1 for r in results for f in r.findings if f.disabled],
+        1 for r in results for f in r.findings if f.disabled
     )
-    refs_total = sum([r.refs_total for r in results])
-    refs_structural = sum(
-        [r.refs_structural for r in results],
-    )
-    refs_jinja = sum([r.refs_jinja for r in results])
-    refs_sniff = sum([r.refs_sniff for r in results])
-    refs_service_skipped = sum(
-        [r.refs_service_skipped for r in results],
-    )
+    refs_total = sum(r.refs_total for r in results)
+    refs_structural = sum(r.refs_structural for r in results)
+    refs_jinja = sum(r.refs_jinja for r in results)
+    refs_sniff = sum(r.refs_sniff for r in results)
+    refs_service_skipped = sum(r.refs_service_skipped for r in results)
 
     return EvaluationResult(
         results=results,

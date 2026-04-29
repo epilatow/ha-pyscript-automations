@@ -242,9 +242,9 @@ order is effectively random. The same owners are shown
 
 Three complementary mechanisms run in parallel over
 every parsed source tree. The module-level docstring
-in `pyscript/modules/reference_watchdog.py` documents
-the strategy in detail; the summary below is for
-quickly sanity-checking the stat attributes.
+in `custom_components/blueprint_toolkit/reference_watchdog/logic.py`
+documents the strategy in detail; the summary below is
+for quickly sanity-checking the stat attributes.
 
 1. **Structural walk.** Dict keys in `_ENTITY_KEYS`
    (`entity`, `entity_id`, `entities`, `source`,
@@ -288,10 +288,10 @@ broken-entity false positive.
 ### Entity attributes
 
 After each evaluation, attributes are written to
-`pyscript.<automation-name>_state` (e.g.,
-`pyscript.automation_reference_watchdog_state`). Search
-for `pyscript.*_state` in **Developer Tools > States**
-to find it.
+`blueprint_toolkit.reference_watchdog_<slug>_state` (e.g.,
+`blueprint_toolkit.reference_watchdog_reference_watchdog_state`).
+Search for `blueprint_toolkit.reference_watchdog_*` in
+**Developer Tools > States** to find it.
 
 | Attribute | Meaning |
 |---|---|
@@ -360,7 +360,8 @@ The `.storage/<helper>` file set is a closed list of
 known UI-helper storage files. Adding a new HA-core
 helper that uses a `.storage/<name>` file means adding
 its filename to `_STORAGE_HELPER_DEFINER_FILES` in
-`pyscript/modules/reference_watchdog.py`. A missing
+`custom_components/blueprint_toolkit/reference_watchdog/logic.py`.
+A missing
 entry produces systematic false positives for that
 platform; an extra entry that doesn't exist on a given
 host is a no-op.
