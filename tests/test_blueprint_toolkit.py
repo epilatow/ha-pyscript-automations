@@ -4731,58 +4731,6 @@ class TestEdwDevicelessIntegrationFilterPropagation:
         assert env.deviceless_target_integrations == {"zwave_js"}
 
 
-def _rw_call(env: _WatchdogEnv, **overrides: Any) -> None:
-    """Invoke the reference_watchdog service wrapper with defaults."""
-    defaults: dict[str, Any] = {
-        "instance_id": "auto.rw_test",
-        "trigger_platform_raw": "state",
-        "exclude_paths_raw": "",
-        "exclude_integrations_raw": [],
-        "exclude_entities_raw": [],
-        "exclude_entity_regex_raw": "",
-        "check_disabled_entities_raw": "false",
-        "check_interval_minutes_raw": "1",
-        "max_source_notifications_raw": "0",
-        "debug_logging_raw": "false",
-    }
-    defaults.update(overrides)
-    import asyncio
-
-    asyncio.run(
-        env._ns["reference_watchdog_blueprint_entrypoint"](**defaults),
-    )
-
-
-class TestRwIntInputValidation:
-    """RW rejects non-numeric / out-of-range int inputs."""
-
-    def test_non_numeric_check_interval_notifies(self) -> None:
-        env = _WatchdogEnv()
-        _rw_call(env, check_interval_minutes_raw="not-a-number")
-        config_errors = [
-            c
-            for c in env.mock_pn.create_calls
-            if "Invalid" in c.get("title", "")
-        ]
-        assert len(config_errors) == 1
-        msg = config_errors[0]["message"]
-        assert "check_interval_minutes" in msg
-        assert "must be an integer" in msg
-
-    def test_out_of_range_max_notifications_notifies(self) -> None:
-        env = _WatchdogEnv()
-        _rw_call(env, max_source_notifications_raw="9999")
-        config_errors = [
-            c
-            for c in env.mock_pn.create_calls
-            if "Invalid" in c.get("title", "")
-        ]
-        assert len(config_errors) == 1
-        msg = config_errors[0]["message"]
-        assert "max_source_notifications" in msg
-        assert "must be between 0 and 1000" in msg
-
-
 class TestImportBan:
     """Ban ``from <our_module> import X`` in wrapper + logic modules.
 
@@ -4803,7 +4751,6 @@ class TestImportBan:
             "helpers",
             "device_watchdog",
             "entity_defaults_watchdog",
-            "reference_watchdog",
             "sensor_threshold_switch_controller",
             "trigger_entity_controller",
             "zwave_route_manager",
@@ -5378,7 +5325,6 @@ class TestPyScriptCompatibility:
                 "helpers",
                 "device_watchdog",
                 "entity_defaults_watchdog",
-                "reference_watchdog",
                 "sensor_threshold_switch_controller",
                 "trigger_entity_controller",
                 "zwave_route_manager",
@@ -5444,7 +5390,6 @@ class TestPyScriptCompatibility:
                 "helpers",
                 "device_watchdog",
                 "entity_defaults_watchdog",
-                "reference_watchdog",
                 "sensor_threshold_switch_controller",
                 "trigger_entity_controller",
                 "zwave_route_manager",

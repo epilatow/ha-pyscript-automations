@@ -41,7 +41,7 @@ import sys
 import types
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +73,53 @@ _ha_helpers_er = types.ModuleType(
     "homeassistant.helpers.entity_registry",
 )
 _ha_helpers_er.EVENT_ENTITY_REGISTRY_UPDATED = "entity_registry_updated"  # type: ignore[attr-defined]
+# ``homeassistant.helpers.event`` exposes the timer
+# primitives ``schedule_periodic_with_jitter`` late-imports.
+# The schedule helper's tests reach in via the
+# ``_track_calls`` / ``_call_later_calls`` capture lists
+# below (each registration appends; each unsub records its
+# index).
+_ha_helpers_event = types.ModuleType("homeassistant.helpers.event")
+_track_calls: list[tuple[Any, Any, Any]] = []
+_track_cancel_calls: list[int] = []
+_call_later_calls: list[tuple[Any, Any, Any]] = []
+_call_later_cancel_calls: list[int] = []
+
+
+def _async_track_time_interval(
+    _hass: Any,
+    cb: Any,
+    interval: Any,
+) -> Any:
+    handle_index = len(_track_calls)
+    _track_calls.append((interval, cb, _hass))
+
+    def _cancel() -> None:
+        _track_cancel_calls.append(handle_index)
+
+    return _cancel
+
+
+def _async_call_later(
+    _hass: Any,
+    delay: Any,
+    cb: Any,
+) -> Any:
+    handle_index = len(_call_later_calls)
+    _call_later_calls.append((delay, cb, _hass))
+
+    def _cancel() -> None:
+        _call_later_cancel_calls.append(handle_index)
+
+    return _cancel
+
+
+_ha_helpers_event.async_track_time_interval = (  # type: ignore[attr-defined]
+    _async_track_time_interval
+)
+_ha_helpers_event.async_call_later = (  # type: ignore[attr-defined]
+    _async_call_later
+)
 sys.modules["homeassistant"] = _ha
 sys.modules["homeassistant.components"] = _ha_components
 sys.modules["homeassistant.components.automation"] = _ha_components_automation
@@ -80,6 +127,7 @@ sys.modules["homeassistant.const"] = _ha_const
 sys.modules["homeassistant.core"] = _ha_core
 sys.modules["homeassistant.helpers"] = _ha_helpers
 sys.modules["homeassistant.helpers.entity_registry"] = _ha_helpers_er
+sys.modules["homeassistant.helpers.event"] = _ha_helpers_event
 
 from custom_components.blueprint_toolkit import helpers  # noqa: E402
 from custom_components.blueprint_toolkit.const import DOMAIN  # noqa: E402
@@ -1122,11 +1170,19 @@ class TestListenerDispatch:
         # initial recovery task at registration. Reset
         # before exercising the listener so we count only
         # the reload-triggered one.
-        hass.tasks.clear()
+        entry.background_tasks.clear()
         listener = hass.bus.listeners["automation_reloaded"][0]
         listener(_MockEvent(data={}))
         assert on_reload_calls == [True]
-        assert len(hass.tasks) == 1
+        # Reload-triggered recovery is entry-scoped (matches
+        # the startup-recovery branch) so an entry unload
+        # racing the reload cancels the in-flight task.
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 1
+        name, _coro = entry.background_tasks[0]
+        assert name == (
+            "blueprint_toolkit_trigger_entity_controller_reload_recover"
+        )
 
 
 # --------------------------------------------------------
@@ -1139,6 +1195,397 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     for item in items:
         if asyncio.iscoroutinefunction(getattr(item, "function", None)):
             item.add_marker(pytest.mark.asyncio)
+
+
+# --------------------------------------------------------
+# Pure helpers (slugify + matches_pattern)
+# --------------------------------------------------------
+#
+# ``test_helpers.py`` covers the pyscript copy of these.
+# These tests cover the native ports lifted into
+# ``custom_components/blueprint_toolkit/helpers.py``.
+
+
+class TestSlugify:
+    def test_basic(self) -> None:
+        assert helpers.slugify("Hello World") == "hello_world"
+
+    def test_collapses_runs_of_non_alphanum(self) -> None:
+        assert helpers.slugify("a---b   c") == "a_b_c"
+
+    def test_strips_leading_trailing_underscores(self) -> None:
+        assert helpers.slugify("  __foo__  ") == "foo"
+
+    def test_drops_non_ascii(self) -> None:
+        # NFKD-decomposed accented chars get stripped.
+        assert helpers.slugify("Café") == "cafe"
+        assert helpers.slugify("naive") == "naive"
+
+    def test_empty_returns_empty(self) -> None:
+        assert helpers.slugify("") == ""
+
+    def test_collapses_to_unknown(self) -> None:
+        # Punctuation-only / emoji-only collapse to the
+        # HA-fallback sentinel.
+        assert helpers.slugify("!!!") == "unknown"
+        assert helpers.slugify("\U0001f600") == "unknown"
+
+    def test_lowercase(self) -> None:
+        assert helpers.slugify("ABC") == "abc"
+
+
+class TestMatchesPattern:
+    def test_simple_match(self) -> None:
+        assert helpers.matches_pattern("foo.bar", "foo")
+
+    def test_case_insensitive(self) -> None:
+        assert helpers.matches_pattern("FOO", "foo")
+        assert helpers.matches_pattern("foo", "FOO")
+
+    def test_substring_via_search(self) -> None:
+        # Regex.search semantics: anchored matching not
+        # required.
+        assert helpers.matches_pattern("prefix-foo-suffix", "foo")
+
+    def test_no_match(self) -> None:
+        assert not helpers.matches_pattern("foo", "bar")
+
+    def test_empty_pattern_returns_false(self) -> None:
+        # Documented behaviour: callers handle "no
+        # pattern means match-all" themselves if they
+        # want it.
+        assert not helpers.matches_pattern("anything", "")
+
+    def test_invalid_regex_returns_false(self) -> None:
+        # Unbalanced bracket -> re.error. Returns False
+        # rather than raising; callers that need to
+        # surface invalid-regex errors validate at
+        # config-parse time.
+        assert not helpers.matches_pattern("foo", "[unclosed")
+
+
+# --------------------------------------------------------
+# validate_and_join_regex_patterns
+# --------------------------------------------------------
+
+
+class TestValidateAndJoinRegexPatterns:
+    """Multi-line regex-input handling for blueprint
+    fields like RW's ``exclude_entity_regex`` (and DW /
+    EDW's ``device_exclude_regex`` /
+    ``entity_id_exclude_regex`` / ``entity_name_exclude_regex``).
+
+    Pre-port pyscript had this in
+    ``_validate_and_join_patterns``; the original RW
+    native port lost it and re-implemented argparse with
+    a single ``re.compile()`` -- which silently fails on
+    multi-line input because the whole string (newline
+    chars and all) gets fed to the regex engine. This
+    suite covers the regression.
+    """
+
+    def test_single_line_passes_through(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "sensor\\.foo",
+            "exclude_entity_regex",
+        )
+        assert joined == "sensor\\.foo"
+        assert errors == []
+
+    def test_multiline_joined_with_pipe(self) -> None:
+        # The bug the user hit: multiple patterns on
+        # separate lines must combine into a single
+        # alternation regex.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "sensor\\.loft_humidifier_energy\nsensor\\.office_humidifier_energy",
+            "exclude_entity_regex",
+        )
+        assert errors == []
+        assert (
+            joined == "sensor\\.loft_humidifier_energy"
+            "|sensor\\.office_humidifier_energy"
+        )
+
+    def test_joined_pattern_actually_matches_each_line(self) -> None:
+        # End-to-end: feed the joined pattern back through
+        # ``matches_pattern`` and verify both inputs match.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "sensor\\.loft_humidifier_energy\n"
+            "sensor\\.office_humidifier_energy",
+            "exclude_entity_regex",
+        )
+        assert errors == []
+        assert helpers.matches_pattern("sensor.loft_humidifier_energy", joined)
+        assert helpers.matches_pattern(
+            "sensor.office_humidifier_energy", joined
+        )
+        # And a non-matching entity is correctly NOT
+        # matched -- the bug-fix shouldn't accidentally
+        # turn this into a match-everything regex.
+        assert not helpers.matches_pattern("sensor.bedroom_temperature", joined)
+
+    def test_empty_lines_skipped(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "\n  \nfoo\n\n",
+            "exclude_entity_regex",
+        )
+        assert joined == "foo"
+        assert errors == []
+
+    def test_invalid_pattern_per_line_error(self) -> None:
+        # One invalid line drops out; valid neighbours
+        # still get joined.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "valid.*\n[invalid\nalso_valid",
+            "exclude_entity_regex",
+        )
+        assert len(errors) == 1
+        assert "[invalid" in errors[0]
+        assert "exclude_entity_regex" in errors[0]
+        # Valid lines get joined; the invalid one is
+        # excluded but error surfaced.
+        assert "valid" in joined
+        assert "also_valid" in joined
+        assert "[invalid" not in joined
+
+    def test_match_all_pattern_rejected(self) -> None:
+        # ``.*`` matches every entity; rejecting it stops
+        # the user accidentally turning the field into a
+        # match-everything filter.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            ".*",
+            "exclude_entity_regex",
+        )
+        assert joined == ""
+        assert len(errors) == 1
+        assert "matches empty string" in errors[0]
+
+    def test_match_empty_via_alternation_rejected(self) -> None:
+        # ``|||||`` is the canonical "all alternatives are
+        # empty" pattern -- also matches everything.
+        _joined, errors = helpers.validate_and_join_regex_patterns(
+            "|||||",
+            "exclude_entity_regex",
+        )
+        assert any("matches empty string" in e for e in errors)
+
+    def test_match_empty_via_optional_rejected(self) -> None:
+        # ``a?`` matches "" too.
+        _joined, errors = helpers.validate_and_join_regex_patterns(
+            "a?",
+            "exclude_entity_regex",
+        )
+        assert any("matches empty string" in e for e in errors)
+
+    def test_empty_input_returns_empty(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "",
+            "exclude_entity_regex",
+        )
+        assert joined == ""
+        assert errors == []
+
+    def test_only_whitespace_returns_empty(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "  \n\t\n   ",
+            "exclude_entity_regex",
+        )
+        assert joined == ""
+        assert errors == []
+
+
+# --------------------------------------------------------
+# schedule_periodic_with_jitter
+# --------------------------------------------------------
+
+
+def _reset_timer_capture() -> None:
+    _track_calls.clear()
+    _track_cancel_calls.clear()
+    _call_later_calls.clear()
+    _call_later_cancel_calls.clear()
+
+
+class TestSchedulePeriodicWithJitter:
+    def test_arms_async_call_later_with_jittered_delay(self) -> None:
+        _reset_timer_capture()
+        hass = _MockHass()
+        entry = _MockEntry()
+
+        async def _action(_now: Any) -> None:
+            return
+
+        helpers.schedule_periodic_with_jitter(
+            hass,  # type: ignore[arg-type]
+            entry,
+            interval=timedelta(minutes=5),
+            instance_id="automation.test_a",
+            action=_action,
+        )
+
+        # Initial schedule is via async_call_later, not
+        # async_track_time_interval -- the steady-state
+        # tracker is armed only after the one-shot fires.
+        assert len(_call_later_calls) == 1
+        assert _track_calls == []
+
+        delay, _cb, _hass = _call_later_calls[0]
+        # 5 min = 300s, jitter is in [0, 300).
+        assert isinstance(delay, int)
+        assert 0 <= delay < 300
+
+    def test_jitter_is_deterministic_per_instance(self) -> None:
+        _reset_timer_capture()
+        hass = _MockHass()
+        entry = _MockEntry()
+
+        async def _action(_now: Any) -> None:
+            return
+
+        # Two registrations with the same instance_id must
+        # produce the same jitter (stable hash).
+        helpers.schedule_periodic_with_jitter(
+            hass,  # type: ignore[arg-type]
+            entry,
+            interval=timedelta(minutes=5),
+            instance_id="automation.same",
+            action=_action,
+        )
+        helpers.schedule_periodic_with_jitter(
+            hass,  # type: ignore[arg-type]
+            entry,
+            interval=timedelta(minutes=5),
+            instance_id="automation.same",
+            action=_action,
+        )
+        assert _call_later_calls[0][0] == _call_later_calls[1][0]
+
+    def test_jitter_differs_across_instances(self) -> None:
+        _reset_timer_capture()
+        hass = _MockHass()
+        entry = _MockEntry()
+
+        async def _action(_now: Any) -> None:
+            return
+
+        # 5-minute interval gives 300 distinct slots; a
+        # handful of distinct instance_ids should hit
+        # multiple slots. We assert >=2 distinct values to
+        # confirm jitter actually varies.
+        for instance_id in (
+            "automation.a",
+            "automation.b",
+            "automation.c",
+            "automation.d",
+            "automation.e",
+            "automation.f",
+        ):
+            helpers.schedule_periodic_with_jitter(
+                hass,  # type: ignore[arg-type]
+                entry,
+                interval=timedelta(minutes=5),
+                instance_id=instance_id,
+                action=_action,
+            )
+        delays = {call[0] for call in _call_later_calls}
+        assert len(delays) >= 2, (
+            f"jitter should vary across instances; got {delays}"
+        )
+
+    def test_unsub_before_first_fire_cancels_call_later(self) -> None:
+        _reset_timer_capture()
+        hass = _MockHass()
+        entry = _MockEntry()
+
+        async def _action(_now: Any) -> None:
+            return
+
+        unsub = helpers.schedule_periodic_with_jitter(
+            hass,  # type: ignore[arg-type]
+            entry,
+            interval=timedelta(minutes=5),
+            instance_id="automation.cancel",
+            action=_action,
+        )
+        unsub()
+        # Cancelling before the one-shot fired must cancel
+        # the async_call_later handle (index 0).
+        assert _call_later_cancel_calls == [0]
+        # And no steady-state timer should have been armed.
+        assert _track_calls == []
+
+    def test_first_fire_arms_track_time_interval(self) -> None:
+        _reset_timer_capture()
+        hass = _MockHass()
+        entry = _MockEntry()
+
+        invoked: list[Any] = []
+
+        async def _action(now: Any) -> None:
+            invoked.append(now)
+
+        helpers.schedule_periodic_with_jitter(
+            hass,  # type: ignore[arg-type]
+            entry,
+            interval=timedelta(minutes=5),
+            instance_id="automation.fire",
+            action=_action,
+        )
+        # Pull the registered one-shot callback and fire it
+        # synchronously, simulating HA's
+        # ``async_call_later`` dispatch.
+        _delay, on_first_fire, _hass = _call_later_calls[0]
+        fake_now = datetime(2026, 4, 28, 23, 0, 0)
+        on_first_fire(fake_now)
+
+        # Steady-state tracker now armed for subsequent
+        # ticks. The tracked callback is a sync wrapper
+        # (not ``_action`` directly) so every tick routes
+        # through ``entry.async_create_background_task``
+        # rather than HA's internal ``hass.async_create_task``.
+        assert len(_track_calls) == 1
+        interval, tracked_cb, _ = _track_calls[0]
+        assert interval == timedelta(minutes=5)
+        assert tracked_cb is not _action
+        # First-call action scheduled via
+        # ``entry.async_create_background_task`` so an entry
+        # unload mid-tick cancels it.
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 1
+        name, _coro = entry.background_tasks[0]
+        assert name == "blueprint_toolkit_periodic_tick_automation.fire"
+
+        # Firing the tracked callback (steady-state tick)
+        # also routes through the entry, not hass.
+        tracked_cb(datetime(2026, 4, 28, 23, 5, 0))
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 2
+
+    def test_unsub_after_first_fire_cancels_track(self) -> None:
+        _reset_timer_capture()
+        hass = _MockHass()
+        entry = _MockEntry()
+
+        async def _action(_now: Any) -> None:
+            return
+
+        unsub = helpers.schedule_periodic_with_jitter(
+            hass,  # type: ignore[arg-type]
+            entry,
+            interval=timedelta(minutes=5),
+            instance_id="automation.late_unsub",
+            action=_action,
+        )
+        # Fire the one-shot.
+        _delay, on_first_fire, _hass = _call_later_calls[0]
+        on_first_fire(datetime(2026, 4, 28, 23, 0, 0))
+        # Now the steady-state tracker is the active timer.
+        unsub()
+        assert _track_cancel_calls == [0]
+        # And the original ``async_call_later`` was NOT
+        # cancelled a second time -- HA already auto-removed
+        # it when it fired.
+        assert _call_later_cancel_calls == []
 
 
 # --------------------------------------------------------

@@ -51,13 +51,14 @@ NOOP_RESTART = "echo restart-stub"
 # wrapper loaded" signal. The native integration handlers
 # (Trigger Entity Controller at
 # ``blueprint_toolkit.trigger_entity_controller``, Z-Wave
-# Route Manager at ``blueprint_toolkit.zwave_route_manager``)
-# are NOT pyscript entrypoints and so don't appear here.
+# Route Manager at ``blueprint_toolkit.zwave_route_manager``,
+# Reference Watchdog at
+# ``blueprint_toolkit.reference_watchdog``) are NOT pyscript
+# entrypoints and so don't appear here.
 EXPECTED_SERVICES = frozenset(
     {
         "device_watchdog_blueprint_entrypoint",
         "entity_defaults_watchdog_blueprint_entrypoint",
-        "reference_watchdog_blueprint_entrypoint",
         "sensor_threshold_switch_controller_blueprint_entrypoint",
     },
 )

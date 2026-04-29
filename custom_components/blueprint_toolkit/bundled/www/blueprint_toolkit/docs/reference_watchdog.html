@@ -345,9 +345,9 @@ order is effectively random. The same owners are shown
 <h3>Detection mechanisms</h3>
 <p>Three complementary mechanisms run in parallel over
 every parsed source tree. The module-level docstring
-in <code>pyscript/modules/reference_watchdog.py</code> documents
-the strategy in detail; the summary below is for
-quickly sanity-checking the stat attributes.</p>
+in <code>custom_components/blueprint_toolkit/reference_watchdog/logic.py</code>
+documents the strategy in detail; the summary below is
+for quickly sanity-checking the stat attributes.</p>
 <ol>
 <li><strong>Structural walk.</strong> Dict keys in <code>_ENTITY_KEYS</code>
 (<code>entity</code>, <code>entity_id</code>, <code>entities</code>, <code>source</code>,
@@ -386,10 +386,10 @@ this backstop, every <code>notification_service: notify.mobile_app_*</code> blue
 broken-entity false positive.</p>
 <h3>Entity attributes</h3>
 <p>After each evaluation, attributes are written to
-<code>pyscript.&lt;automation-name&gt;_state</code> (e.g.,
-<code>pyscript.automation_reference_watchdog_state</code>). Search
-for <code>pyscript.*_state</code> in <strong>Developer Tools &gt; States</strong>
-to find it.</p>
+<code>blueprint_toolkit.reference_watchdog_&lt;slug&gt;_state</code> (e.g.,
+<code>blueprint_toolkit.reference_watchdog_reference_watchdog_state</code>).
+Search for <code>blueprint_toolkit.reference_watchdog_*</code> in
+<strong>Developer Tools &gt; States</strong> to find it.</p>
 <table>
 <thead>
 <tr>
@@ -537,7 +537,8 @@ are still being customized.</p>
 known UI-helper storage files. Adding a new HA-core
 helper that uses a <code>.storage/&lt;name&gt;</code> file means adding
 its filename to <code>_STORAGE_HELPER_DEFINER_FILES</code> in
-<code>pyscript/modules/reference_watchdog.py</code>. A missing
+<code>custom_components/blueprint_toolkit/reference_watchdog/logic.py</code>.
+A missing
 entry produces systematic false positives for that
 platform; an extra entry that doesn't exist on a given
 host is a no-op.</p>

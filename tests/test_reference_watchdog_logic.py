@@ -20,12 +20,11 @@ import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 
-_SCRIPT_PATH = REPO_ROOT / "pyscript" / "modules" / "reference_watchdog.py"
-
-sys.path.insert(0, str(_SCRIPT_PATH.parent))
+sys.path.insert(0, str(REPO_ROOT))
 
 from conftest import CodeQualityBase  # noqa: E402
-from reference_watchdog import (  # noqa: E402
+
+from custom_components.blueprint_toolkit.reference_watchdog.logic import (  # noqa: E402, E501
     SEED_DOMAINS,
     Config,
     Finding,
@@ -2566,15 +2565,16 @@ class TestIntegrationUxInvariant:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/modules/reference_watchdog.py",
-        "tests/test_reference_watchdog.py",
+        "custom_components/blueprint_toolkit/reference_watchdog/__init__.py",
+        "custom_components/blueprint_toolkit/reference_watchdog/handler.py",
+        "custom_components/blueprint_toolkit/reference_watchdog/logic.py",
+        "tests/test_reference_watchdog_logic.py",
     ]
     mypy_targets = [
-        "pyscript/modules/reference_watchdog.py",
+        "custom_components/blueprint_toolkit/reference_watchdog/logic.py",
+        "custom_components/blueprint_toolkit/reference_watchdog/handler.py",
     ]
 
 
 if __name__ == "__main__":
-    from conftest import run_tests
-
-    run_tests(__file__, _SCRIPT_PATH, REPO_ROOT)
+    sys.exit(pytest.main([__file__, "-v", *sys.argv[1:]]))

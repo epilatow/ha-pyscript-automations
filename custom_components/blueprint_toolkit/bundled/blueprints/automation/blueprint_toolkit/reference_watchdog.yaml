@@ -135,15 +135,20 @@ blueprint:
       selector:
         boolean: {}
 
-triggers:
-  - trigger: time_pattern
-    minutes: "/1"
+triggers: []
 
 actions:
-  - action: pyscript.reference_watchdog_blueprint_entrypoint
+  - action: blueprint_toolkit.reference_watchdog
     data:
       instance_id: "{{ this.entity_id }}"
-      trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"
+      # Synthetic invocations from the integration
+      # (periodic timer, restart-recovery + reload-
+      # recovery kicks) pass ``trigger_id`` as a flat
+      # top-level variable since HA's automation.trigger
+      # service strips the ``trigger`` key from caller
+      # variables. Default covers ad-hoc dev-tools manual
+      # calls.
+      trigger_id: "{{ trigger_id | default('manual', true) }}"
       exclude_paths_raw: !input exclude_paths
       exclude_integrations_raw: !input exclude_integrations
       exclude_entities_raw: !input exclude_entities
@@ -153,7 +158,16 @@ actions:
       max_source_notifications_raw: !input max_source_notifications
       debug_logging_raw: !input debug_logging
 
-# Triggers every minute but most invocations exit
-# immediately (interval gate). If a real evaluation
-# overlaps the next tick, dropping it is fine.
+# Periodic scans, restart recovery, and reload recovery
+# are all owned by the integration -- no blueprint-side
+# triggers needed. The integration's
+# schedule_periodic_with_jitter handles the periodic
+# cadence (interval = the check_interval_minutes input,
+# with a per-instance jitter offset so multiple watchdog
+# instances don't collide on shared intervals);
+# recover_at_startup kicks every discovered automation
+# on EVENT_HOMEASSISTANT_STARTED and again on
+# EVENT_AUTOMATION_RELOADED. Manual triggers (dev tools,
+# the integration's restart-recovery kick) reach the
+# action via automation.trigger directly.
 mode: single

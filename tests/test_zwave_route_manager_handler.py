@@ -43,7 +43,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
 from _handler_stubs import install_homeassistant_stubs  # noqa: E402
-from conftest import CodeQualityBase  # noqa: E402
+from conftest import (  # noqa: E402
+    BlueprintSchemaDriftBase,
+    CodeQualityBase,
+)
 
 
 class _FrozenNow:
@@ -625,72 +628,12 @@ class TestTimeoutNotification:
 # Schema vs blueprint drift
 # --------------------------------------------------------
 
-import voluptuous as vol  # noqa: E402
-import yaml  # noqa: E402
 
-
-class _PermissiveBlueprintLoader(yaml.SafeLoader):
-    """SafeLoader that ignores the ``!input`` tag.
-
-    Blueprint YAML uses ``!input <name>`` to interpolate
-    inputs at load time; under PyYAML's SafeLoader that's an
-    unrecognised tag and load() raises. The test only cares
-    about the keys, so the tag value just becomes a marker.
-    """
-
-
-def _passthrough_tag(_loader: Any, _suffix: str, node: Any) -> Any:
-    if isinstance(node, yaml.ScalarNode):
-        return f"!input:{node.value}"
-    return None
-
-
-_PermissiveBlueprintLoader.add_multi_constructor("!input", _passthrough_tag)
-
-
-def _required_keys(schema: vol.Schema) -> set[str]:
-    return {
-        str(k.schema)
-        for k in schema.schema  # type: ignore[attr-defined]
-        if isinstance(k, vol.Required)
-    }
-
-
-class TestBlueprintSchemaDrift:
+class TestBlueprintSchemaDrift(BlueprintSchemaDriftBase):
     """The blueprint's ``data:`` keys must match the schema."""
 
-    def _load_blueprint(self) -> dict[str, Any]:
-        bp_path = (
-            REPO_ROOT
-            / "custom_components"
-            / "blueprint_toolkit"
-            / (
-                "bundled/blueprints/automation/blueprint_toolkit/"
-                "zwave_route_manager.yaml"
-            )
-        )
-        text = bp_path.read_text()
-        loaded = yaml.load(text, Loader=_PermissiveBlueprintLoader)
-        assert isinstance(loaded, dict)
-        return loaded
-
-    def test_yaml_data_keys_match_schema_required_keys(self) -> None:
-        bp = self._load_blueprint()
-        actions = bp["actions"]
-        assert isinstance(actions, list) and actions
-        action = actions[0]
-        data_keys = set(action["data"].keys())
-        schema_keys = _required_keys(handler._SCHEMA)
-        assert data_keys == schema_keys, (
-            f"blueprint vs schema mismatch:\n"
-            f"  in blueprint, not schema: {sorted(data_keys - schema_keys)}\n"
-            f"  in schema, not blueprint: {sorted(schema_keys - data_keys)}"
-        )
-
-    def test_blueprint_action_targets_registered_service(self) -> None:
-        bp = self._load_blueprint()
-        action = bp["actions"][0]
-        assert action["action"] == f"blueprint_toolkit.{handler._SERVICE}"
+    handler = handler
+    blueprint_filename = "zwave_route_manager.yaml"
 
 
 class TestCodeQuality(CodeQualityBase):

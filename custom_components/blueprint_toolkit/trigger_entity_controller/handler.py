@@ -68,13 +68,13 @@ from ..helpers import (
     BlueprintHandlerSpec,
     automation_friendly_name,
     format_notification,
-    instance_id_for_config_error,
     make_emit_config_error,
     parse_notification_service,
     register_blueprint_handler,
     spec_bucket,
     unregister_blueprint_handler,
     update_instance_state,
+    validate_payload_or_emit_config_error,
 )
 from . import logic
 
@@ -255,26 +255,16 @@ async def _async_argparse(
     """Validate the call, build a Config, dispatch to the service layer."""
     raw = dict(call.data)
 
-    # --- Schema validation (field shape / type / range) ---
-    # vol.MultipleInvalid carries all collected errors in
-    # ``.errors``; ``str()`` on it returns only the first,
-    # which would hide every key after the first failure.
-    # Iterate so the user sees every problem at once.
-    try:
-        data = _SCHEMA(raw)
-    except vol.MultipleInvalid as err:
-        await _emit_config_error(
-            hass,
-            instance_id_for_config_error(raw),
-            [f"schema: {sub}" for sub in err.errors],
-        )
-        return
-    except vol.Invalid as err:
-        await _emit_config_error(
-            hass,
-            instance_id_for_config_error(raw),
-            [f"schema: {err}"],
-        )
+    # Schema validation: shape / type / range, with all
+    # collected errors surfaced (``vol.MultipleInvalid``)
+    # rather than just the first.
+    data = await validate_payload_or_emit_config_error(
+        hass,
+        raw,
+        _SCHEMA,
+        _emit_config_error,
+    )
+    if data is None:
         return
 
     instance_id: str = data["instance_id"]
