@@ -244,6 +244,33 @@ class TestSetupEntry:
         }
         assert destinations == expected
 
+    async def test_setup_registers_native_services(self, hass) -> None:  # noqa: ANN001
+        # Coverage parity with the docker test's
+        # ``EXPECTED_SERVICES`` check (which only covers
+        # pyscript blueprint entrypoints) -- here we assert
+        # the native handlers register their services on
+        # ``async_setup_entry``. Catches a service that's
+        # silently dropped from ``__init__.py``'s setup hook
+        # (or whose handler module fails to expose a callable
+        # ``async_register``) without each handler suite
+        # having to assert it independently.
+        entry = _mock_config_entry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        expected = {
+            "trigger_entity_controller",
+            "zwave_route_manager",
+            "reference_watchdog",
+        }
+        registered = set(hass.services.async_services().get(DOMAIN, {}))
+        missing = expected - registered
+        assert not missing, (
+            f"native handler services not registered after setup: "
+            f"{sorted(missing)}"
+        )
+
 
 class TestDocsStaticRoute:
     async def test_setup_serves_rendered_docs_at_local_url(
