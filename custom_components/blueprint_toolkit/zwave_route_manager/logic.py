@@ -26,10 +26,13 @@ Two Z-Wave routes managed per configured client:
 See ``docs/zwave_route_manager.md`` for user-facing docs.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from operator import attrgetter
 
 from . import bridge
 
@@ -46,7 +49,7 @@ class ClientSpec:
     """
 
     entity_id: str
-    route_speed: "bridge.RouteSpeed | None" = None
+    route_speed: bridge.RouteSpeed | None = None
 
 
 @dataclass
@@ -54,7 +57,7 @@ class RouteEntry:
     """One repeater + its clients, from the YAML config."""
 
     repeater_entity_id: str
-    route_speed: "bridge.RouteSpeed | None" = None
+    route_speed: bridge.RouteSpeed | None = None
     clients: list[ClientSpec] = field(default_factory=list)
 
 
@@ -243,7 +246,7 @@ class RouteAction:
     kind: RouteActionKind
     node_id: bridge.NodeID
     repeaters: list[bridge.NodeID]
-    route_speed: "bridge.RouteSpeed | None"
+    route_speed: bridge.RouteSpeed | None
     client_entity_id: str
 
 
@@ -304,7 +307,7 @@ class RouteRequest:
 
     type: RouteType
     repeater_node_ids: list[bridge.NodeID]
-    speed: "bridge.RouteSpeed | None"
+    speed: bridge.RouteSpeed | None
     requested_at: datetime | None = None
     confirmed_at: datetime | None = None
     timeout_count: int = 0
@@ -510,7 +513,7 @@ def is_bridge_timeout_error(error: object) -> bool:
 # -- Parsing -----------------------------------------------------
 
 
-_ROUTE_SPEED_STRINGS: "dict[str, bridge.RouteSpeed | None]" = {
+_ROUTE_SPEED_STRINGS: dict[str, bridge.RouteSpeed | None] = {
     "auto": None,
     "9600": bridge.RouteSpeed.RATE_9600,
     "40k": bridge.RouteSpeed.RATE_40K,
@@ -529,7 +532,7 @@ _ROUTE_SPEED_INTS: dict[int, bridge.RouteSpeed] = {
 def parse_route_speed_value(
     raw: object,
     location: str,
-) -> "tuple[bridge.RouteSpeed | None, ConfigError | None]":
+) -> tuple[bridge.RouteSpeed | None, ConfigError | None]:
     """Parse a ``route_speed`` value from the YAML.
 
     Returns (resolved_speed_or_none, error_or_none). A missing
@@ -854,8 +857,8 @@ _SPEED_ORDINAL: dict[bridge.RouteSpeed, int] = {
 
 
 def _min_speed(
-    speeds: "list[bridge.RouteSpeed | None]",
-) -> "bridge.RouteSpeed | None":
+    speeds: list[bridge.RouteSpeed | None],
+) -> bridge.RouteSpeed | None:
     """Slowest speed across ``speeds``, or None if indeterminate.
 
     Returns ``None`` if the list is empty OR if any entry is
@@ -863,26 +866,20 @@ def _min_speed(
     max rate; a single unknown hop invalidates the result
     because an over-optimistic pick would fail to transmit.
     """
-    if not speeds:
+    if not speeds or any(s is None for s in speeds):
         return None
-    if any(s is None for s in speeds):
-        return None
-    # All non-None by the check above. Help mypy: narrow via
-    # explicit cast-by-reconstruction.
+    # All non-None by the check above. The list comprehension
+    # narrows the element type for mypy.
     concrete: list[bridge.RouteSpeed] = [s for s in speeds if s is not None]
-    best = concrete[0]
-    for s in concrete[1:]:
-        if _SPEED_ORDINAL[s] < _SPEED_ORDINAL[best]:
-            best = s
-    return best
+    return min(concrete, key=_SPEED_ORDINAL.__getitem__)
 
 
 def resolve_speed(
-    client_speed: "bridge.RouteSpeed | None",
-    entry_speed: "bridge.RouteSpeed | None",
-    default_speed: "bridge.RouteSpeed | None",
-    auto_fallback: "bridge.RouteSpeed | None",
-) -> "bridge.RouteSpeed | None":
+    client_speed: bridge.RouteSpeed | None,
+    entry_speed: bridge.RouteSpeed | None,
+    default_speed: bridge.RouteSpeed | None,
+    auto_fallback: bridge.RouteSpeed | None,
+) -> bridge.RouteSpeed | None:
     """Apply the route_speed precedence chain.
 
     Most-specific wins. If nothing is explicit, fall back to
@@ -898,7 +895,7 @@ def resolve_speed(
 
 def resolve_entities(
     config: Config,
-    default_route_speed: "bridge.RouteSpeed | None",
+    default_route_speed: bridge.RouteSpeed | None,
     entity_to_resolution: dict[str, DeviceResolution],
     controller: DeviceResolution,
 ) -> tuple[list[ResolvedRoute], list[ConfigError]]:
@@ -1096,8 +1093,8 @@ def _route_tuple(
 
 
 def _routes_equal(
-    a: "tuple[list[bridge.NodeID], bridge.RouteSpeed | None] | None",
-    b: "tuple[list[bridge.NodeID], bridge.RouteSpeed | None] | None",
+    a: tuple[list[bridge.NodeID], bridge.RouteSpeed | None] | None,
+    b: tuple[list[bridge.NodeID], bridge.RouteSpeed | None] | None,
 ) -> bool:
     """Compare two route tuples by value.
 
@@ -1144,44 +1141,52 @@ def _current_matches_desired(
     return list(cur_reps) == list(des_reps)
 
 
-def _current_route_for_type(
-    ni: bridge.NodeInfo,
-    route_type: RouteType,
-) -> tuple[list[bridge.NodeID], bridge.RouteSpeed] | None:
-    """Return the node's current route tuple for ``route_type``."""
-    if route_type == RouteType.PRIORITY_APP:
-        return ni.application_route
-    return ni.priority_suc_return_route
+# Per-RouteType dispatch tables. Each one must have an entry
+# for every member of RouteType; the assertions below catch a
+# missing entry at module load when a new route type is added.
+_NODE_ROUTE_GETTERS: dict[
+    RouteType,
+    attrgetter[tuple[list[bridge.NodeID], bridge.RouteSpeed] | None],
+] = {
+    RouteType.PRIORITY_APP: attrgetter("application_route"),
+    RouteType.PRIORITY_SUC: attrgetter("priority_suc_return_route"),
+}
 
+_SET_ACTION_KIND_FOR_TYPE: dict[RouteType, RouteActionKind] = {
+    RouteType.PRIORITY_APP: RouteActionKind.SET_APPLICATION_ROUTE,
+    RouteType.PRIORITY_SUC: RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE,
+}
 
-def _action_kind_for_type(route_type: RouteType) -> RouteActionKind:
-    """Return the bridge action kind that writes ``route_type``."""
-    if route_type == RouteType.PRIORITY_APP:
-        return RouteActionKind.SET_APPLICATION_ROUTE
-    return RouteActionKind.SET_PRIORITY_SUC_RETURN_ROUTE
+_CLEAR_ACTION_KIND_FOR_TYPE: dict[RouteType, RouteActionKind] = {
+    RouteType.PRIORITY_APP: RouteActionKind.CLEAR_APPLICATION_ROUTE,
+    RouteType.PRIORITY_SUC: RouteActionKind.CLEAR_PRIORITY_SUC_RETURN_ROUTES,
+}
 
+# Inverse of the two tables above: every RouteActionKind maps
+# back to the RouteType it operates on (set + clear collapse to
+# the same type). Built programmatically so adding a route type
+# only requires updating the forward tables above.
+_TYPE_FOR_ACTION_KIND: dict[RouteActionKind, RouteType] = {
+    **{kind: t for t, kind in _SET_ACTION_KIND_FOR_TYPE.items()},
+    **{kind: t for t, kind in _CLEAR_ACTION_KIND_FOR_TYPE.items()},
+}
 
-def _clear_action_kind_for_type(route_type: RouteType) -> RouteActionKind:
-    """Return the bridge action kind that clears ``route_type``."""
-    if route_type == RouteType.PRIORITY_APP:
-        return RouteActionKind.CLEAR_APPLICATION_ROUTE
-    return RouteActionKind.CLEAR_PRIORITY_SUC_RETURN_ROUTES
+assert _NODE_ROUTE_GETTERS.keys() == set(RouteType)
+assert _SET_ACTION_KIND_FOR_TYPE.keys() == set(RouteType)
+assert _CLEAR_ACTION_KIND_FOR_TYPE.keys() == set(RouteType)
+assert _TYPE_FOR_ACTION_KIND.keys() == set(RouteActionKind)
 
 
 def type_for_action_kind(kind: RouteActionKind) -> RouteType:
     """Return the route direction a given action operates on.
 
-    Inverse of :func:`_action_kind_for_type` /
-    :func:`_clear_action_kind_for_type`: both the set and clear
+    Inverse of ``_SET_ACTION_KIND_FOR_TYPE`` /
+    ``_CLEAR_ACTION_KIND_FOR_TYPE``: both the set and clear
     kinds for a direction collapse back to the same RouteType.
     Public because the service wrapper needs this to classify
     failed apply results back to a route direction.
     """
-    if kind == RouteActionKind.SET_APPLICATION_ROUTE:
-        return RouteType.PRIORITY_APP
-    if kind == RouteActionKind.CLEAR_APPLICATION_ROUTE:
-        return RouteType.PRIORITY_APP
-    return RouteType.PRIORITY_SUC
+    return _TYPE_FOR_ACTION_KIND[kind]
 
 
 def _find_path(
@@ -1189,10 +1194,7 @@ def _find_path(
     route_type: RouteType,
 ) -> RouteRequest | None:
     """Return the path of ``route_type`` from ``paths``, if any."""
-    for p in paths:
-        if p.type == route_type:
-            return p
-    return None
+    return next((p for p in paths if p.type == route_type), None)
 
 
 def diff_and_plan(
@@ -1247,7 +1249,7 @@ def diff_and_plan(
         node_applied: list[RouteRequest] = []
 
         for route_type in MANAGED_ROUTE_TYPES:
-            current = _current_route_for_type(ni, route_type)
+            current = _NODE_ROUTE_GETTERS[route_type](ni)
             matches = _current_matches_desired(
                 current,
                 desired_tuple,
@@ -1328,7 +1330,7 @@ def diff_and_plan(
                 new_count = prior_pending.timeout_count + 1
                 result.actions.append(
                     RouteAction(
-                        kind=_action_kind_for_type(route_type),
+                        kind=_SET_ACTION_KIND_FOR_TYPE[route_type],
                         node_id=node_id,
                         repeaters=list(route.repeater_node_ids),
                         route_speed=route.route_speed,
@@ -1364,7 +1366,7 @@ def diff_and_plan(
             # for this route type with timeout_count=0.
             result.actions.append(
                 RouteAction(
-                    kind=_action_kind_for_type(route_type),
+                    kind=_SET_ACTION_KIND_FOR_TYPE[route_type],
                     node_id=node_id,
                     repeaters=list(route.repeater_node_ids),
                     route_speed=route.route_speed,
@@ -1394,7 +1396,7 @@ def diff_and_plan(
             node_pending_clears: list[RouteRequest] = []
 
             for route_type in MANAGED_ROUTE_TYPES:
-                current = _current_route_for_type(ni, route_type)
+                current = _NODE_ROUTE_GETTERS[route_type](ni)
                 if current is None:
                     # Already cleared; nothing to do, nothing
                     # to track.
@@ -1430,7 +1432,7 @@ def diff_and_plan(
                     new_count = prior_pending.timeout_count + 1
                     result.actions.append(
                         RouteAction(
-                            kind=_clear_action_kind_for_type(route_type),
+                            kind=_CLEAR_ACTION_KIND_FOR_TYPE[route_type],
                             node_id=node_id,
                             repeaters=[],
                             route_speed=None,
@@ -1462,7 +1464,7 @@ def diff_and_plan(
                 # stale set). Emit a fresh clear.
                 result.actions.append(
                     RouteAction(
-                        kind=_clear_action_kind_for_type(route_type),
+                        kind=_CLEAR_ACTION_KIND_FOR_TYPE[route_type],
                         node_id=node_id,
                         repeaters=[],
                         route_speed=None,
