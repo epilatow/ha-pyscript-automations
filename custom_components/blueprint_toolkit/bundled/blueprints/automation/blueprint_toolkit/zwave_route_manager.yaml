@@ -139,19 +139,19 @@ blueprint:
       selector:
         boolean: {}
 
-triggers:
-  - trigger: time_pattern
-    minutes: "/1"
-    id: periodic
-  - trigger: homeassistant
-    event: start
-    id: ha_start
+triggers: []
 
 actions:
-  - action: pyscript.zwave_route_manager_blueprint_entrypoint
+  - action: blueprint_toolkit.zwave_route_manager
     data:
       instance_id: "{{ this.entity_id }}"
-      trigger_id: "{{ trigger.id | default('manual', true) }}"
+      # All invocations are synthetic (the integration's
+      # periodic timer + restart/reload-recovery kicks);
+      # ``trigger_id`` is passed as a flat top-level
+      # variable since HA's automation.trigger service
+      # strips the ``trigger`` key from caller variables.
+      # Default covers ad-hoc dev-tools manual calls.
+      trigger_id: "{{ trigger_id | default('manual', true) }}"
       config_file_path: !input config_file_path
       zwave_js_ui_host_raw: !input zwave_js_ui_host
       zwave_js_ui_port_raw: !input zwave_js_ui_port
@@ -163,8 +163,14 @@ actions:
       max_notifications_raw: !input max_notifications
       debug_logging_raw: !input debug_logging
 
-# Time-pattern fires every minute; an internal gate in the
-# service wrapper decides whether the tick warrants a full
-# reconcile. If one reconcile overlaps the next tick, the
-# newer one is dropped (mode: single).
+# Periodic reconciles, restart recovery, and reload
+# recovery are all owned by the integration -- no
+# blueprint-side triggers needed. The integration's
+# async_track_time_interval handles the periodic cadence
+# (interval = the reconcile_interval_minutes input);
+# recover_at_startup kicks every discovered automation
+# on EVENT_HOMEASSISTANT_STARTED and again on
+# EVENT_AUTOMATION_RELOADED. Manual triggers (dev tools,
+# the integration's restart-recovery kick) reach the
+# action via automation.trigger directly.
 mode: single

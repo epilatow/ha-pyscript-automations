@@ -3,15 +3,14 @@
 
 Isolated shim around the zwave-js-ui HTTP/socket.io API for
 managing Z-Wave priority application routes and priority SUC
-return routes. Imported by the ``zwave_route_manager`` service
-wrapper; never imported by the logic module, keeping the logic
-module free of socket.io and network dependencies.
+return routes. Imported by the ``zwave_route_manager`` handler;
+never imported by the logic module, keeping the logic module
+free of socket.io and network dependencies.
 
-``socketio`` imports are deferred into function bodies so the
-module can load under PyScript's AST evaluator (used for test
-compatibility) even when ``python-socketio`` is not installed in
-the local test environment. At runtime inside HA Core's Python
-environment, ``socketio`` is preinstalled.
+``socketio`` imports are deferred into function bodies so this
+module can be imported in test environments that don't have
+``python-socketio`` installed. At runtime inside HA Core's
+Python environment, ``socketio`` is preinstalled.
 
 Migration target: when zwave-js-server ships schema 47 (merged
 upstream 2026-03-10 but not yet released as of writing) and
@@ -46,14 +45,10 @@ class RouteSpeed(Enum):
 
 # Wire mapping used by zwave-js core / zwave-js-ui.
 # ``routeSpeed`` field values in ZWAVE_API request/response.
-# Keyed by the enum's ``.value`` string rather than the enum
-# instance: PyScript re-creates enum instances across the
-# AST / native-Python boundary, breaking enum-identity
-# lookups. String keys are stable.
-_SPEED_TO_WIRE: dict[str, int] = {
-    RouteSpeed.RATE_9600.value: 1,
-    RouteSpeed.RATE_40K.value: 2,
-    RouteSpeed.RATE_100K.value: 3,
+_SPEED_TO_WIRE: dict[RouteSpeed, int] = {
+    RouteSpeed.RATE_9600: 1,
+    RouteSpeed.RATE_40K: 2,
+    RouteSpeed.RATE_100K: 3,
 }
 
 _WIRE_TO_SPEED: dict[int, RouteSpeed] = {
@@ -71,26 +66,9 @@ _BPS_TO_SPEED: dict[int, RouteSpeed] = {
 }
 
 
-# Lookup by the enum's ``.value`` string. Used by the wrapper's
-# ``_zrm_speed_from_storage``: pyscript's AST evaluator wraps
-# imported modules in ``EvalLocalVar``, and iterating
-# ``bridge.RouteSpeed`` from wrapper scope raises
-# ``TypeError: 'EvalLocalVar' object is not iterable``. The
-# wrapper calls this helper instead -- native-Python function
-# call through the module attribute works, and the iteration
-# happens inside the module's own scope where ``RouteSpeed`` is
-# the raw enum class.
-_SPEED_BY_VALUE: "dict[str, RouteSpeed]" = {s.value: s for s in RouteSpeed}
-
-
-def speed_by_value(value: str) -> "RouteSpeed | None":
-    """Return the ``RouteSpeed`` whose ``.value`` equals ``value``."""
-    return _SPEED_BY_VALUE.get(value)
-
-
 def speed_to_wire(speed: RouteSpeed) -> int:
     """Convert RouteSpeed to the 1/2/3 wire integer."""
-    return _SPEED_TO_WIRE[speed.value]
+    return _SPEED_TO_WIRE[speed]
 
 
 def speed_from_wire(wire_value: int) -> RouteSpeed | None:
@@ -279,8 +257,8 @@ class ZwaveJsUiClient:
         """Open the socket.io connection.
 
         Deferred import of ``socketio`` lets the module load
-        under PyScript's AST evaluator in local test envs that
-        don't have python-socketio installed.
+        in local test envs that don't have python-socketio
+        installed.
         """
         import socketio  # noqa: PLC0415
 

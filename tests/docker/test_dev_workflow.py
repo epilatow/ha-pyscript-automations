@@ -46,19 +46,19 @@ DEV_INSTALL_REL = "scripts/dev-install.py"
 # over ssh so the value just has to be a noop on the host.
 NOOP_RESTART = "echo restart-stub"
 
-# The five blueprint entrypoint services registered by
-# pyscript/blueprint_toolkit.py. Verifying all five
-# appear is our "load succeeded" signal. (Trigger Entity
-# Controller is now served by the integration's native
-# handler at ``blueprint_toolkit.trigger_entity_controller``,
-# not by a pyscript ``*_blueprint_entrypoint``.)
+# Pyscript blueprint entrypoint services that should still
+# be registered. Verifying these all appear is our "pyscript
+# wrapper loaded" signal. The native integration handlers
+# (Trigger Entity Controller at
+# ``blueprint_toolkit.trigger_entity_controller``, Z-Wave
+# Route Manager at ``blueprint_toolkit.zwave_route_manager``)
+# are NOT pyscript entrypoints and so don't appear here.
 EXPECTED_SERVICES = frozenset(
     {
         "device_watchdog_blueprint_entrypoint",
         "entity_defaults_watchdog_blueprint_entrypoint",
         "reference_watchdog_blueprint_entrypoint",
         "sensor_threshold_switch_controller_blueprint_entrypoint",
-        "zwave_route_manager_blueprint_entrypoint",
     },
 )
 

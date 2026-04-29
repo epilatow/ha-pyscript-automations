@@ -46,10 +46,10 @@ in the HA persistent-notification namespace.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .const import DOMAIN
 
@@ -257,6 +257,15 @@ async def process_persistent_notifications(
     message body so users can click through to the
     associated automation. Inactive (dismiss) specs are
     not prefixed -- nothing's being shown.
+
+    Use this bare form when the caller is touching a
+    single known notification ID (``emit_config_error``
+    is the canonical case). If the caller knows it owns
+    the *entire* per-instance notification space for this
+    run -- e.g. a reconcile pass that emits every
+    notification it expects to be visible -- use
+    ``process_persistent_notifications_with_sweep`` so
+    orphans from prior runs get dismissed.
     """
     for n in notifications:
         if n.active:
@@ -276,6 +285,95 @@ async def process_persistent_notifications(
                 "dismiss",
                 {"notification_id": n.notification_id},
             )
+
+
+def _active_notification_ids(hass: HomeAssistant) -> set[str] | None:
+    """Return all active persistent_notification IDs, or None.
+
+    HA stores live notifications at
+    ``hass.data["persistent_notification"]`` keyed by ID.
+    Returns ``None`` when that data is unavailable (test
+    contexts that stub out ``hass.data``); callers treat
+    ``None`` as "skip the orphan sweep" -- nothing to
+    sweep against.
+    """
+    try:
+        data = hass.data.get("persistent_notification", {})
+        return set(data.keys())
+    except (AttributeError, TypeError):
+        return None
+
+
+def _orphan_dismissals(
+    hass: HomeAssistant,
+    notifications: list[PersistentNotification],
+    *,
+    sweep_prefix: str,
+    keep_pattern: str | None = None,
+) -> list[PersistentNotification]:
+    """Return inactive specs for prefix-matching IDs not in ``notifications``.
+
+    Builds the dismissal list the sweep variant prepends
+    to its outgoing batch. Orphans = active IDs starting
+    with ``sweep_prefix`` that this run isn't re-emitting,
+    minus anything matching ``keep_pattern``.
+
+    ``keep_pattern`` is a substring opt-out for
+    event-stream notifications that should persist until
+    the user dismisses them. ZRM's per-attempt timeout
+    notifications (IDs containing ``__timeout_<ts>``) are
+    the canonical case: each retry is a distinct event,
+    the user wants the history.
+    """
+    active_ids = _active_notification_ids(hass)
+    if active_ids is None:
+        return []
+    current_ids = {n.notification_id for n in notifications}
+    orphans: list[PersistentNotification] = []
+    for nid in active_ids:
+        if not nid.startswith(sweep_prefix) or nid in current_ids:
+            continue
+        if keep_pattern is not None and keep_pattern in nid:
+            continue
+        orphans.append(
+            PersistentNotification(
+                active=False,
+                notification_id=nid,
+                title="",
+                message="",
+            ),
+        )
+    return orphans
+
+
+async def process_persistent_notifications_with_sweep(
+    hass: HomeAssistant,
+    notifications: list[PersistentNotification],
+    *,
+    sweep_prefix: str,
+    keep_pattern: str | None = None,
+) -> None:
+    """Dispatch a batch + sweep prefix-matching orphans.
+
+    Calling contract: the caller is asserting that
+    ``notifications`` is the *complete* set of notification
+    IDs starting with ``sweep_prefix`` it expects to be
+    visible after this call. Anything currently active
+    that matches the prefix and isn't in ``notifications``
+    is dismissed (modulo ``keep_pattern`` opt-outs).
+
+    Internally builds the orphan-dismissal list and hands
+    everything off to ``process_persistent_notifications``,
+    so create/dismiss semantics + automation-link prefix
+    behavior are identical to the bare dispatcher.
+    """
+    orphans = _orphan_dismissals(
+        hass,
+        notifications,
+        sweep_prefix=sweep_prefix,
+        keep_pattern=keep_pattern,
+    )
+    await process_persistent_notifications(hass, notifications + orphans)
 
 
 # --------------------------------------------------------
@@ -369,6 +467,283 @@ async def emit_config_error(
             "; ".join(errors),
         )
     await process_persistent_notifications(hass, [spec])
+
+
+def instance_id_for_config_error(raw_data: dict[str, Any]) -> str:
+    """Best-effort instance_id extraction for a config-error path.
+
+    Handlers fall back to this when schema validation
+    fails before the ``instance_id`` field could be
+    parsed; the sentinel keeps the resulting
+    notification ID from colliding with a real instance.
+    """
+    candidate = raw_data.get("instance_id")
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    return "unknown"
+
+
+def make_emit_config_error(
+    *,
+    service: str,
+    service_tag: str,
+) -> Callable[[HomeAssistant, str, list[str]], Awaitable[None]]:
+    """Return an ``emit_config_error`` closure bound to a port's identifiers.
+
+    Saves repeating ``service=_SERVICE,
+    service_tag=_SERVICE_TAG`` at every call site in a
+    handler. Equivalent to a `functools.partial`, but
+    typed-for-handler-callers (positional ``hass``,
+    ``instance_id``, ``errors``).
+    """
+
+    async def emit(
+        hass: HomeAssistant,
+        instance_id: str,
+        errors: list[str],
+    ) -> None:
+        await emit_config_error(
+            hass,
+            service=service,
+            service_tag=service_tag,
+            instance_id=instance_id,
+            errors=errors,
+        )
+
+    return emit
+
+
+# --------------------------------------------------------
+# Notification capping + sorting (prepare_notifications)
+# --------------------------------------------------------
+
+
+@runtime_checkable
+class CappableResult(Protocol):
+    """Structural type expected by ``prepare_notifications``.
+
+    Watchdog result dataclasses naturally fit this shape:
+    they expose
+
+    - ``has_issue: bool``
+    - ``notification_id: str``
+    - ``notification_title: str``
+    - ``to_notification(suppress: bool = False) -> PersistentNotification``
+
+    Sorting uses ``(notification_title, notification_id)``
+    so the shown / suppressed split is reproducible across
+    runs. ``to_notification(suppress=True)`` MUST return an
+    inactive notification keyed to the same ID, so the
+    cap helper can dismiss prior-run notifications that
+    no longer fit under the cap.
+
+    Members are declared as ``@property`` so both
+    plain-dataclass-attribute implementations
+    (watchdogs) and property-backed wrappers
+    (``IssueNotification``) satisfy the Protocol.
+    """
+
+    @property
+    def has_issue(self) -> bool: ...
+
+    @property
+    def notification_id(self) -> str: ...
+
+    @property
+    def notification_title(self) -> str: ...
+
+    def to_notification(
+        self,
+        suppress: bool = False,
+    ) -> PersistentNotification:
+        """Return a PersistentNotification for this result."""
+        ...
+
+
+@dataclass
+class IssueNotification:
+    """Adapter: pre-built ``PersistentNotification`` -> ``CappableResult``.
+
+    For automations like ZRM that build issue
+    notifications ad hoc rather than via a watchdog-style
+    result dataclass. Always reports ``has_issue=True``;
+    on ``suppress=True`` returns an inactive notification
+    keyed to the same ID + ``instance_id``.
+    """
+
+    notification: PersistentNotification
+
+    @property
+    def has_issue(self) -> bool:
+        return True
+
+    @property
+    def notification_id(self) -> str:
+        return self.notification.notification_id
+
+    @property
+    def notification_title(self) -> str:
+        return self.notification.title
+
+    def to_notification(
+        self,
+        suppress: bool = False,
+    ) -> PersistentNotification:
+        if suppress:
+            return PersistentNotification(
+                active=False,
+                notification_id=self.notification.notification_id,
+                title="",
+                message="",
+                instance_id=self.notification.instance_id,
+            )
+        return self.notification
+
+
+def prepare_notifications(
+    results: Sequence[CappableResult],
+    *,
+    max_notifications: int,
+    cap_notification_id: str,
+    cap_title: str,
+    cap_item_label: str,
+    instance_id: str | None = None,
+) -> list[PersistentNotification]:
+    """Sort, build, and cap per-result notifications.
+
+    The "glue" between an automation's per-result
+    evaluation and the notification dispatcher.
+    Responsibilities:
+
+    1. **Sort** ``results`` by
+       ``(notification_title, notification_id)``. Each
+       caller used to sort itself; the helper does it
+       once. Deterministic ordering means the
+       shown / suppressed split below is reproducible
+       across runs.
+    2. **Cap** the issue subset. When the number of
+       has-issue results exceeds ``max_notifications``
+       (and the cap is non-zero), the first
+       ``max_notifications`` are shown in full, the rest
+       are passed through ``to_notification(suppress=True)``
+       which dismisses their stored ID, and a
+       cap-reached summary notification is appended.
+    3. **Emit clean-result notifications anyway** when
+       the cap is exceeded, so any lingering
+       notifications from a prior run where the same
+       result was in the issue partition get dismissed.
+    4. **Always emit the cap-summary slot** -- active
+       when the cap is reached, inactive otherwise --
+       so a previously-active summary gets dismissed
+       when the cap no longer applies.
+
+    Pair with ``process_persistent_notifications_with_sweep``
+    so any per-instance notifications a prior run emitted
+    that this run isn't re-emitting (e.g. result whose
+    ``has_issue`` flipped between runs and that wasn't in
+    ``results`` at all this time) get dismissed too.
+
+    Args:
+        results: Per-result objects implementing
+            ``CappableResult``. Wrap pre-built
+            notifications via ``IssueNotification`` if
+            you don't have a result dataclass.
+        max_notifications: Per-run cap; ``0`` = unlimited.
+        cap_notification_id: Persistent notification ID
+            used for the cap-summary notification. Must
+            be unique per automation instance.
+        cap_title: Title used when the cap is reached.
+        cap_item_label: Human-readable label describing
+            what's being counted, e.g.
+            ``"devices with issues"`` or
+            ``"route issues"``. Inserted into the cap
+            summary message.
+        instance_id: When set, stamped on the cap-summary
+            notification so the dispatcher's
+            ``Automation: ...`` link prefix lands on it.
+    """
+    sorted_results = [
+        r
+        for _, _, r in sorted(
+            ((r.notification_title, r.notification_id, r) for r in results),
+            key=lambda triple: (triple[0], triple[1]),
+        )
+    ]
+
+    notifications: list[PersistentNotification] = []
+    issues = [r for r in sorted_results if r.has_issue]
+
+    if max_notifications > 0 and len(issues) > max_notifications:
+        shown = issues[:max_notifications]
+        suppressed = issues[max_notifications:]
+        for r in shown:
+            notifications.append(r.to_notification())
+        for r in suppressed:
+            notifications.append(r.to_notification(suppress=True))
+        # Emit notifications for clean results so any
+        # lingering notifications from a prior run get
+        # dismissed.
+        for r in sorted_results:
+            if not r.has_issue:
+                notifications.append(r.to_notification())
+        notifications.append(
+            PersistentNotification(
+                active=True,
+                notification_id=cap_notification_id,
+                title=cap_title,
+                message=(
+                    f"Showing {max_notifications} of"
+                    f" {len(issues)} {cap_item_label}."
+                    f" {len(suppressed)} additional notifications"
+                    " were suppressed. Increase the"
+                    " notification cap or fix existing"
+                    " issues to see more."
+                ),
+                instance_id=instance_id,
+            ),
+        )
+    else:
+        for r in sorted_results:
+            notifications.append(r.to_notification())
+        # Cap slot always emitted so a previously-active
+        # summary gets dismissed when the cap no longer
+        # applies.
+        notifications.append(
+            PersistentNotification(
+                active=False,
+                notification_id=cap_notification_id,
+                title="",
+                message="",
+            ),
+        )
+    return notifications
+
+
+# --------------------------------------------------------
+# Automation friendly-name resolution (for log tags)
+# --------------------------------------------------------
+
+
+def automation_friendly_name(
+    hass: HomeAssistant,
+    instance_id: str,
+) -> str:
+    """Return the automation's user-set friendly name.
+
+    Used to build log tags like
+    ``[ZRM: Z-Wave Route Manager]`` from the canonical
+    ``automation.z_wave_route_manager`` entity_id. Falls
+    back to ``instance_id`` if the friendly_name attribute
+    isn't available (entity not yet in the state machine,
+    or test contexts without one).
+    """
+    state = hass.states.get(instance_id)
+    if state is None:
+        return instance_id
+    name = state.attributes.get("friendly_name")
+    if isinstance(name, str) and name:
+        return name
+    return instance_id
 
 
 # --------------------------------------------------------
