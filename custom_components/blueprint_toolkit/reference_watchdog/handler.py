@@ -136,6 +136,17 @@ def _instances(hass: HomeAssistant) -> dict[str, RwInstanceState]:
     return instances
 
 
+def _entry(hass: HomeAssistant) -> ConfigEntry | None:
+    """Return our integration's config entry, if any.
+
+    Single-entry integration; returns the lone entry or
+    ``None`` if the integration is not loaded. Used by
+    timer-arming to scope task lifecycle to the entry.
+    """
+    entries = hass.config_entries.async_entries(DOMAIN)
+    return entries[0] if entries else None
+
+
 # --------------------------------------------------------
 # Layer 1: entrypoint
 # --------------------------------------------------------
@@ -254,7 +265,9 @@ async def _async_service_layer(
     # Make sure the periodic timer is armed with the
     # current interval (handles first-run + interval
     # changes mid-flight).
-    _ensure_timer(hass, state, check_interval_minutes)
+    entry = _entry(hass)
+    if entry is not None:
+        _ensure_timer(hass, entry, state, check_interval_minutes)
 
     now = dt_util.now()
     notif_prefix = _notification_prefix(instance_id)
@@ -452,6 +465,7 @@ def _build_truth_set(hass: HomeAssistant) -> logic.TruthSet:
 
 def _ensure_timer(
     hass: HomeAssistant,
+    entry: ConfigEntry,
     state: RwInstanceState,
     interval_minutes: int,
 ) -> None:
@@ -464,6 +478,7 @@ def _ensure_timer(
     state.armed_interval_minutes = interval_minutes
     state.cancel_timer = schedule_periodic_with_jitter(
         hass,
+        entry,
         interval=timedelta(minutes=interval_minutes),
         instance_id=state.instance_id,
         action=_make_periodic_callback(hass, state.instance_id),

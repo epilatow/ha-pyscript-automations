@@ -235,6 +235,7 @@ class TestEnsureTimer:
 
         def _fake_schedule(
             _hass: Any,
+            entry: Any,
             *,
             interval: timedelta,
             instance_id: str,
@@ -243,6 +244,7 @@ class TestEnsureTimer:
             handle_index = len(self.calls)
             self.calls.append(
                 {
+                    "entry": entry,
                     "interval": interval,
                     "instance_id": instance_id,
                     "action": action,
@@ -263,10 +265,12 @@ class TestEnsureTimer:
     def test_first_call_arms(self) -> None:
         h = _hass_with_instances({})
         s = _make_state("automation.rw")
+        e = object()
 
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
 
         assert len(self.calls) == 1
+        assert self.calls[0]["entry"] is e
         assert self.calls[0]["interval"] == timedelta(minutes=5)
         assert self.calls[0]["instance_id"] == "automation.rw"
         assert s.armed_interval_minutes == 5
@@ -275,8 +279,9 @@ class TestEnsureTimer:
     def test_same_interval_does_not_re_arm(self) -> None:
         h = _hass_with_instances({})
         s = _make_state("automation.rw")
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
+        e = object()
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
 
         # Only one schedule call; previous timer was NOT
         # cancelled.
@@ -286,8 +291,9 @@ class TestEnsureTimer:
     def test_changed_interval_re_arms(self) -> None:
         h = _hass_with_instances({})
         s = _make_state("automation.rw")
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
-        handler._ensure_timer(h, s, 10)  # type: ignore[arg-type]
+        e = object()
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
+        handler._ensure_timer(h, e, s, 10)  # type: ignore[arg-type]
 
         # Previous unsub fired; new schedule call recorded.
         assert self.unsub_called == [0]

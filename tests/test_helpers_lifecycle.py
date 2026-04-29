@@ -1170,11 +1170,19 @@ class TestListenerDispatch:
         # initial recovery task at registration. Reset
         # before exercising the listener so we count only
         # the reload-triggered one.
-        hass.tasks.clear()
+        entry.background_tasks.clear()
         listener = hass.bus.listeners["automation_reloaded"][0]
         listener(_MockEvent(data={}))
         assert on_reload_calls == [True]
-        assert len(hass.tasks) == 1
+        # Reload-triggered recovery is entry-scoped (matches
+        # the startup-recovery branch) so an entry unload
+        # racing the reload cancels the in-flight task.
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 1
+        name, _coro = entry.background_tasks[0]
+        assert name == (
+            "blueprint_toolkit_trigger_entity_controller_reload_recover"
+        )
 
 
 # --------------------------------------------------------
@@ -1402,12 +1410,14 @@ class TestSchedulePeriodicWithJitter:
     def test_arms_async_call_later_with_jittered_delay(self) -> None:
         _reset_timer_capture()
         hass = _MockHass()
+        entry = _MockEntry()
 
         async def _action(_now: Any) -> None:
             return
 
         helpers.schedule_periodic_with_jitter(
             hass,  # type: ignore[arg-type]
+            entry,
             interval=timedelta(minutes=5),
             instance_id="automation.test_a",
             action=_action,
@@ -1427,6 +1437,7 @@ class TestSchedulePeriodicWithJitter:
     def test_jitter_is_deterministic_per_instance(self) -> None:
         _reset_timer_capture()
         hass = _MockHass()
+        entry = _MockEntry()
 
         async def _action(_now: Any) -> None:
             return
@@ -1435,12 +1446,14 @@ class TestSchedulePeriodicWithJitter:
         # produce the same jitter (stable hash).
         helpers.schedule_periodic_with_jitter(
             hass,  # type: ignore[arg-type]
+            entry,
             interval=timedelta(minutes=5),
             instance_id="automation.same",
             action=_action,
         )
         helpers.schedule_periodic_with_jitter(
             hass,  # type: ignore[arg-type]
+            entry,
             interval=timedelta(minutes=5),
             instance_id="automation.same",
             action=_action,
@@ -1450,6 +1463,7 @@ class TestSchedulePeriodicWithJitter:
     def test_jitter_differs_across_instances(self) -> None:
         _reset_timer_capture()
         hass = _MockHass()
+        entry = _MockEntry()
 
         async def _action(_now: Any) -> None:
             return
@@ -1468,6 +1482,7 @@ class TestSchedulePeriodicWithJitter:
         ):
             helpers.schedule_periodic_with_jitter(
                 hass,  # type: ignore[arg-type]
+                entry,
                 interval=timedelta(minutes=5),
                 instance_id=instance_id,
                 action=_action,
@@ -1480,12 +1495,14 @@ class TestSchedulePeriodicWithJitter:
     def test_unsub_before_first_fire_cancels_call_later(self) -> None:
         _reset_timer_capture()
         hass = _MockHass()
+        entry = _MockEntry()
 
         async def _action(_now: Any) -> None:
             return
 
         unsub = helpers.schedule_periodic_with_jitter(
             hass,  # type: ignore[arg-type]
+            entry,
             interval=timedelta(minutes=5),
             instance_id="automation.cancel",
             action=_action,
@@ -1500,6 +1517,7 @@ class TestSchedulePeriodicWithJitter:
     def test_first_fire_arms_track_time_interval(self) -> None:
         _reset_timer_capture()
         hass = _MockHass()
+        entry = _MockEntry()
 
         invoked: list[Any] = []
 
@@ -1508,6 +1526,7 @@ class TestSchedulePeriodicWithJitter:
 
         helpers.schedule_periodic_with_jitter(
             hass,  # type: ignore[arg-type]
+            entry,
             interval=timedelta(minutes=5),
             instance_id="automation.fire",
             action=_action,
@@ -1520,24 +1539,39 @@ class TestSchedulePeriodicWithJitter:
         on_first_fire(fake_now)
 
         # Steady-state tracker now armed for subsequent
-        # ticks.
+        # ticks. The tracked callback is a sync wrapper
+        # (not ``_action`` directly) so every tick routes
+        # through ``entry.async_create_background_task``
+        # rather than HA's internal ``hass.async_create_task``.
         assert len(_track_calls) == 1
         interval, tracked_cb, _ = _track_calls[0]
         assert interval == timedelta(minutes=5)
-        assert tracked_cb is _action
+        assert tracked_cb is not _action
         # First-call action scheduled via
-        # ``hass.async_create_task``.
-        assert len(hass.tasks) == 1
+        # ``entry.async_create_background_task`` so an entry
+        # unload mid-tick cancels it.
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 1
+        name, _coro = entry.background_tasks[0]
+        assert name == "blueprint_toolkit_periodic_tick_automation.fire"
+
+        # Firing the tracked callback (steady-state tick)
+        # also routes through the entry, not hass.
+        tracked_cb(datetime(2026, 4, 28, 23, 5, 0))
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 2
 
     def test_unsub_after_first_fire_cancels_track(self) -> None:
         _reset_timer_capture()
         hass = _MockHass()
+        entry = _MockEntry()
 
         async def _action(_now: Any) -> None:
             return
 
         unsub = helpers.schedule_periodic_with_jitter(
             hass,  # type: ignore[arg-type]
+            entry,
             interval=timedelta(minutes=5),
             instance_id="automation.late_unsub",
             action=_action,

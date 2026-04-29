@@ -996,6 +996,7 @@ async def recover_at_startup(
 
 def schedule_periodic_with_jitter(
     hass: HomeAssistant,
+    entry: Any,
     *,
     interval: timedelta,
     instance_id: str,
@@ -1030,7 +1031,10 @@ def schedule_periodic_with_jitter(
     environments.
 
     ``action`` must be a coroutine function; it's invoked
-    via ``hass.async_create_task``.
+    via ``entry.async_create_background_task`` so an entry
+    unload mid-tick cancels the in-flight action rather than
+    leaving it running detached against a torn-down service
+    registration.
     """
     from homeassistant.core import callback  # noqa: PLC0415
     from homeassistant.helpers.event import (  # noqa: PLC0415
@@ -1047,6 +1051,19 @@ def schedule_periodic_with_jitter(
     # one-shot or steady-state interval).
     cancel_holder: dict[str, Callable[[], None] | None] = {"current": None}
 
+    task_name = f"{DOMAIN}_periodic_tick_{instance_id}"
+
+    @callback  # type: ignore[untyped-decorator]
+    def _fire_action(now: datetime) -> None:
+        # Wrap so every tick (jittered first fire AND each
+        # steady-state tick) goes through
+        # ``entry.async_create_background_task``. Passing
+        # ``action`` directly to ``async_track_time_interval``
+        # would route subsequent ticks through HA's internal
+        # ``hass.async_create_task``, leaving them detached
+        # from entry unload.
+        entry.async_create_background_task(hass, action(now), task_name)
+
     @callback  # type: ignore[untyped-decorator]
     def _on_first_fire(now: datetime) -> None:
         # The one-shot fired and HA already removed it.
@@ -1055,10 +1072,10 @@ def schedule_periodic_with_jitter(
         # subsequent ticks.
         cancel_holder["current"] = async_track_time_interval(
             hass,
-            action,
+            _fire_action,
             interval,
         )
-        hass.async_create_task(action(now))
+        _fire_action(now)
 
     cancel_holder["current"] = async_call_later(
         hass,
@@ -1262,19 +1279,27 @@ async def register_blueprint_handler(
     # --- Reload listener (if any per-reload behaviour
     # is configured) ---
     if on_reload is not None or kick is not None:
+        reload_recover_task_name = f"{DOMAIN}_{spec.service}_reload_recover"
 
         @callback  # type: ignore[untyped-decorator]
         def _reload_listener(_event: Event) -> None:
             if on_reload is not None:
                 on_reload(hass)
             if kick is not None:
-                hass.async_create_task(
+                # Entry-scoped: matches the startup-recovery
+                # path below. Without this, an entry unload
+                # racing the reload would leave the recover
+                # task running detached against a torn-down
+                # service registration.
+                entry.async_create_background_task(
+                    hass,
                     recover_at_startup(
                         hass,
                         service_tag=spec.service_tag,
                         blueprint_path=spec.blueprint_path,
                         kick=kick,
                     ),
+                    reload_recover_task_name,
                 )
 
         unsubs.append(
