@@ -9,7 +9,8 @@ Three flavours of symbol live here:
 
 - **Pure** (no HA imports): ``format_timestamp``,
   ``format_notification``, ``md_escape``, ``slugify``,
-  ``matches_pattern``, ``PersistentNotification``,
+  ``matches_pattern``, ``validate_and_join_regex_patterns``,
+  ``PersistentNotification``,
   ``make_config_error_notification``,
   ``parse_entity_registry_update``. Safe to import from
   non-HA test environments.
@@ -211,6 +212,64 @@ def matches_pattern(text: str, pattern: str) -> bool:
         return bool(re.search(pattern, text, re.IGNORECASE))
     except re.error:
         return False
+
+
+def validate_and_join_regex_patterns(
+    raw: str,
+    field_name: str,
+) -> tuple[str, list[str]]:
+    """Split a multi-line regex-list input, validate, and join with ``|``.
+
+    Blueprint inputs that accept "one regex per line"
+    surface as a single multi-line string at the schema
+    boundary. Callers want a single combined regex they
+    can hand to ``re.search`` (or to ``matches_pattern``).
+    Joining naively with ``|`` would silently accept
+    invalid lines and fail at runtime; we want loud
+    config-time errors so the user knows which line was
+    bad.
+
+    Per-line validation:
+
+    - Empty / whitespace-only lines are skipped silently.
+    - Patterns that fail ``re.compile`` produce an error
+      bullet identifying the offending line.
+    - Patterns that match the empty string (``.*`` /
+      ``|||||`` / ``a?`` / etc.) are rejected with an
+      "matches empty string" error -- they would silently
+      exclude every entity / device / id, defeating the
+      purpose of the exclusion list.
+
+    Returns ``(joined_pattern, errors)``. ``joined_pattern``
+    is the pipe-joined alternation of every valid line
+    (empty string when no valid lines remain). ``errors``
+    is a list of ``"<field_name>: \"<line>\": <reason>"``
+    strings the caller can append to its argparse errors
+    list.
+    """
+    import re  # noqa: PLC0415
+
+    lines = [line.strip() for line in (raw or "").splitlines()]
+    valid: list[str] = []
+    errors: list[str] = []
+    for line in lines:
+        if not line:
+            continue
+        try:
+            compiled = re.compile(line)
+        except re.error as exc:
+            errors.append(f'{field_name}: "{line}": {exc}')
+            continue
+        if compiled.match(""):
+            errors.append(
+                f'{field_name}: "{line}": pattern matches empty string '
+                "(would exclude everything; tighten the pattern -- e.g. "
+                "anchor with ``^...$`` or drop the ``.*`` / ``?`` / "
+                "trailing alternation that lets it match empty)",
+            )
+            continue
+        valid.append(line)
+    return "|".join(valid), errors
 
 
 # --------------------------------------------------------

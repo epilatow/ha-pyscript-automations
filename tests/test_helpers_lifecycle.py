@@ -1257,6 +1257,136 @@ class TestMatchesPattern:
 
 
 # --------------------------------------------------------
+# validate_and_join_regex_patterns
+# --------------------------------------------------------
+
+
+class TestValidateAndJoinRegexPatterns:
+    """Multi-line regex-input handling for blueprint
+    fields like RW's ``exclude_entity_regex`` (and DW /
+    EDW's ``device_exclude_regex`` /
+    ``entity_id_exclude_regex`` / ``entity_name_exclude_regex``).
+
+    Pre-port pyscript had this in
+    ``_validate_and_join_patterns``; the original RW
+    native port lost it and re-implemented argparse with
+    a single ``re.compile()`` -- which silently fails on
+    multi-line input because the whole string (newline
+    chars and all) gets fed to the regex engine. This
+    suite covers the regression.
+    """
+
+    def test_single_line_passes_through(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "sensor\\.foo",
+            "exclude_entity_regex",
+        )
+        assert joined == "sensor\\.foo"
+        assert errors == []
+
+    def test_multiline_joined_with_pipe(self) -> None:
+        # The bug the user hit: multiple patterns on
+        # separate lines must combine into a single
+        # alternation regex.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "sensor\\.loft_humidifier_energy\nsensor\\.office_humidifier_energy",
+            "exclude_entity_regex",
+        )
+        assert errors == []
+        assert (
+            joined == "sensor\\.loft_humidifier_energy"
+            "|sensor\\.office_humidifier_energy"
+        )
+
+    def test_joined_pattern_actually_matches_each_line(self) -> None:
+        # End-to-end: feed the joined pattern back through
+        # ``matches_pattern`` and verify both inputs match.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "sensor\\.loft_humidifier_energy\n"
+            "sensor\\.office_humidifier_energy",
+            "exclude_entity_regex",
+        )
+        assert errors == []
+        assert helpers.matches_pattern("sensor.loft_humidifier_energy", joined)
+        assert helpers.matches_pattern(
+            "sensor.office_humidifier_energy", joined
+        )
+        # And a non-matching entity is correctly NOT
+        # matched -- the bug-fix shouldn't accidentally
+        # turn this into a match-everything regex.
+        assert not helpers.matches_pattern("sensor.bedroom_temperature", joined)
+
+    def test_empty_lines_skipped(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "\n  \nfoo\n\n",
+            "exclude_entity_regex",
+        )
+        assert joined == "foo"
+        assert errors == []
+
+    def test_invalid_pattern_per_line_error(self) -> None:
+        # One invalid line drops out; valid neighbours
+        # still get joined.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "valid.*\n[invalid\nalso_valid",
+            "exclude_entity_regex",
+        )
+        assert len(errors) == 1
+        assert "[invalid" in errors[0]
+        assert "exclude_entity_regex" in errors[0]
+        # Valid lines get joined; the invalid one is
+        # excluded but error surfaced.
+        assert "valid" in joined
+        assert "also_valid" in joined
+        assert "[invalid" not in joined
+
+    def test_match_all_pattern_rejected(self) -> None:
+        # ``.*`` matches every entity; rejecting it stops
+        # the user accidentally turning the field into a
+        # match-everything filter.
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            ".*",
+            "exclude_entity_regex",
+        )
+        assert joined == ""
+        assert len(errors) == 1
+        assert "matches empty string" in errors[0]
+
+    def test_match_empty_via_alternation_rejected(self) -> None:
+        # ``|||||`` is the canonical "all alternatives are
+        # empty" pattern -- also matches everything.
+        _joined, errors = helpers.validate_and_join_regex_patterns(
+            "|||||",
+            "exclude_entity_regex",
+        )
+        assert any("matches empty string" in e for e in errors)
+
+    def test_match_empty_via_optional_rejected(self) -> None:
+        # ``a?`` matches "" too.
+        _joined, errors = helpers.validate_and_join_regex_patterns(
+            "a?",
+            "exclude_entity_regex",
+        )
+        assert any("matches empty string" in e for e in errors)
+
+    def test_empty_input_returns_empty(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "",
+            "exclude_entity_regex",
+        )
+        assert joined == ""
+        assert errors == []
+
+    def test_only_whitespace_returns_empty(self) -> None:
+        joined, errors = helpers.validate_and_join_regex_patterns(
+            "  \n\t\n   ",
+            "exclude_entity_regex",
+        )
+        assert joined == ""
+        assert errors == []
+
+
+# --------------------------------------------------------
 # schedule_periodic_with_jitter
 # --------------------------------------------------------
 

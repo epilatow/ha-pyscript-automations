@@ -297,6 +297,169 @@ class TestEnsureTimer:
 
 
 # --------------------------------------------------------
+# Argparse: multi-line exclude_entity_regex
+# --------------------------------------------------------
+#
+# Regression guard for the user-reported bug where
+# multi-line ``exclude_entity_regex`` input silently
+# matched nothing because the whole string (with literal
+# ``\n`` chars) was fed to ``re.search``. Argparse must
+# split on newlines and join valid lines with ``|`` --
+# delegated to ``helpers.validate_and_join_regex_patterns``.
+# Unit tests for the helper itself live in
+# ``test_helpers_lifecycle.py``; this class verifies
+# argparse actually wires the helper in.
+
+
+@dataclass
+class _ArgparseCapture:
+    """Records the kwargs passed into ``_async_service_layer``.
+
+    Lets us assert what the post-argparse joined
+    ``exclude_entity_regex`` looks like without booting
+    the full service-layer executor path.
+    """
+
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def __call__(self, _hass: Any, _call: Any, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
+
+
+class _FakeServiceCall:
+    """Bare-minimum ServiceCall shape ``_async_argparse`` reads."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.data = data
+        self.context = None
+
+
+def _valid_argparse_payload(**overrides: Any) -> dict[str, Any]:
+    """Return a schema-valid raw payload with optional overrides."""
+    payload = {
+        "instance_id": "automation.rw_test",
+        "trigger_id": "manual",
+        "exclude_paths_raw": "",
+        "exclude_integrations_raw": [],
+        "exclude_entities_raw": [],
+        "exclude_entity_regex_raw": "",
+        "check_disabled_entities_raw": False,
+        "check_interval_minutes_raw": 60,
+        "max_source_notifications_raw": 0,
+        "debug_logging_raw": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestArgparseMultilineRegex:
+    def setup_method(self) -> None:
+        # Replace the service-layer entry point with a
+        # capture stub so argparse runs in isolation.
+        self.capture = _ArgparseCapture()
+        self._real_service_layer = handler._async_service_layer
+        handler._async_service_layer = self.capture  # type: ignore[assignment]
+        # Replace the emit-config-error helper with a
+        # capture-list so we can inspect the per-instance
+        # error notifications without booting HA's
+        # persistent_notification surface.
+        self.config_errors: list[list[str]] = []
+
+        async def _capture_errors(
+            _hass: Any,
+            _instance_id: str,
+            errors: list[str],
+        ) -> None:
+            self.config_errors.append(errors)
+
+        self._real_emit = handler._emit_config_error
+        handler._emit_config_error = _capture_errors  # type: ignore[assignment]
+
+    def teardown_method(self) -> None:
+        handler._async_service_layer = self._real_service_layer  # type: ignore[assignment]
+        handler._emit_config_error = self._real_emit  # type: ignore[assignment]
+
+    def test_multiline_regex_joined_with_pipe(self) -> None:
+        # The bug the user hit: two patterns on separate
+        # lines must reach the service layer as a single
+        # alternation regex.
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                exclude_entity_regex_raw=(
+                    "sensor\\.loft_humidifier_energy\n"
+                    "sensor\\.office_humidifier_energy"
+                ),
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.config_errors == [[]], (
+            f"argparse should produce no errors; got {self.config_errors}"
+        )
+        assert len(self.capture.calls) == 1
+        joined = self.capture.calls[0]["exclude_entity_regex"]
+        assert (
+            joined == "sensor\\.loft_humidifier_energy"
+            "|sensor\\.office_humidifier_energy"
+        )
+
+    def test_invalid_regex_per_line_surfaces_error(self) -> None:
+        # ``[invalid`` fails ``re.compile``; ``foo`` is a
+        # legitimate valid pattern. The bad line surfaces
+        # in the error list while the good one would have
+        # been used had argparse continued -- but since
+        # any error short-circuits the dispatch, the
+        # service layer doesn't run at all.
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                exclude_entity_regex_raw="foo\n[invalid",
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == [], (
+            "service layer must NOT run when argparse has errors"
+        )
+        assert len(self.config_errors) == 1
+        errors = self.config_errors[0]
+        # The invalid line surfaces; the valid line does
+        # not (no error needed for it).
+        joined_msg = "\n".join(errors)
+        assert "[invalid" in joined_msg
+        assert "exclude_entity_regex" in joined_msg
+
+    def test_match_all_pattern_rejected(self) -> None:
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(exclude_entity_regex_raw=".*"),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == []
+        assert len(self.config_errors) == 1
+        assert any("matches empty string" in e for e in self.config_errors[0])
+
+    def test_empty_field_is_fine(self) -> None:
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(_valid_argparse_payload())
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.config_errors == [[]]
+        assert len(self.capture.calls) == 1
+        assert self.capture.calls[0]["exclude_entity_regex"] == ""
+
+
+# --------------------------------------------------------
 # Restart-recovery kick payload
 # --------------------------------------------------------
 

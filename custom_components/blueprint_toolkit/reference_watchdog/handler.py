@@ -56,6 +56,7 @@ from ..helpers import (
     spec_bucket,
     unregister_blueprint_handler,
     update_instance_state,
+    validate_and_join_regex_patterns,
 )
 from . import logic
 
@@ -180,23 +181,17 @@ async def _async_argparse(
     instance_id: str = data["instance_id"]
     errors: list[str] = []
 
-    # Validate the user-supplied regex by attempting to
-    # compile it. ``helpers.matches_pattern`` swallows
-    # invalid regex at runtime (returning False); we'd
-    # rather surface the error at config time so the user
-    # knows their exclusion isn't doing anything.
-    exclude_entity_regex: str = data["exclude_entity_regex_raw"].strip()
-    if exclude_entity_regex:
-        import re  # noqa: PLC0415
-
-        try:
-            re.compile(exclude_entity_regex)
-        except re.error as e:
-            errors.append(
-                f"exclude_entity_regex is not a valid regex: {e} -- "
-                "to fix, escape the offending metacharacters or simplify "
-                "the pattern.",
-            )
+    # Multi-line input: split, validate per-line, reject
+    # empty-matching patterns (``.*`` / ``|||||`` / ``a?``
+    # would silently exclude everything), and join the
+    # surviving lines with ``|`` so the logic module gets
+    # a single alternation regex it can hand to
+    # ``re.search``.
+    exclude_entity_regex, regex_errors = validate_and_join_regex_patterns(
+        data["exclude_entity_regex_raw"],
+        "exclude_entity_regex",
+    )
+    errors.extend(regex_errors)
 
     # Argparse complete; emit accumulated errors (or
     # dismiss any prior config_error notification).
