@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 # Repository root
 _REPO_ROOT = Path(__file__).parent.parent
@@ -207,3 +208,116 @@ class CodeQualityBase:
             assert result.returncode == 0, (
                 f"mypy failed on {target}.\n\n{result.stdout}{result.stderr}"
             )
+
+
+# --------------------------------------------------------
+# BlueprintSchemaDriftBase: shared per-handler test base
+# --------------------------------------------------------
+
+
+_BUNDLED_BLUEPRINTS_DIR = (
+    _REPO_ROOT
+    / "custom_components"
+    / "blueprint_toolkit"
+    / "bundled"
+    / "blueprints"
+    / "automation"
+    / "blueprint_toolkit"
+)
+
+
+class BlueprintSchemaDriftBase:
+    """Base for per-handler blueprint-vs-schema drift checks.
+
+    Subclass per handler test file:
+
+        class TestBlueprintSchemaDrift(BlueprintSchemaDriftBase):
+            handler = my_handler_module
+            blueprint_filename = "my_handler.yaml"
+
+    Inherited tests verify:
+
+    - The first action's ``data:`` keys match the handler's
+      ``_SCHEMA`` ``vol.Required`` keys.
+    - The first action's ``action:`` targets the handler's
+      registered service (``blueprint_toolkit.<service>``).
+
+    Originally duplicated as a per-handler ``TestBlueprintSchemaDrift``
+    class in each test file. Centralised here so the drift
+    contract evolves in one place; per-handler files just
+    declare the two class vars and inherit the two tests.
+    """
+
+    handler: Any = None  # subclass override
+    blueprint_filename: str = ""  # subclass override
+
+    def _load_blueprint(self) -> dict[str, Any]:
+        import voluptuous as vol  # noqa: F401, PLC0415
+        import yaml  # noqa: PLC0415
+
+        class _PermissiveLoader(yaml.SafeLoader):
+            """SafeLoader that ignores blueprint-only ``!`` tags.
+
+            Blueprint YAML uses ``!input <name>`` to interpolate
+            inputs at load time; SafeLoader otherwise raises on
+            the unrecognised tag. This test only inspects keys
+            and the ``action:`` string, so tag values just get
+            passed through.
+            """
+
+        def _passthrough(_loader: Any, _suffix: str, node: Any) -> Any:
+            if hasattr(node, "value") and isinstance(node.value, str):
+                return node.value
+            return None
+
+        _PermissiveLoader.add_multi_constructor("!", _passthrough)
+
+        path = _BUNDLED_BLUEPRINTS_DIR / self.blueprint_filename
+        loaded: dict[str, Any] = yaml.load(  # noqa: S506
+            path.read_text(),
+            Loader=_PermissiveLoader,
+        )
+        assert isinstance(loaded, dict)
+        return loaded
+
+    @staticmethod
+    def _required_keys(schema: Any) -> set[str]:
+        import voluptuous as vol  # noqa: PLC0415
+
+        return {
+            str(k.schema) for k in schema.schema if isinstance(k, vol.Required)
+        }
+
+    def _first_action(self, bp: dict[str, Any]) -> dict[str, Any]:
+        # Blueprints accept either ``actions:`` (list, current
+        # convention) or singular ``action:`` (mapping). Handle
+        # both so the base doesn't trip on an older blueprint.
+        actions = bp.get("actions") or bp.get("action") or []
+        first: dict[str, Any] = (
+            actions[0] if isinstance(actions, list) else actions
+        )
+        assert isinstance(first, dict)
+        return first
+
+    def test_yaml_data_keys_match_schema_required_keys(self) -> None:
+        bp = self._load_blueprint()
+        action = self._first_action(bp)
+        yaml_keys = set((action.get("data") or {}).keys())
+        schema_keys = self._required_keys(self.handler._SCHEMA)
+        assert yaml_keys == schema_keys, (
+            f"blueprint {self.blueprint_filename} 'data:' keys do "
+            f"not match handler._SCHEMA's vol.Required keys.\n"
+            f"  only in YAML:   {sorted(yaml_keys - schema_keys)}\n"
+            f"  only in schema: {sorted(schema_keys - yaml_keys)}"
+        )
+
+    def test_blueprint_action_targets_registered_service(self) -> None:
+        bp = self._load_blueprint()
+        action = self._first_action(bp)
+        action_name = action.get("action", "")
+        expected = f"blueprint_toolkit.{self.handler._SERVICE}"
+        assert action_name == expected, (
+            f"blueprint {self.blueprint_filename} action: "
+            f"{action_name!r} does not match the registered "
+            f"service {expected!r}"
+        )
