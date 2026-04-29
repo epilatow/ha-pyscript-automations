@@ -66,7 +66,6 @@ from ..helpers import (
     IssueNotification,
     PersistentNotification,
     automation_friendly_name,
-    instance_id_for_config_error,
     make_config_error_notification,
     make_emit_config_error,
     md_escape,
@@ -77,6 +76,7 @@ from ..helpers import (
     spec_bucket,
     unregister_blueprint_handler,
     update_instance_state,
+    validate_payload_or_emit_config_error,
 )
 from . import bridge, logic
 
@@ -252,21 +252,13 @@ async def _async_argparse(
     """Validate, build context, dispatch to the service layer."""
     raw = dict(call.data)
 
-    try:
-        data = _SCHEMA(raw)
-    except vol.MultipleInvalid as err:
-        await _emit_config_error(
-            hass,
-            instance_id_for_config_error(raw),
-            [f"schema: {sub}" for sub in err.errors],
-        )
-        return
-    except vol.Invalid as err:
-        await _emit_config_error(
-            hass,
-            instance_id_for_config_error(raw),
-            [f"schema: {err}"],
-        )
+    data = await validate_payload_or_emit_config_error(
+        hass,
+        raw,
+        _SCHEMA,
+        _emit_config_error,
+    )
+    if data is None:
         return
 
     instance_id: str = data["instance_id"]

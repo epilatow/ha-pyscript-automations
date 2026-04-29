@@ -17,9 +17,11 @@ Three flavours of symbol live here:
 - **Runtime-HA** (uses the runtime ``hass`` argument
   but doesn't import HA at module scope):
   ``process_persistent_notifications``,
-  ``emit_config_error``, ``recover_at_startup``. Module
-  import succeeds outside HA; calling the function
-  needs a real ``HomeAssistant`` instance.
+  ``emit_config_error``,
+  ``validate_payload_or_emit_config_error``,
+  ``recover_at_startup``. Module import succeeds outside
+  HA; calling the function needs a real ``HomeAssistant``
+  instance.
 - **Lifecycle** (late-imports HA inside the function):
   ``discover_automations_using_blueprint``,
   ``register_blueprint_handler``,
@@ -622,6 +624,50 @@ def make_emit_config_error(
         )
 
     return emit
+
+
+async def validate_payload_or_emit_config_error(
+    hass: HomeAssistant,
+    raw: dict[str, Any],
+    schema: Callable[[dict[str, Any]], dict[str, Any]],
+    emit_config_error: Callable[
+        [HomeAssistant, str, list[str]],
+        Awaitable[None],
+    ],
+) -> dict[str, Any] | None:
+    """Run ``schema`` over ``raw`` or emit a config-error notification.
+
+    Every native handler's ``_async_argparse`` opens with
+    the same try / except / ``_emit_config_error`` block;
+    factor it here so the failure shape (``schema:`` prefix,
+    fallback ``instance_id_for_config_error`` lookup, single-
+    error vs ``MultipleInvalid`` collected list) stays
+    consistent across handlers as schemas evolve.
+
+    Returns the validated payload on success, or ``None``
+    when a notification was emitted -- callers short-circuit
+    dispatch on ``None``. ``vol`` is late-imported so the
+    helpers module still imports outside HA (mirrors the
+    other lifecycle helpers).
+    """
+    import voluptuous as vol  # noqa: PLC0415
+
+    try:
+        return schema(raw)
+    except vol.MultipleInvalid as err:
+        await emit_config_error(
+            hass,
+            instance_id_for_config_error(raw),
+            [f"schema: {sub}" for sub in err.errors],
+        )
+        return None
+    except vol.Invalid as err:
+        await emit_config_error(
+            hass,
+            instance_id_for_config_error(raw),
+            [f"schema: {err}"],
+        )
+        return None
 
 
 # --------------------------------------------------------
