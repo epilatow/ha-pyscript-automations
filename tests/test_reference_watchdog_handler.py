@@ -300,15 +300,18 @@ class TestEnsureTimer:
 # Argparse: multi-line exclude_entity_regex
 # --------------------------------------------------------
 #
-# Regression guard for the user-reported bug where
-# multi-line ``exclude_entity_regex`` input silently
-# matched nothing because the whole string (with literal
-# ``\n`` chars) was fed to ``re.search``. Argparse must
-# split on newlines and join valid lines with ``|`` --
-# delegated to ``helpers.validate_and_join_regex_patterns``.
-# Unit tests for the helper itself live in
-# ``test_helpers_lifecycle.py``; this class verifies
-# argparse actually wires the helper in.
+# Argparse splits multi-line ``exclude_entity_regex`` input
+# on newlines and joins valid lines with ``|`` so two
+# patterns on separate lines reach the service layer as a
+# single alternation regex (instead of being passed verbatim
+# as a multi-line string ``re.search`` would silently match
+# nothing on). The split/join + per-line validation lives in
+# the shared ``helpers.validate_and_join_regex_patterns``;
+# parser-semantic tests for that helper live in
+# ``test_helpers_lifecycle.py`` (``TestValidateAndJoinRegexPatterns``).
+# This class only verifies the handler-side wiring: that
+# argparse delegates to the helper and that helper-level
+# errors surface as a config-error notification.
 
 
 @dataclass
@@ -406,13 +409,13 @@ class TestArgparseMultilineRegex:
             "|sensor\\.office_humidifier_energy"
         )
 
-    def test_invalid_regex_per_line_surfaces_error(self) -> None:
-        # ``[invalid`` fails ``re.compile``; ``foo`` is a
-        # legitimate valid pattern. The bad line surfaces
-        # in the error list while the good one would have
-        # been used had argparse continued -- but since
-        # any error short-circuits the dispatch, the
-        # service layer doesn't run at all.
+    def test_helper_errors_emit_config_error_notification(self) -> None:
+        # Wiring check: when the shared helper returns
+        # errors, argparse short-circuits dispatch and
+        # surfaces them as a config-error notification.
+        # The exact errors (which lines fail, why) are
+        # parser semantics covered by
+        # ``TestValidateAndJoinRegexPatterns``.
         import asyncio
 
         h = _MockHass()
@@ -427,25 +430,7 @@ class TestArgparseMultilineRegex:
             "service layer must NOT run when argparse has errors"
         )
         assert len(self.config_errors) == 1
-        errors = self.config_errors[0]
-        # The invalid line surfaces; the valid line does
-        # not (no error needed for it).
-        joined_msg = "\n".join(errors)
-        assert "[invalid" in joined_msg
-        assert "exclude_entity_regex" in joined_msg
-
-    def test_match_all_pattern_rejected(self) -> None:
-        import asyncio
-
-        h = _MockHass()
-        call = _FakeServiceCall(
-            _valid_argparse_payload(exclude_entity_regex_raw=".*"),
-        )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
-
-        assert self.capture.calls == []
-        assert len(self.config_errors) == 1
-        assert any("matches empty string" in e for e in self.config_errors[0])
+        assert self.config_errors[0], "expected a non-empty error list"
 
     def test_empty_field_is_fine(self) -> None:
         import asyncio
@@ -457,6 +442,47 @@ class TestArgparseMultilineRegex:
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
         assert self.capture.calls[0]["exclude_entity_regex"] == ""
+
+    def test_argparse_delegates_to_shared_regex_helper(self) -> None:
+        """Lock in that argparse delegates regex parsing to
+        ``helpers.validate_and_join_regex_patterns``.
+
+        Why this matters: re-implementing multi-line regex
+        parsing inline would silently lose the helper's
+        guarantees (per-line ``re.compile`` validation,
+        ``.*``-rejection, alternation join, empty-line
+        drop). If a future refactor moves off the helper,
+        this test fires and forces the maintainer to
+        choose: (a) restore the call-through, or (b)
+        re-implement equivalent guarantees inline -- see
+        ``TestValidateAndJoinRegexPatterns`` in
+        ``test_helpers_lifecycle.py`` for the full contract.
+        """
+        import asyncio
+
+        spy_calls: list[tuple[Any, ...]] = []
+        real = handler.validate_and_join_regex_patterns
+
+        def _spy(*args: Any, **kwargs: Any) -> Any:
+            spy_calls.append(args)
+            return real(*args, **kwargs)
+
+        handler.validate_and_join_regex_patterns = _spy  # type: ignore[assignment]
+        try:
+            h = _MockHass()
+            call = _FakeServiceCall(
+                _valid_argparse_payload(
+                    exclude_entity_regex_raw="foo\nbar",
+                ),
+            )
+            asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        finally:
+            handler.validate_and_join_regex_patterns = real  # type: ignore[assignment]
+
+        assert spy_calls, (
+            "argparse must call helpers.validate_and_join_regex_patterns "
+            "-- see this test's docstring for the contract"
+        )
 
 
 # --------------------------------------------------------
