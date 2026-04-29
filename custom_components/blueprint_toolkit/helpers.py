@@ -740,36 +740,75 @@ async def register_blueprint_handler(
 
     # --- Restart recovery (if kick is configured) ---
     if kick is not None:
+        # Both branches schedule via
+        # ``entry.async_create_background_task`` rather than
+        # ``hass.async_create_task`` so the recovery work is
+        # entry-scoped: if the config entry unloads (e.g.
+        # the user disables the integration) while the task
+        # is still queued or mid-flight, HA cancels it
+        # automatically. Without this, an unload that races
+        # the recover task would leave kicks firing into a
+        # detached service registration.
+        recover_task_name = f"{DOMAIN}_{spec.service}_recover_at_startup"
         if hass.is_running:
-            hass.async_create_task(
+            entry.async_create_background_task(
+                hass,
                 recover_at_startup(
                     hass,
                     service_tag=spec.service_tag,
                     blueprint_path=spec.blueprint_path,
                     kick=kick,
                 ),
+                recover_task_name,
             )
         else:
+            # ``async_listen_once`` returns an unsubscribe
+            # callable AND auto-detaches the listener when
+            # the event fires. If the listener fires and we
+            # later call the stored unsub (e.g. on
+            # integration unload), HA logs ``Unable to
+            # remove unknown job listener`` at ERROR level.
+            # Drop our bookkeeping handle synchronously
+            # inside the dispatch so any concurrent
+            # ``unregister_blueprint_handler`` won't see it.
+            #
+            # The wrapper is ``@callback`` (sync) so the
+            # ``unsubs.remove`` runs in the same synchronous
+            # block as HA's listener detach inside
+            # ``Bus.async_fire``; the background-task
+            # creation then schedules the actual recovery
+            # work. If the wrapper were ``async def``
+            # instead, the recovery would be scheduled as a
+            # separate task and there'd be a (tiny but real)
+            # race window where unregister could fire and
+            # call the stale unsub before our async body
+            # removed it.
+            once_unsub: Callable[[], None] | None = None
 
-            async def _recover_when_ready(_event: Event) -> None:
-                await recover_at_startup(
+            @callback  # type: ignore[untyped-decorator]
+            def _on_started_sync(_event: Event) -> None:
+                if once_unsub is not None and once_unsub in unsubs:
+                    unsubs.remove(once_unsub)
+                entry.async_create_background_task(
                     hass,
-                    service_tag=spec.service_tag,
-                    blueprint_path=spec.blueprint_path,
-                    kick=kick,
+                    recover_at_startup(
+                        hass,
+                        service_tag=spec.service_tag,
+                        blueprint_path=spec.blueprint_path,
+                        kick=kick,
+                    ),
+                    recover_task_name,
                 )
 
-            # Capture the once-listener unsub: if the
-            # config entry unloads before HA finishes
-            # starting, unregister tears this listener
-            # down so a deferred kick doesn't fire into
-            # stale state.
-            unsubs.append(
-                hass.bus.async_listen_once(
-                    EVENT_HOMEASSISTANT_STARTED,
-                    _recover_when_ready,
-                ),
+            once_unsub = hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED,
+                _on_started_sync,
             )
+            # Stored so unregister can detach the listener
+            # if the entry unloads before HA finishes
+            # starting (i.e. before the once-listener fires
+            # and removes itself).
+            unsubs.append(once_unsub)
 
     _LOGGER.info(
         "%s [%s]: service %s.%s registered (blueprint=%s)",

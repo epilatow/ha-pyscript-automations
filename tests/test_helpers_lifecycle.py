@@ -128,6 +128,13 @@ class _MockBus:
     once_listeners: dict[str, list[Callable[..., Any]]] = field(
         default_factory=dict,
     )
+    # Records each ``unsub()`` call against an already-
+    # detached once-listener -- HA logs these as
+    # ``Unable to remove unknown job listener`` ERROR
+    # entries; tests assert this list stays empty.
+    stale_unsub_calls: list[tuple[str, Callable[..., Any]]] = field(
+        default_factory=list,
+    )
 
     def async_listen(
         self,
@@ -147,8 +154,33 @@ class _MockBus:
         event_type: str,
         handler: Callable[..., Any],
     ) -> Callable[[], None]:
+        # Mimic HA's behaviour: the listener auto-detaches
+        # when the event fires; calling the returned unsub
+        # AFTER that point logs ``Unable to remove unknown
+        # job listener``. We surface that as a tracked event
+        # so regression tests can assert it didn't happen.
         self.once_listeners.setdefault(event_type, []).append(handler)
-        return lambda: None
+
+        def _unsub() -> None:
+            if handler in self.once_listeners.get(event_type, []):
+                self.once_listeners[event_type].remove(handler)
+            else:
+                self.stale_unsub_calls.append((event_type, handler))
+
+        return _unsub
+
+    def fire_once(self, event_type: str, event: Any = None) -> None:
+        """Dispatch every once-listener for ``event_type``, then auto-detach.
+
+        Mirrors HA's ``Bus.async_fire`` for once-listeners:
+        the listener runs synchronously and is removed
+        from the bus before any task it schedules has a
+        chance to run.
+        """
+        handlers = list(self.once_listeners.get(event_type, []))
+        self.once_listeners[event_type] = []
+        for handler in handlers:
+            handler(event)
 
 
 @dataclass
@@ -225,6 +257,25 @@ class _MockEntry:
 
     entry_id: str = "mock_entry"
     runtime_data: _MockRuntimeData = field(default_factory=_MockRuntimeData)
+    # Records each ``async_create_background_task`` call as
+    # ``(name, coro)`` so tests can assert the entry-scoped
+    # task was created (HA cancels these on entry unload).
+    background_tasks: list[tuple[str, Awaitable[Any]]] = field(
+        default_factory=list,
+    )
+
+    def async_create_background_task(
+        self,
+        _hass: Any,
+        coro: Awaitable[Any],
+        name: str,
+    ) -> None:
+        # Track for inspection, then close the coroutine to
+        # avoid the ``RuntimeWarning: coroutine was never
+        # awaited`` pytest emits otherwise.
+        self.background_tasks.append((name, coro))
+        if hasattr(coro, "close"):
+            coro.close()
 
 
 def _service_handler_stub() -> Callable[[Any, Any], Awaitable[None]]:
@@ -691,7 +742,14 @@ class TestRegisterBlueprintHandler:
         # Reload listener wired (kick is enough)
         assert len(hass.bus.listeners.get("automation_reloaded", [])) == 1
         # Restart-recovery scheduled (hass already running)
-        assert len(hass.tasks) == 1
+        # via the entry-scoped background-task API so HA
+        # cancels it on entry unload -- NOT via
+        # ``hass.async_create_task`` which would dangle past
+        # an unload that lands while the task is queued.
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 1
+        name, _coro = entry.background_tasks[0]
+        assert name.endswith("_recover_at_startup")
 
     @pytest.mark.asyncio
     async def test_kick_when_not_running_defers_to_started_event(
@@ -839,6 +897,70 @@ class TestUnregisterBlueprintHandler:
             spec,
         )
         # Should not raise.
+        await helpers.unregister_blueprint_handler(
+            hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
+            spec,
+        )
+
+    @pytest.mark.asyncio
+    async def test_started_once_listener_no_stale_unsub(self) -> None:
+        # Regression for the ``Unable to remove unknown
+        # job listener`` ERROR HA logs when an
+        # already-detached once-listener's unsub is called
+        # later. Sequence: register while HA is starting (so
+        # we register the EVENT_HOMEASSISTANT_STARTED
+        # once-listener), fire the event (HA auto-detaches
+        # the listener), then unregister. The dispatcher
+        # must have removed its bookkeeping handle when the
+        # listener fired so unregister doesn't try to call
+        # the stale unsub.
+        hass = _MockHass(is_running=False)
+
+        entry = _MockEntry()
+        spec = _make_spec(kick=_kick_stub)
+        await helpers.register_blueprint_handler(
+            hass,  # type: ignore[arg-type]
+            entry,  # type: ignore[arg-type]
+            spec,
+        )
+        # The once-listener is registered.
+        assert len(hass.bus.once_listeners["homeassistant_started"]) == 1
+
+        # HA finishes starting -> fires the event. HA's bus
+        # auto-detaches the listener as part of dispatch.
+        hass.bus.fire_once("homeassistant_started")
+        assert hass.bus.once_listeners["homeassistant_started"] == []
+
+        # Recovery is scheduled via the entry-scoped
+        # background-task API so HA cancels it on entry
+        # unload (covers a corner-case race where a kick
+        # task could otherwise call into the just-removed
+        # blueprint service).
+        assert hass.tasks == []
+        assert len(entry.background_tasks) == 1
+        name, _coro = entry.background_tasks[0]
+        assert name.endswith("_recover_at_startup")
+
+        # The dispatcher must have removed its stored unsub
+        # for the now-detached listener.
+        bucket = entry.runtime_data.handlers[spec.service]
+        assert bucket["unsubs"] != [], (
+            "non-once unsubs (reload + er listeners) should still be tracked"
+        )
+        # No unsub in the bucket should still target the
+        # detached homeassistant_started listener.
+        for unsub in bucket["unsubs"]:
+            unsub()
+        assert hass.bus.stale_unsub_calls == [], (
+            "calling each remaining unsub MUST NOT trigger the stale-unsub "
+            f"path; got: {hass.bus.stale_unsub_calls}"
+        )
+
+        # Restore listeners (test self-cleanup) before
+        # invoking unregister, which calls all unsubs again.
+        # Since we've already exhausted them above we just
+        # make sure unregister itself doesn't raise.
         await helpers.unregister_blueprint_handler(
             hass,  # type: ignore[arg-type]
             entry,  # type: ignore[arg-type]
