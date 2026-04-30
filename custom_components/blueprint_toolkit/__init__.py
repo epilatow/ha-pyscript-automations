@@ -374,6 +374,7 @@ async def async_setup_entry(
     # Per-port service handlers. Lazy-imported because each
     # handler module pulls in ``voluptuous`` and
     # ``homeassistant`` at module scope.
+    from .entity_defaults_watchdog import handler as edw_handler
     from .reference_watchdog import handler as rw_handler
     from .trigger_entity_controller import handler as tec_handler
     from .zwave_route_manager import handler as zrm_handler
@@ -381,6 +382,7 @@ async def async_setup_entry(
     await tec_handler.async_register(hass, entry)
     await zrm_handler.async_register(hass, entry)
     await rw_handler.async_register(hass, entry)
+    await edw_handler.async_register(hass, entry)
 
     # Conflicts surface to the user via Repairs rather
     # than by failing the setup. Real install errors raise
@@ -401,6 +403,7 @@ async def async_unload_entry(
     registrations, bus listeners, or pending wakeups /
     timers.
     """
+    from .entity_defaults_watchdog import handler as edw_handler
     from .reference_watchdog import handler as rw_handler
     from .trigger_entity_controller import handler as tec_handler
     from .zwave_route_manager import handler as zrm_handler
@@ -408,6 +411,7 @@ async def async_unload_entry(
     await tec_handler.async_unregister(hass, entry)
     await zrm_handler.async_unregister(hass, entry)
     await rw_handler.async_unregister(hass, entry)
+    await edw_handler.async_unregister(hass, entry)
     return True
 
 

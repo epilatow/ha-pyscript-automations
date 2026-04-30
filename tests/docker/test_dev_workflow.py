@@ -53,12 +53,12 @@ NOOP_RESTART = "echo restart-stub"
 # ``blueprint_toolkit.trigger_entity_controller``, Z-Wave
 # Route Manager at ``blueprint_toolkit.zwave_route_manager``,
 # Reference Watchdog at
-# ``blueprint_toolkit.reference_watchdog``) are NOT pyscript
-# entrypoints and so don't appear here.
+# ``blueprint_toolkit.reference_watchdog``, Entity Defaults
+# Watchdog at ``blueprint_toolkit.entity_defaults_watchdog``)
+# are NOT pyscript entrypoints and so don't appear here.
 EXPECTED_SERVICES = frozenset(
     {
         "device_watchdog_blueprint_entrypoint",
-        "entity_defaults_watchdog_blueprint_entrypoint",
         "sensor_threshold_switch_controller_blueprint_entrypoint",
     },
 )

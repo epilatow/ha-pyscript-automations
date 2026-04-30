@@ -103,6 +103,13 @@ class Config:
     # the service wrapper's orphan sweep can safely scope
     # dismissals to one instance.
     notification_prefix: str = ""
+    # Carried onto every ``PersistentNotification`` we
+    # construct so the dispatcher can prepend
+    # ``Automation: [name](edit-link)\n`` to the body.
+    # ``None`` in pure-Python tests where the Config
+    # carries no real instance binding; the dispatcher
+    # silently skips the header in that case.
+    instance_id: str | None = None
 
 
 @dataclass
@@ -216,6 +223,11 @@ class DeviceResult:
     drifted_entities: list[DriftDetail]
     entities_checked: int
     entities_excluded: int
+    # Stamped from ``Config.instance_id`` at evaluation
+    # time so ``to_notification`` can hand the dispatcher
+    # the automation entity_id needed for the
+    # ``Automation: [name](edit-link)\n`` body prefix.
+    instance_id: str | None = None
 
     def to_notification(
         self,
@@ -226,6 +238,7 @@ class DeviceResult:
             notification_id=self.notification_id,
             title=self.notification_title,
             message=self.notification_message,
+            instance_id=self.instance_id,
         )
 
 
@@ -647,6 +660,7 @@ def _evaluate_device(
             drifted_entities=[],
             entities_checked=0,
             entities_excluded=0,
+            instance_id=config.instance_id,
         )
 
     drifted: list[DriftDetail] = []
@@ -684,6 +698,7 @@ def _evaluate_device(
         drifted_entities=drifted,
         entities_checked=len(device.entities) - excluded,
         entities_excluded=excluded,
+        instance_id=config.instance_id,
     )
 
 
@@ -953,6 +968,7 @@ def run_evaluation(
         cap_notification_id=f"{config.notification_prefix}cap",
         cap_title="Entity defaults watchdog: notification cap reached",
         cap_item_label="devices with drift",
+        instance_id=config.instance_id,
     )
 
     if _check_deviceless_enabled(config):
@@ -977,6 +993,7 @@ def run_evaluation(
             notification_id=deviceless.notification_id,
             title=deviceless.notification_title,
             message=deviceless.notification_message,
+            instance_id=config.instance_id,
         ),
     )
 
