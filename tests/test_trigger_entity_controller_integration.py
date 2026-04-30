@@ -10,7 +10,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Integration-level tests for the native TEC handler.
+"""Integration-level tests for the TEC handler.
 
 Exercises the parts that the in-process unit tests
 (``tests/test_trigger_entity_controller_handler.py``) deliberately don't cover:

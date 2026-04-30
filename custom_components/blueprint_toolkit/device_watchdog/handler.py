@@ -363,9 +363,9 @@ async def _async_service_layer(
             "entities_excluded": ev.stat_entities_excluded,
             "device_issues": ev.issues_count,
             "entity_issues": ev.stat_entity_issues,
-            # Pyscript-era attribute name; preserve verbatim
-            # so operators' diagnostic-state queries don't
-            # silently break across the port. The doc at
+            # Attribute name preserved verbatim so existing
+            # operator diagnostic-state queries don't silently
+            # break. The doc at
             # ``bundled/docs/device_watchdog.md`` describes
             # this name.
             "device_stale_issues": ev.stat_stale,

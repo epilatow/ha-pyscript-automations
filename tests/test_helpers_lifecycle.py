@@ -1201,8 +1201,8 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
 # Pure helpers (slugify + matches_pattern)
 # --------------------------------------------------------
 #
-# ``test_helpers.py`` covers the pyscript copy of these.
-# These tests cover the native ports lifted into
+# Coverage parity with ``test_helpers.py`` for the same
+# helpers lifted into
 # ``custom_components/blueprint_toolkit/helpers.py``.
 
 
@@ -1275,13 +1275,11 @@ class TestValidateAndJoinRegexPatterns:
     EDW's ``device_exclude_regex`` /
     ``entity_id_exclude_regex`` / ``entity_name_exclude_regex``).
 
-    Pre-port pyscript had this in
-    ``_validate_and_join_patterns``; the original RW
-    native port lost it and re-implemented argparse with
-    a single ``re.compile()`` -- which silently fails on
-    multi-line input because the whole string (newline
-    chars and all) gets fed to the regex engine. This
-    suite covers the regression.
+    The naive shape of this validation -- a single
+    ``re.compile()`` on the joined string -- silently
+    fails on multi-line input because the whole string
+    (newline chars and all) gets fed to the regex
+    engine. This suite covers that regression.
     """
 
     def test_single_line_passes_through(self) -> None:

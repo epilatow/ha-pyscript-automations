@@ -10,11 +10,12 @@ restart-recovery plumbing.
 
 Module layout:
 
-- ``logic`` -- pure-function reference-integrity scanner.
-  Owns YAML / JSON source discovery, structural-walk +
-  jinja-AST + string-sniff ref extraction, exclusion
-  filters, owner attribution, and notification building.
-  No HA-side imports.
+- ``logic`` -- reference-integrity scanner. Owns YAML /
+  JSON source discovery, structural-walk + jinja-AST +
+  string-sniff ref extraction, exclusion filters, owner
+  attribution, and notification building. No HA
+  dependencies; safe to import + call outside the HA
+  process.
 - ``handler`` -- HA wiring: vol.Schema-driven argparse,
   three-layer dispatch (entrypoint / argparse / service),
   periodic scheduling via

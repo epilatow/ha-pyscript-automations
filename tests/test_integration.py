@@ -22,9 +22,10 @@ installer:
   destinations and writes the manifest store.
 - ``async_remove_entry`` removes everything we installed.
 
-Pure-function reconciler logic is covered separately by
-``tests/test_reconciler.py``; pure-function installer
-logic by integration with the dev CLI in
+Reconciler logic (no HA dependencies; safe to import +
+call outside the HA process) is covered separately by
+``tests/test_reconciler.py``; installer logic by
+integration with the dev CLI in
 ``tests/test_dev_install.py``. This file's job is the
 plumbing in ``custom_components/blueprint_toolkit/__init__.py``.
 """
@@ -125,9 +126,6 @@ def _expected_destinations(config_dir: Path) -> set[Path]:
     for src in (bundled / "blueprints").rglob("*.yaml"):
         rel = src.relative_to(bundled / "blueprints")
         out.add(config_dir / "blueprints" / rel)
-    for src in (bundled / "pyscript").rglob("*.py"):
-        rel = src.relative_to(bundled / "pyscript")
-        out.add(config_dir / "pyscript" / rel)
     return out
 
 
@@ -244,11 +242,8 @@ class TestSetupEntry:
         }
         assert destinations == expected
 
-    async def test_setup_registers_native_services(self, hass) -> None:  # noqa: ANN001
-        # Coverage parity with the docker test's
-        # ``EXPECTED_SERVICES`` check (which only covers
-        # pyscript blueprint entrypoints) -- here we assert
-        # the native handlers register their services on
+    async def test_setup_registers_services(self, hass) -> None:  # noqa: ANN001
+        # Asserts every handler registers its service on
         # ``async_setup_entry``. Catches a service that's
         # silently dropped from ``__init__.py``'s setup hook
         # (or whose handler module fails to expose a callable
@@ -270,8 +265,7 @@ class TestSetupEntry:
         registered = set(hass.services.async_services().get(DOMAIN, {}))
         missing = expected - registered
         assert not missing, (
-            f"native handler services not registered after setup: "
-            f"{sorted(missing)}"
+            f"handler services not registered after setup: {sorted(missing)}"
         )
 
 

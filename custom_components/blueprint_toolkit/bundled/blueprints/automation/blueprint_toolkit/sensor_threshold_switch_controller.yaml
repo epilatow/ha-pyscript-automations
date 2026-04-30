@@ -138,11 +138,10 @@ variables:
   target_switch_entity: !input target_switch_entity
 
 triggers:
-  # The blueprint keeps the two reactive triggers
-  # (sensor + switch state changes); the periodic
-  # minute-tick that pyscript handled here lives in the
-  # integration's
-  # ``schedule_periodic_with_jitter`` plumbing now.
+  # Reactive triggers only (sensor + switch state
+  # changes); the periodic minute-tick is owned by the
+  # integration's ``schedule_periodic_with_jitter``
+  # plumbing.
   - id: sensor_change
     trigger: state
     entity_id: !input sensor_entities

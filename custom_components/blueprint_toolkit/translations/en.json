@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Blueprint Toolkit",
-        "description": "Set up the integration. Click Submit to install the bundled blueprints, pyscript modules, and rendered docs into your config directory."
+        "description": "Set up the integration. Click Submit to install the bundled blueprints and rendered docs into your config directory."
       }
     },
     "abort": {

@@ -32,13 +32,7 @@ First run installs the pinned HA and pytest-HACC into a
 uv-script env (large download, one-time per cache).
 Subsequent runs reuse the cache.
 
-Note: pyscript itself is not exercised here. pytest-HACC
-ships its own bundled copy of pyscript under
-``testing_config/custom_components/pyscript/`` which can
-shadow the version we drop into the test config dir, so
-service-registration assertions against our pyscript
-modules go through the docker harness instead. The
-reconciler / installer get full coverage in
+The reconciler / installer get full coverage in
 ``tests/test_reconciler.py`` and ``tests/test_dev_install.py``.
 """
 

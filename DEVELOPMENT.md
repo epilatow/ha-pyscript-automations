@@ -26,35 +26,28 @@ Integration code (`__init__.py`, `manifest.json`,
 `repairs.py`, etc.) lives at the
 `custom_components/blueprint_toolkit/` level. The
 `bundled/` subdirectory is our own convention for the
-blueprints, pyscript modules, docs, and CLI script the
-installer ships to their user-visible `/config/...` paths
-via symlinks.
+blueprints, docs, and CLI script the installer ships to
+their user-visible `/config/...` paths via symlinks.
 
 ```
 custom_components/blueprint_toolkit/bundled/
     blueprints/automation/blueprint_toolkit/*.yaml
     cli/zwave_network_info.py
     docs/*.md
-    pyscript/blueprint_toolkit.py
-    pyscript/modules/*.py
 ```
 
-The repo root keeps three committed symlinks into the
+The repo root keeps two committed symlinks into the
 bundle for path-typing convenience and so existing test
 paths keep resolving:
 
 ```
 blueprints -> custom_components/blueprint_toolkit/bundled/blueprints
-pyscript   -> custom_components/blueprint_toolkit/bundled/pyscript
 docs       -> custom_components/blueprint_toolkit/bundled/docs
 ```
 
 These are real git symlinks (mode 120000). They live
 outside HACS's download path and are never shipped to
-users. When referring to files, either path works --
-`pyscript/modules/foo.py` and
-`custom_components/blueprint_toolkit/bundled/pyscript/modules/foo.py`
-resolve to the same file.
+users.
 
 **POSIX filesystem required for development.** The repo
 uses mode-120000 symlinks that Windows (with default git
@@ -72,33 +65,30 @@ reads brand assets from the brands CDN.
 
 All automations follow a three-layer architecture:
 
-1. **Blueprint** (`blueprints/.../name.yaml`) -- defines HA
-   triggers and user-configurable inputs. Calls a pyscript
-   service. Contains no logic.
-2. **Service wrapper** (`pyscript/blueprint_toolkit.py`)
-   -- runs under PyScript's AST evaluator. Has access to
-   PyScript-injected globals (`state`, `hass`,
-   `homeassistant`, `service`, `log`, etc.). Parses inputs,
-   loads/saves state, calls the logic module, and executes
-   the returned action. No business logic.
-3. **Logic module** (`pyscript/modules/name.py`) -- runs
-   under PyScript's AST evaluator (not standard Python
-   import). Testable with pytest. Does not use PyScript-
-   injected globals (cannot call `state.get()`,
-   `homeassistant.turn_on()`, etc.). Must follow the
-   PyScript AST constraints listed below. May reference
-   HA concepts (entity IDs, integration names, device
+1. **Blueprint** (`bundled/blueprints/automation/blueprint_toolkit/<service>.yaml`)
+   -- defines HA triggers and user-configurable inputs.
+   Calls the integration's
+   `blueprint_toolkit.<service>` action. Contains no
+   logic.
+2. **Handler** (`<service>/handler.py`) -- the HA wiring
+   layer. Registered as the `blueprint_toolkit.<service>`
+   service via `helpers.register_blueprint_handler`.
+   Validates inputs (voluptuous schema + cross-field
+   checks against `hass.states` / `hass.services`),
+   loads/saves state, calls the logic module, and
+   executes the returned action against HA. No business
+   logic.
+3. **Logic module** (`<service>/logic.py`) -- pure
+   business logic. Testable with pytest. Does not import
+   `homeassistant.*` (cannot call `state.get()`,
+   `homeassistant.turn_on()`, etc.). May reference HA
+   concepts (entity IDs, integration names, device
    classes) as data.
 
 **Execution model**: purely reactive. No sleeping, no
 waiting, no scheduling. Trigger fires, logic evaluates,
 action executes, exit. Timeouts use the "record timestamp,
 check on periodic trigger" pattern.
-
-**State persistence**: service wrappers persist state as
-JSON in HA entity attributes (not entity state, which is
-limited to 255 chars). Use `_state_key(instance_id)` to
-build the persistence key.
 
 ## File Conventions
 
@@ -111,9 +101,9 @@ All Python files begin with `# This is AI generated code`.
 - **Executable scripts** (test files, `run_all.py`) use the
   PEP 723 shebang `#!/usr/bin/env -S uv run --script` with
   inline dependency declarations.
-- **Module files** (`pyscript/modules/*.py`,
-  `pyscript/blueprint_toolkit.py`) have no shebang.
-  They are imported, not executed directly.
+- **Module files** (handler.py, logic.py, helpers.py,
+  etc.) have no shebang. They are imported, not executed
+  directly.
 
 ### Test files
 
@@ -205,155 +195,18 @@ selection. Also validate domains at runtime via
 
 All code has type annotations and mypy strict enforcement:
 
-- **Logic modules** (`pyscript/modules/*.py`) -- fully
+- **Logic modules** (`<service>/logic.py`) -- fully
   typed, checked by mypy strict.
-- **Service wrapper** (`pyscript/blueprint_toolkit.py`)
-  -- fully typed, with `TYPE_CHECKING` stubs for
-  PyScript-injected globals (`state`, `homeassistant`,
-  `service`, `log`, `persistent_notification`, `hass`).
-- **mypy configuration** lives in `pyproject.toml`. The
-  `mypy_path` setting includes `pyscript/modules` so mypy
-  can resolve module imports.
-
-## Service Wrapper Conventions
-
-### @service decorator
-
-Service entry points use the `@service` decorator
-(PyScript-provided) with `# noqa: F821` since it's not
-importable at lint time.
-
-### Debug log tag format
-
-Debug log messages use a tag with abbreviated service
-initials and the user-assigned automation name:
-
-```python
-auto_name = _automation_name(instance_id)
-tag = "[TEC: " + auto_name + "]"
-log.warning("%s event=%s ...", tag, ...)
-```
-
-Current abbreviations: `STSC` (Sensor Threshold Switch
-Controller), `DW` (Device Watchdog), `EDW` (Entity
-Defaults Watchdog), `TEC` (Trigger Entity Controller),
-`RW` (Reference Watchdog).
-
-### Three-layer dispatch model
-
-Every service is implemented as three independently
-callable layers. Each layer either emits a persistent
-notification and returns, or calls the next layer
-directly — no layer propagates a return value.
-
-1. **Entrypoint — `<service>_blueprint_entrypoint(**kwargs)`**
-   `@service`-decorated. The blueprint's `action:` calls
-   this. Body is a one-line call to
-   `_dispatch_blueprint_service(service_label, kwargs)`,
-   which looks up the registered argparse function and
-   expected-keys set from the `_BLUEPRINT_SERVICES`
-   module dict. On missing or extra kwargs it emits a
-   `blueprint_mismatch` notification and returns;
-   otherwise it calls the argparse layer.
-
-2. **Argparse — `<service>_blueprint_argparse(...typed _raw kwargs)`**
-   Parses every `_raw` blueprint input into a native
-   Python type and runs every config-validation check:
-   pure parsing, set-math on the parsed values, and
-   read-only HA state reads such as entity existence
-   or service registration. On any errors it emits a
-   `config_error` notification and returns; otherwise
-   it calls the service layer directly with native-
-   typed kwargs. Argparse has no side effects beyond
-   reads and its error notification.
-
-3. **Service — `<service>(...native-typed kwargs)`**
-   Takes strongly typed native Python parameters
-   (`list[str]`, `int`, `bool`, etc.). No parsing, no
-   validation. Executes the business logic: evaluate,
-   act, save state, emit domain-specific findings
-   notifications.
-
-Notification ownership follows the layers: entrypoint
-owns `blueprint_mismatch`, argparse owns `config_error`,
-service owns findings. Only the service uses
-`_sweep_and_process_notifications` — its orphan sweep
-handles findings that no longer apply (device removed,
-reference fixed, etc.). Entrypoint and argparse each
-call `_process_persistent_notifications` with their
-single owned notification (active on failure, inactive
-on success as a specific-ID dismiss); they never
-orphan-sweep, because that would collateral-dismiss
-findings emitted by the service layer.
-
-The blueprint `action:` line calls
-`pyscript.<service>_blueprint_entrypoint` (not
-`pyscript.<service>`).
-
-Each service defines a module-level
-`_<SVC>_SERVICE_LABEL` constant (the human-readable
-label used for the registry key, the notification-
-prefix builder, and `_build_config_error_notification`)
-and registers itself in `_BLUEPRINT_SERVICES` right
-after its argparse function is defined. The expected-
-kwargs frozenset is inlined in the registry entry:
-
-```python
-_DW_SERVICE_LABEL = "Device Watchdog"
-
-
-def device_watchdog_blueprint_argparse(...):
-    notif_prefix = _notification_prefix(
-        _DW_SERVICE_LABEL, instance_id,
-    )
-    config_error = _build_config_error_notification(
-        errors, instance_id, _DW_SERVICE_LABEL,
-    )
-    ...
-
-
-_BLUEPRINT_SERVICES[_DW_SERVICE_LABEL] = (
-    "device_watchdog.yaml",
-    frozenset([
-        "instance_id",
-        "watched_integrations_raw",
-        # ...
-    ]),
-    device_watchdog_blueprint_argparse,
-)
-
-
-@service
-async def device_watchdog_blueprint_entrypoint(**kwargs):
-    await _dispatch_blueprint_service(_DW_SERVICE_LABEL, kwargs)
-```
-
-(Trigger Entity Controller used to follow this pattern but
-was ported to a native HA service handler -- see
-``custom_components/blueprint_toolkit/trigger_entity_controller/`` for the new
-shape that future ports should adopt.)
-
-The entrypoint is ``async def`` because ``_dispatch_blueprint_service``
-awaits the module-reload read lock. See "Module reload coordination" in
-``pyscript/blueprint_toolkit.py`` for why the lock is async.
-
-The registry is the single source of truth wired by
-both the dispatcher and the `TestBlueprintExpectedKeys`
-drift test — registering a service is all that's
-needed for dispatch to route through it and for the
-drift test to catch any mismatch between its inlined
-expected-kwargs frozenset and the live argparse
-signature (pyscript's AST evaluator can't introspect
-real parameter names at runtime, which is why the
-frozenset exists; CPython's `inspect.signature` still
-works normally in tests).
+- **Handlers** (`<service>/handler.py`) -- fully typed,
+  checked by mypy strict.
+- **mypy configuration** lives in `pyproject.toml`.
 
 ## Notifications
 
 Use friendly names (not raw entity IDs) in all user-facing
-notification messages. The service wrapper resolves friendly
-names via `state.getattr()` and passes them to the
-logic module.
+notification messages. The handler resolves friendly names
+via `helpers.automation_friendly_name(hass, instance_id)`
+and passes them to the logic module.
 
 ## Implementation Details in Code
 
@@ -372,7 +225,7 @@ information in the same place across automations:
 1. **Summary** -- one paragraph describing what the
    automation does.
 2. **Features** -- bulleted list of capabilities.
-3. **Requirements** -- prerequisite HA / PyScript config.
+3. **Requirements** -- prerequisite HA config.
 4. **Usage** -- install + enable steps.
 5. **Configuration** -- blueprint input table.
 6. **Usage notes** -- examples, exclusion cheatsheets,
@@ -454,34 +307,6 @@ Do not number steps in comments (e.g., `# 1. Parse state`).
 Numbering is unnecessary and adding/removing steps requires
 renumbering.
 
-## PyScript AST Constraints
-
-All pyscript files -- both the service wrapper
-(`blueprint_toolkit.py`) and logic modules
-(`pyscript/modules/*.py`) -- run under PyScript's
-custom AST evaluator, which has restrictions. Even
-though some logic modules are called via
-`@pyscript_executor` (native Python in a worker
-thread), they may also be imported directly by the
-wrapper, so all code must be compatible with the AST
-evaluator. These are enforced via the
-`TestPyScriptCompatibility` test class:
-
-- No generator expressions (use list comprehensions)
-- No `@classmethod` or `@property`
-- No `lambda`
-- No `yield` / `yield from`
-- No `print()` (use `log.warning()`)
-- No `match`/`case`
-- No `sort(key=func)` or `sorted(key=func)` (PyScript
-  wraps function calls as coroutines; use tuple-based
-  sorting instead)
-- No bare `open()` (use `io.open()`)
-- No unquoted `TYPE_CHECKING`-only names in local
-  variable annotations. PyScript evaluates function-
-  body annotations at runtime, unlike standard Python.
-  Either remove the annotation or quote it.
-
 ## Testing
 
 Always add new tests when adding new functionality.
@@ -511,8 +336,8 @@ automatically by `uv`. Run tools via `uvx <tool> [args]`.
 
 ### Docker test harness (opt-in, slow)
 
-`tests/docker/` spins up a real HA container with pyscript
-pre-installed and exercises `scripts/dev-install.py` and
+`tests/docker/` spins up a real HA container and
+exercises `scripts/dev-install.py` and
 `scripts/dev-deploy.py` end-to-end. Not run by
 `tests/run_all.py`; opt in with `pytest -m docker
 tests/docker`. See `tests/docker/README.md` for details
@@ -602,40 +427,19 @@ part of the test suite:
 - `test_ruff_format` -- ruff formatting
 - `test_mypy_strict` -- mypy strict type checking
 
-### PyScript compatibility
-
-Two complementary mechanisms catch PyScript AST
-evaluator incompatibilities before deployment:
-
-- **Static scan**
-  (`TestPyScriptCompatibility` in
-  `test_blueprint_toolkit.py`) -- walks the AST
-  of every `pyscript/**/*.py` file and flags known-bad
-  patterns (generators, lambda, yield, bare `open()`,
-  `sorted(key=func)`, etc.). Fast and gives precise
-  file:line errors. When adding a new static ban, add
-  a paired negative test in `TestHarnessSanity` (see
-  below) to verify the evaluator actually rejects it.
-
-- **Real evaluator**
-  (`test_pyscript_eval_compat.py`) -- instantiates
-  PyScript's actual `AstEval` interpreter and executes
-  every top-level statement of every pyscript file.
-  Catches issues the static scan can't express (e.g.
-  coroutine comparison from `sort(key=func)`, lambda
-  closure capture failures). `TestHarnessSanity`
-  pairs each static ban with a negative test through
-  the real evaluator; if a future pyscript release
-  starts accepting a banned construct, the paired
-  test fails and signals the ban can be removed.
-
 ### Standalone checks
 
 ```bash
 uvx ruff check .
 uvx ruff format .
-uvx mypy pyscript/ --strict
 ```
+
+mypy is run via each test file's
+`TestCodeQuality(CodeQualityBase)` class, which installs
+Home Assistant + voluptuous via PEP 723 inline deps.
+Bare `uvx mypy` from a checkout without those deps
+cannot resolve `homeassistant.*`; run
+`./tests/run_all.py` instead.
 
 ### Python code style
 
@@ -669,10 +473,10 @@ uvx mypy pyscript/ --strict
 - **`scripts/dev-install.py` runs on the HA host.** Plain
   Python (no uv). Reads the checked-out repo under
   `--repo-dir` and reconciles its bundled payload into
-  `/config/blueprints/`, `/config/pyscript/`,
-  `/config/www/blueprint_toolkit/`, and optionally
-  `<cli-symlink-dir>/` as symlinks pointing back into the
-  bundled subtree. Idempotent; tracks state in
+  `/config/blueprints/`, `/config/www/blueprint_toolkit/`,
+  and optionally `<cli-symlink-dir>/` as symlinks
+  pointing back into the bundled subtree. Idempotent;
+  tracks state in
   `<ha-config>/.blueprint_toolkit.manifest.json`
   so stale symlinks from renamed or removed bundled
   files get cleaned up on the next run. Refuses to
@@ -682,17 +486,6 @@ uvx mypy pyscript/ --strict
   `dev-deploy.py` on every push, but can also be run
   directly on the host during debugging.
 
-- **Run `pyscript.reload` after pyscript changes.**
-  Re-imports every file under `pyscript/`. Needed when
-  you touch `pyscript/blueprint_toolkit.py` or any
-  `pyscript/modules/*.py`. Reload picks up the current
-  `@service` signatures and module contents:
-  ```bash
-  curl -s -X POST \
-    -H "Authorization: Bearer $API_KEY" \
-    http://$HA_HOST:8123/api/services/pyscript/reload
-  ```
-
 - **Run `automation.reload` after blueprint changes.**
   Re-reads `automations.yaml` *and* re-renders
   blueprint-backed automation actions from the current
@@ -701,22 +494,23 @@ uvx mypy pyscript/ --strict
   file. Without this, HA keeps dispatching the cached
   rendered action, so if a blueprint input was renamed
   or removed the service call still arrives with the
-  stale kwarg and pyscript raises
-  `TypeError: <service>() called with unexpected keyword
-  arguments`:
+  stale kwarg and the handler's schema rejects it:
   ```bash
   curl -s -X POST \
     -H "Authorization: Bearer $API_KEY" \
     http://$HA_HOST:8123/api/services/automation/reload
   ```
 
-- **Fetch `pyscript.automation_<slug>_state`.** Every
-  blueprint-backed automation writes a state entity on
-  each successful run with `last_run`, `runtime`, and
-  per-automation findings attributes. Read it with:
+- **Fetch the diagnostic state entity.** Each blueprint-
+  backed automation writes a state entity on each
+  successful run with `last_run`, `runtime`, and
+  per-automation diagnostic attributes. The entity ID
+  lives under
+  `blueprint_toolkit.<service>_<slug>_state`. Read it
+  with:
   ```bash
   curl -s -H "Authorization: Bearer $API_KEY" \
-    http://$HA_HOST:8123/api/states/pyscript.automation_<slug>_state
+    http://$HA_HOST:8123/api/states/blueprint_toolkit.<service>_<slug>_state
   ```
   A fresh `last_run` plus a nonzero `runtime` and no
   error attributes mean the run completed. Persistent

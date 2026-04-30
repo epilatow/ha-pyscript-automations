@@ -10,7 +10,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Integration-level tests for the native RW handler.
+"""Integration-level tests for the RW handler.
 
 Exercises the parts the in-process unit tests
 (``tests/test_reference_watchdog_handler.py``) deliberately
@@ -378,7 +378,7 @@ class TestServiceLayerScan:
         """RW per-owner notifications must carry the
         ``Automation: [name](link)`` prefix. Regression
         guard for the P1 the code review caught: the
-        original native port built per-owner specs without
+        handler initially built per-owner specs without
         ``instance_id``, so the dispatcher's friendly-name
         lookup never fired and users couldn't click through
         to the automation that was scanning.

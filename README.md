@@ -1,9 +1,9 @@
 # Blueprint Toolkit
 
-Home Assistant automations built as native HA blueprints that call
-[PyScript](https://github.com/custom-components/pyscript) actions.
-All business logic lives in Python modules with no PyScript
-runtime dependencies, making it fully testable with pytest.
+Home Assistant automations built as HA blueprints that dispatch
+to a custom integration's service handlers. Business logic lives
+in Python modules with no Home Assistant dependencies in the
+logic layer, making it fully testable with pytest.
 
 ## Automations
 
@@ -68,41 +68,26 @@ HA host.
 
 ## Prerequisites
 
-- Home Assistant with the
-  [PyScript integration](https://github.com/custom-components/pyscript)
-  installed
+- Home Assistant
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) (for development)
 
 ## Installation
 
-1. Install [PyScript](https://github.com/custom-components/pyscript)
-   via HACS if you don't already have it.
-
-2. Add the following to your `configuration.yaml`. The two options
-   are required for our pyscript modules to load:
-
-   ```yaml
-   pyscript:
-     allow_all_imports: true
-     hass_is_global: true
-   ```
-
-3. In Home Assistant, go to HACS, then the menu in the top right
+1. In Home Assistant, go to HACS, then the menu in the top right
    and choose **Custom repositories**. Add this repo's URL with
    the **Integration** type.
 
-4. Find **Blueprint Toolkit** in HACS and click
-   **Download**.
+2. Find **Blueprint Toolkit** in HACS and click **Download**.
 
-5. Restart Home Assistant.
+3. Restart Home Assistant.
 
-6. Go to **Settings > Devices & Services > Add Integration** and
+4. Go to **Settings > Devices & Services > Add Integration** and
    add **Blueprint Toolkit**. The integration installs the
-   bundled blueprints, pyscript modules, and rendered docs into
-   your `/config/` directory.
+   bundled blueprints and rendered docs into your `/config/`
+   directory.
 
-7. Optionally, open the integration's **Configure** dialog to set
+5. Optionally, open the integration's **Configure** dialog to set
    **CLI symlink directory** if you want the
    `zwave_network_info.py` shell tool symlinked into a directory
    on your shell's `$PATH`. The path must be writable by the Home
@@ -114,7 +99,7 @@ HA host.
    Home Assistant Container or Core (no Supervisor), any path
    the HA process can write to works. Leave blank to skip.
 
-8. Go to **Settings > Automations & Scenes > Blueprints** to
+6. Go to **Settings > Automations & Scenes > Blueprints** to
    create automations from the installed blueprints.
 
 ## Development

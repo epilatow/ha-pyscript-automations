@@ -11,19 +11,18 @@ restart-recovery plumbing.
 
 Module layout:
 
-- ``logic`` -- pure-function spike-detection / release /
-  auto-off / manual-override evaluator. Owns sample
-  windowing, threshold logic, notification formatting
-  via ``helpers.format_notification``. No HA-side
-  imports.
+- ``logic`` -- spike-detection / release / auto-off /
+  manual-override evaluator. Owns sample windowing,
+  threshold logic, notification formatting via
+  ``helpers.format_notification``. No HA dependencies;
+  safe to import + call outside the HA process.
 - ``handler`` -- HA wiring: vol.Schema-driven argparse,
   three-layer dispatch (entrypoint / argparse / service),
   per-instance state load/save through the diagnostic
   state entity's attributes, periodic ``timer`` ticks
-  via ``helpers.schedule_periodic_with_jitter`` (the
-  blueprint's ``time_pattern`` minute trigger is gone),
-  switch turn_on / turn_off + best-effort notification
-  dispatch via the user-configured notify service.
+  via ``helpers.schedule_periodic_with_jitter``, switch
+  turn_on / turn_off + best-effort notification dispatch
+  via the user-configured notify service.
 """
 
 from __future__ import annotations

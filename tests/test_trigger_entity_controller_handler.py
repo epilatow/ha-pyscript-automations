@@ -510,11 +510,8 @@ class TestKickForRecovery:
 #
 # Catches the failure mode where someone adds / renames a
 # blueprint input but forgets to update the vol.Schema (or
-# vice-versa). Pyscript-side ``test_blueprint_toolkit.py``
-# had the equivalent ``TestBlueprintYamlMatchesRegistry``
-# test against ``_BLUEPRINT_SERVICES``; this is the native
-# replacement, currently single-port. When a second native
-# port lands, hoist into a shared registry + iterate.
+# vice-versa). Currently single-port; when more handlers
+# want this guard, hoist into a shared registry + iterate.
 
 
 class TestBlueprintSchemaDrift(BlueprintSchemaDriftBase):

@@ -10,7 +10,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Integration-level tests for the native DW handler.
+"""Integration-level tests for the DW handler.
 
 Exercises the parts the in-process unit tests
 (``tests/test_device_watchdog_handler.py``) deliberately

@@ -4,9 +4,8 @@
 
 Exercises scripts/dev-install.py (the HA-node-side
 installer) and scripts/dev-deploy.py (the laptop-side push)
-against a real HA container with pyscript pre-installed.
-See tests/docker/README.md for manual invocation during
-interactive development.
+against a real HA container. See tests/docker/README.md for
+manual invocation during interactive development.
 
 Gated by @pytest.mark.docker. The default pytest run excludes
 this module (``addopts = -m 'not docker'`` in pyproject.toml).
@@ -17,7 +16,6 @@ fixtures.
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable
 
@@ -45,16 +43,6 @@ DEV_INSTALL_REL = "scripts/dev-install.py"
 # container. dev-deploy ships the stub command verbatim
 # over ssh so the value just has to be a noop on the host.
 NOOP_RESTART = "echo restart-stub"
-
-# Pyscript blueprint entrypoint services that should still
-# be registered. The set is empty: every automation is now
-# a native handler under ``blueprint_toolkit.<service>``.
-# Kept (rather than the test deleted) until the pyscript
-# graveyard cleanup commit removes the bundled pyscript
-# wrapper entirely; at that point the surrounding
-# pyscript-services loop in this file becomes vacuous and
-# the helper / loop should go too.
-EXPECTED_SERVICES: frozenset[str] = frozenset()
 
 # HA returns blueprint paths relative to its
 # blueprints/<domain>/ directory. Verifying these are
@@ -118,24 +106,13 @@ def _poll(
     raise AssertionError(f"{message}; last_err={last_err!r}")
 
 
-def _pyscript_services(docker_ha: DockerHA) -> set[str]:
-    code, body = docker_ha.api_get("/api/services")
-    assert code == 200, f"/api/services returned {code}"
-    data = json.loads(body)
-    for domain in data:
-        if domain["domain"] == "pyscript":
-            return set(domain["services"].keys())
-    return set()
-
-
 def _clear_installed_symlinks(docker_ha: DockerHA) -> None:
     """Remove the dev-install-owned symlinks under /config.
 
     Leaves the repo clone and HA state alone.
     """
     docker_ha.exec_shell(
-        "rm -f /config/pyscript/blueprint_toolkit.py && "
-        "rm -rf /config/pyscript/modules /config/blueprints "
+        "rm -rf /config/blueprints "
         "/config/www/blueprint_toolkit && "
         "rm -f /config/.blueprint_toolkit.manifest.json",
     )
@@ -197,14 +174,6 @@ class TestDevInstallEndToEnd:
             f"dev-install.py failed: stdout={r.stdout} stderr={r.stderr}"
         )
 
-        check = docker_ha.exec_shell(
-            "test -L /config/pyscript/blueprint_toolkit.py",
-            check=False,
-        )
-        assert check.returncode == 0, (
-            "expected /config/pyscript/blueprint_toolkit.py "
-            "to be a symlink after dev-install"
-        )
         # Note: bundled/www/ is not installed by the
         # reconciler (HA's /local/ static handler refuses
         # to follow our symlinks; the integration
@@ -223,29 +192,14 @@ class TestDevInstallEndToEnd:
                 f"expected blueprint symlink missing: {bp}"
             )
 
-        code, _ = docker_ha.api_post("/api/services/pyscript/reload")
-        assert code == 200, f"pyscript.reload failed: {code}"
         code, _ = docker_ha.api_post("/api/services/automation/reload")
         assert code == 200, f"automation.reload failed: {code}"
-
-        def _all_services_present() -> bool:
-            missing = EXPECTED_SERVICES - _pyscript_services(docker_ha)
-            assert not missing, f"missing services: {sorted(missing)}"
-            return True
 
         def _all_blueprints_registered() -> bool:
             missing = EXPECTED_BLUEPRINTS - _registered_blueprints(docker_ha)
             assert not missing, f"missing blueprints in HA: {sorted(missing)}"
             return True
 
-        _poll(
-            _all_services_present,
-            timeout=30,
-            message=(
-                "pyscript blueprint entrypoint services not registered "
-                "after dev-install + pyscript.reload"
-            ),
-        )
         _poll(
             _all_blueprints_registered,
             timeout=30,

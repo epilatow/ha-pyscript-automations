@@ -99,13 +99,6 @@ def _destination_mapping(
             rel = src.relative_to(src_dir)
             mapping[config_root / "blueprints" / rel] = src
 
-    # bundled/pyscript/... -> /config/pyscript/...
-    src_dir = bundled_root / "pyscript"
-    if src_dir.is_dir():
-        for src in sorted(src_dir.rglob("*.py")):
-            rel = src.relative_to(src_dir)
-            mapping[config_root / "pyscript" / rel] = src
-
     # NB: bundled/www/... is NOT installed via the
     # filesystem. HA's /local/ static handler refuses to
     # follow symlinks whose targets escape /config/www/,

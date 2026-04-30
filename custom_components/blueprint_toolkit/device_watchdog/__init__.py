@@ -10,11 +10,12 @@ plumbing.
 
 Module layout:
 
-- ``logic`` -- pure-function device-health evaluator. Owns
-  per-device unavailable / staleness / disabled-diagnostic
+- ``logic`` -- device-health evaluator. Owns per-device
+  unavailable / staleness / disabled-diagnostic
   classification, notification body assembly, and the
   cap-and-sort glue against ``helpers.prepare_notifications``.
-  No HA-side imports.
+  No HA dependencies; safe to import + call outside the
+  HA process.
 - ``handler`` -- HA wiring: vol.Schema-driven argparse,
   three-layer dispatch (entrypoint / argparse / service),
   periodic scheduling via

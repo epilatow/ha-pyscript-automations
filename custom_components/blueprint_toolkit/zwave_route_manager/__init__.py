@@ -10,10 +10,10 @@ plumbing.
 
 Module layout:
 
-- ``logic`` -- pure-function decision tree. Owns YAML
-  parsing, entity-to-node resolution, the diff/plan state
-  machine, and the bridge-timeout circuit breaker. No
-  HA-side imports.
+- ``logic`` -- decision tree. Owns YAML parsing, entity-
+  to-node resolution, the diff/plan state machine, and
+  the bridge-timeout circuit breaker. No HA dependencies;
+  safe to import + call outside the HA process.
 - ``bridge`` -- async socket.io client for zwave-js-ui's
   ``ZWAVE_API`` event. Imported by ``handler`` only.
 - ``handler`` -- HA wiring: vol.Schema-driven argparse with

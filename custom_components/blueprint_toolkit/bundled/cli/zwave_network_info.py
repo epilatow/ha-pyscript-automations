@@ -421,7 +421,7 @@ class ZwaveApiError(RuntimeError):
 # interface. ``2`` keeps the connection pipelined so one slow
 # node doesn't block progress on the rest, without queuing a
 # thundering herd. Mirrored by the ZRM bridge's semaphore in
-# ``pyscript/modules/zwave_js_ui_bridge.py``.
+# ``custom_components/blueprint_toolkit/zwave_route_manager/bridge.py``.
 _ROUTE_REFRESH_CONCURRENCY = 2
 
 

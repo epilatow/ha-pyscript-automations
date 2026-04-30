@@ -1,9 +1,9 @@
 # Docker Test Harness
 
-Full-stack tests that run against a real Home Assistant container with
-pyscript pre-installed. Exercises the parts of this repo that unit-level
-tests cannot reach (install scripts, deploy scripts, reload services,
-blueprint registration) by driving them end-to-end against HA's REST API.
+Full-stack tests that run against a real Home Assistant container.
+Exercises the parts of this repo that unit-level tests cannot reach
+(install scripts, deploy scripts, reload services, blueprint
+registration) by driving them end-to-end against HA's REST API.
 
 ## When to use
 
@@ -30,8 +30,7 @@ in `pyproject.toml` sets `addopts = -m 'not docker'` so `-m docker` is
 required to opt in.
 
 First run builds the custom image (~1 minute); subsequent runs reuse the
-layer cache. The pyscript custom component is cached at
-`tests/docker/.cache/pyscript/` (gitignored) after first clone.
+layer cache.
 
 ## Interactive development
 
@@ -64,12 +63,11 @@ starting.
 - `_harness/ha_onboard.py` -- stdlib-only onboarding driver.
 - `conftest.py` -- session fixtures (container lifecycle, API helpers,
   repo-into-container copy helper).
-- `test_dev_workflow.py` -- the actual tests (install.sh,
+- `test_dev_workflow.py` -- the actual tests (dev-install.py,
   dev-deploy.py).
 
 ## Prerequisites
 
 - Docker Desktop (macOS) or docker + docker compose (Linux). Tested
   against Docker Desktop 29+ on macOS.
-- Internet access on first run to pull the HA image (~600MB) and clone
-  pyscript.
+- Internet access on first run to pull the HA image (~600MB).

@@ -4,8 +4,6 @@
 # with openssh-server, git, and bash so the in-repo test
 # suite can exercise scripts/install.sh and
 # scripts/dev-deploy.py against a running HA instance.
-# pyscript is installed into /config/custom_components/
-# by the pytest fixture, not baked into the image.
 
 ARG HA_IMAGE=ghcr.io/home-assistant/home-assistant:stable
 FROM ${HA_IMAGE}

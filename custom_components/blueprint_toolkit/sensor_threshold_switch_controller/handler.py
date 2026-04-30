@@ -14,9 +14,10 @@ pattern):
 - Per-instance state (sample window, baseline,
   override list, auto_off_started_at) lives in the
   diagnostic state entity's ``data`` attribute as a
-  JSON blob. Volatile across HA restarts (mirrors the
-  pyscript behaviour); the periodic + reactive
-  triggers re-bootstrap state on the next invocation.
+  JSON blob. Volatile across HA restarts; the periodic
+  + reactive triggers re-bootstrap state on the next
+  invocation, and ``handle_service_call`` arms auto-off
+  at bootstrap if the switch is currently on.
 - Action: ``homeassistant.turn_on`` /
   ``homeassistant.turn_off`` against the target
   switch entity, with the caller's ``context``
@@ -76,8 +77,7 @@ _SERVICE_TAG = "STSC"
 _SERVICE_NAME = "Sensor Threshold Switch Controller"
 BLUEPRINT_PATH = "blueprint_toolkit/sensor_threshold_switch_controller.yaml"
 
-# The integration-owned periodic tick fires every minute
-# (matches the pyscript ``time_pattern: "/1"`` cadence).
+# The integration-owned periodic tick fires every minute.
 # Hardcoded rather than a blueprint input -- the cadence
 # is load-bearing for the spike-detection sample window
 # and isn't user-tunable today.
@@ -542,9 +542,8 @@ def _ensure_timer(
     """Arm the periodic minute-tick timer if not yet armed.
 
     The interval is fixed (``_PERIODIC_INTERVAL`` = 1
-    minute, matching pyscript's ``time_pattern: "/1"``);
-    no blueprint input controls it, so re-arming on
-    interval change is moot. First call arms; subsequent
+    minute); no blueprint input controls it, so re-arming
+    on interval change is moot. First call arms; subsequent
     calls within the same instance lifetime are no-ops.
     """
     if state.cancel_timer is not None:

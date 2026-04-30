@@ -2,10 +2,10 @@
 """Session-level pytest fixtures for the docker test harness.
 
 Brings up a single HA container shared across the session
-and provisions it for tests: pyscript pre-installed, ssh
-keypair authorized, onboarding completed, an auth token
-stashed. Tests re-reset /config state as needed rather than
-bouncing the container between each test.
+and provisions it for tests: ssh keypair authorized,
+onboarding completed, an auth token stashed. Tests re-reset
+/config state as needed rather than bouncing the container
+between each test.
 """
 
 from __future__ import annotations
@@ -31,14 +31,6 @@ HA_PORT = 8123
 SSH_PORT = 2222
 HA_BASE_URL = f"http://127.0.0.1:{HA_PORT}"
 CONTAINER_NAME = "blueprint-toolkit-test"
-
-# Cache for the pyscript custom component. Lives under
-# tests/docker/.cache/pyscript/ (gitignored) so it stays
-# adjacent to the harness that uses it. Populated on
-# first fixture use via git clone --depth 1; reused
-# across runs.
-PYSCRIPT_CACHE_DIR = HARNESS_DIR / ".cache" / "pyscript"
-PYSCRIPT_REPO_URL = "https://github.com/custom-components/pyscript"
 
 
 def _have_docker() -> bool:
@@ -238,23 +230,6 @@ class DockerHA:
         return reply
 
 
-def _ensure_pyscript_cache() -> Path:
-    PYSCRIPT_CACHE_DIR.parent.mkdir(parents=True, exist_ok=True)
-    if not (PYSCRIPT_CACHE_DIR / ".git").exists():
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                PYSCRIPT_REPO_URL,
-                str(PYSCRIPT_CACHE_DIR),
-            ],
-            check=True,
-        )
-    return PYSCRIPT_CACHE_DIR / "custom_components" / "pyscript"
-
-
 def _generate_test_key(test_dir: Path) -> Path:
     # Ed25519 keypair used by dev-deploy.py's ssh inside
     # the container. The public half is exposed via the
@@ -326,18 +301,8 @@ def docker_ha(
 
     # Minimal HA configuration.yaml so HA starts cleanly.
     (config_dir / "configuration.yaml").write_text(
-        "default_config:\n"
-        "pyscript:\n"
-        "  allow_all_imports: true\n"
-        "  hass_is_global: true\n",
+        "default_config:\n",
     )
-
-    # Seed pyscript under custom_components/ before HA
-    # first-starts so it loads on initial boot.
-    pyscript_src = _ensure_pyscript_cache()
-    dst = config_dir / "custom_components" / "pyscript"
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(pyscript_src, dst)
 
     _generate_test_key(test_dir)
 

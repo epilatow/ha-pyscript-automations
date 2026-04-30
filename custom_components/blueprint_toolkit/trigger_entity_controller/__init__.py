@@ -10,9 +10,10 @@ plumbing.
 
 Module layout:
 
-- ``logic`` -- pure-function decision tree. Imports
-  formatting helpers from the shared ``..helpers``
-  module.
+- ``logic`` -- decision tree. Imports formatting helpers
+  from the shared ``..helpers`` module. No HA
+  dependencies; safe to import + call outside the HA
+  process.
 - ``handler`` -- HA wiring: vol.Schema-driven argparse
   with persistent-notification config-error surfacing,
   three-layer dispatch (entrypoint / argparse /

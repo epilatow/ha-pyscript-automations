@@ -498,15 +498,12 @@ class TestArgparseMultilineRegex:
 # Argparse: int-input rejection (schema-level)
 # --------------------------------------------------------
 #
-# Pre-port pyscript ``TestRwIntInputValidation`` covered
+# The schema uses ``vol.All(vol.Coerce(int), vol.Range(...))``
+# for integer inputs; rejections flow through
+# ``vol.MultipleInvalid`` and surface via the ``schema:``
+# prefix in the emit-config-error call. These tests cover
 # user-facing error messages for non-numeric and
-# out-of-range integer inputs. The native schema replaces
-# the pyscript hand-rolled validation with
-# ``vol.All(vol.Coerce(int), vol.Range(...))``; rejections
-# flow through ``vol.MultipleInvalid`` and the
-# ``schema:`` prefix in the emit-config-error call. These
-# tests recover that explicit coverage at the native API
-# surface.
+# out-of-range integer inputs.
 
 
 class TestArgparseIntValidation:

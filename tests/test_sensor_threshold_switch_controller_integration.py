@@ -10,7 +10,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Integration-level tests for the native STSC handler.
+"""Integration-level tests for the STSC handler.
 
 Exercises the parts the in-process unit tests
 (``tests/test_sensor_threshold_switch_controller_handler.py``)
@@ -458,11 +458,10 @@ class TestActionDispatch:
     ) -> None:
         """End-to-end: a sensor spike should provoke a
         ``homeassistant.turn_on`` against
-        ``target_switch_entity``. The pre-port
-        ``TestActionExecution`` covered this in
-        ``test_blueprint_toolkit.py``; it's gone with the
-        wrapper, so the dispatch is otherwise opaque to
-        the test surface.
+        ``target_switch_entity``. Without this test the
+        dispatch is opaque to the test surface (the
+        logic suite tests the action enum, not the HA
+        service call).
 
         Also asserts ``context=call.context`` is propagated
         from the originating service call through to the

@@ -1,7 +1,7 @@
 [project]
 name = "ha-blueprint-toolkit"
 version = "1.0.0"
-description = "Home Assistant blueprints backed by testable PyScript actions"
+description = "Home Assistant blueprints backed by a testable HA integration"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
@@ -32,8 +32,13 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["pyscript/"]
-mypy_path = ["pyscript/modules"]
+# No ``files = [...]`` set: the canonical type check runs
+# via each test file's ``TestCodeQuality(CodeQualityBase)``
+# class, which installs HA + voluptuous etc. via PEP 723
+# inline deps and feeds explicit ``mypy_targets`` to mypy.
+# Bare ``uvx mypy`` from a checkout without HA installed
+# will not have the type stubs needed to check the
+# integration; run ``./tests/run_all.py`` instead.
 cache_dir = "/tmp/mypy_cache"
 
 [[tool.mypy.overrides]]
@@ -51,10 +56,9 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # scripts/zwave_network_info.py bootstraps its own venv for
 # these at runtime; the host dev environment may not have them
-# installed, and they're unused in the rest of the repo. The
-# pyscript bridge module imports socketio lazily under the
-# pyscript venv, and the ZRM wrapper imports socketio.exceptions
-# to classify bridge-timeout errors.
+# installed. The ZRM bridge module imports socketio lazily,
+# and the ZRM handler imports socketio.exceptions to classify
+# bridge-timeout errors.
 module = ["socketio", "socketio.exceptions", "aiohttp"]
 ignore_missing_imports = true
 

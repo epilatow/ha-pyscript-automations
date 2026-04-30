@@ -11,8 +11,7 @@ host under ``<workspace>/<YYYYMMDD_HHMMSS>/blueprint_toolkit/``
 flips ``/config/custom_components/blueprint_toolkit`` to a
 symlink that points at the new build, runs the bundled
 ``scripts/dev-install.py`` to refresh the
-``/config/blueprints/`` and ``/config/pyscript/`` symlinks,
-and restarts HA.
+``/config/blueprints/`` symlinks, and restarts HA.
 
 The first run preserves the HACS-installed integration as
 ``<workspace>/<vX.Y.Z>/blueprint_toolkit/`` (using the

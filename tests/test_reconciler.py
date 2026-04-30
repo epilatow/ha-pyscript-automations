@@ -6,8 +6,8 @@
 # This is AI generated code
 """Tests for custom_components/blueprint_toolkit/reconciler.py.
 
-All tests exercise pure planning against tempdirs; no HA,
-no subprocess. Covers every ActionKind transition,
+All tests exercise the planning logic against tempdirs;
+no HA, no subprocess. Covers every ActionKind transition,
 HACS-vs-MANUAL mode differences, cli_symlink_dir behaviour,
 and each conflict classification.
 """
@@ -40,7 +40,6 @@ def _make_bundled(root: Path) -> Path:
     (bundled / "blueprints" / "automation" / "blueprint_toolkit").mkdir(
         parents=True,
     )
-    (bundled / "pyscript" / "modules").mkdir(parents=True)
     (bundled / "www" / "blueprint_toolkit" / "docs").mkdir(parents=True)
     (bundled / "cli").mkdir(parents=True)
 
@@ -51,10 +50,13 @@ def _make_bundled(root: Path) -> Path:
         / "blueprint_toolkit"
         / "demo.yaml"
     ).write_text("blueprint: {}\n")
-    (bundled / "pyscript" / "blueprint_toolkit.py").write_text(
-        "# service wrapper\n",
-    )
-    (bundled / "pyscript" / "modules" / "demo.py").write_text("# module\n")
+    (
+        bundled
+        / "blueprints"
+        / "automation"
+        / "blueprint_toolkit"
+        / "extra.yaml"
+    ).write_text("blueprint: {}\n")
     (bundled / "www" / "blueprint_toolkit" / "docs" / "demo.html").write_text(
         "<html>demo</html>\n"
     )
@@ -105,8 +107,7 @@ class TestFreshInstall:
         # reconciler ignores it.
         expected_dests = {
             config / "blueprints/automation/blueprint_toolkit/demo.yaml",
-            config / "pyscript/blueprint_toolkit.py",
-            config / "pyscript/modules/demo.py",
+            config / "blueprints/automation/blueprint_toolkit/extra.yaml",
         }
         assert {a.destination for a in result.actions} == expected_dests
         assert result.new_manifest == frozenset(expected_dests)
@@ -178,14 +179,20 @@ class TestReinstall:
     def test_removed_bundled_file_becomes_remove(self, tmp_path: Path) -> None:
         bundled, config, first = self._install_all(tmp_path)
         # Remove one source from bundled, keep manifest as-is.
-        (bundled / "pyscript" / "modules" / "demo.py").unlink()
+        (
+            bundled
+            / "blueprints"
+            / "automation"
+            / "blueprint_toolkit"
+            / "extra.yaml"
+        ).unlink()
 
         second = plan(
             bundled_root=bundled,
             config_root=config,
             prior_manifest=first.new_manifest,
         )
-        rm_dest = config / "pyscript/modules/demo.py"
+        rm_dest = config / "blueprints/automation/blueprint_toolkit/extra.yaml"
         assert _kind_for(second, rm_dest) == ActionKind.REMOVE
 
     def test_retargeted_symlink_in_prior_manifest_is_update_in_hacs_mode(
@@ -193,7 +200,7 @@ class TestReinstall:
         tmp_path: Path,
     ) -> None:
         bundled, config, first = self._install_all(tmp_path)
-        victim = config / "pyscript/modules/demo.py"
+        victim = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         # Retarget the symlink to simulate someone editing it
         # out from under us.
         victim.unlink()
@@ -224,7 +231,7 @@ class TestModeHacsStrict:
         config.mkdir()
         # Pre-seed an unknown symlink at a destination we
         # would install.
-        dest = config / "pyscript/blueprint_toolkit.py"
+        dest = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         dest.parent.mkdir(parents=True)
         other = tmp_path / "whatever.py"
         other.write_text("# other\n")
@@ -252,10 +259,14 @@ class TestModeManualLenient:
         config = tmp_path / "config"
         config.mkdir()
         # Pre-seed a symlink that points into the OLD bundle.
-        dest = config / "pyscript/blueprint_toolkit.py"
+        dest = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         dest.parent.mkdir(parents=True)
         dest.symlink_to(
-            old_bundled / "pyscript" / "blueprint_toolkit.py",
+            old_bundled
+            / "blueprints"
+            / "automation"
+            / "blueprint_toolkit"
+            / "demo.yaml",
         )
 
         # Prior manifest empty -- we have never run
@@ -278,7 +289,7 @@ class TestModeManualLenient:
         bundled = _make_bundled(tmp_path / "repo")
         config = tmp_path / "config"
         config.mkdir()
-        dest = config / "pyscript/blueprint_toolkit.py"
+        dest = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         dest.parent.mkdir(parents=True)
         other = tmp_path / "other-place.py"
         other.write_text("#\n")
@@ -311,7 +322,7 @@ class TestConflicts:
         bundled = _make_bundled(tmp_path / "repo")
         config = tmp_path / "config"
         config.mkdir()
-        dest = config / "pyscript/modules/demo.py"
+        dest = config / "blueprints/automation/blueprint_toolkit/extra.yaml"
         dest.parent.mkdir(parents=True)
         dest.write_text("# user file\n")  # regular file
 
@@ -334,7 +345,7 @@ class TestConflicts:
         config = tmp_path / "config"
         config.mkdir()
         # A directory where we want a symlink.
-        dest = config / "pyscript/blueprint_toolkit.py"
+        dest = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         dest.mkdir(parents=True)
 
         result = plan(
@@ -387,7 +398,7 @@ class TestTargetShape:
             action.destination.parent.mkdir(parents=True, exist_ok=True)
             action.destination.symlink_to(action.target)
         # Spot-check one resolved path lands in the bundle.
-        sample = config / "pyscript/modules/demo.py"
+        sample = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         assert sample.is_symlink()
         resolved = os.path.realpath(sample)
         assert BUNDLED_MARKER in resolved
@@ -411,7 +422,7 @@ class TestEmptyBundle:
         bundled.mkdir(parents=True)
         config = tmp_path / "config"
         config.mkdir()
-        stale_dest = config / "pyscript/modules/old.py"
+        stale_dest = config / "blueprints/automation/blueprint_toolkit/old.yaml"
 
         result = plan(
             bundled_root=bundled,
@@ -427,7 +438,7 @@ class TestEmptyBundle:
         )
 
     def test_missing_subdir_is_skipped_silently(self, tmp_path: Path) -> None:
-        # Build a partial bundle with only pyscript/.
+        # Build a partial bundle with only blueprints/.
         bundled = (
             tmp_path
             / "repo"
@@ -435,8 +446,16 @@ class TestEmptyBundle:
             / "blueprint_toolkit"
             / "bundled"
         )
-        (bundled / "pyscript" / "modules").mkdir(parents=True)
-        (bundled / "pyscript" / "modules" / "only.py").write_text("#\n")
+        (bundled / "blueprints" / "automation" / "blueprint_toolkit").mkdir(
+            parents=True,
+        )
+        (
+            bundled
+            / "blueprints"
+            / "automation"
+            / "blueprint_toolkit"
+            / "only.yaml"
+        ).write_text("blueprint: {}\n")
         config = tmp_path / "config"
         config.mkdir()
 
@@ -445,10 +464,11 @@ class TestEmptyBundle:
             config_root=config,
             prior_manifest=frozenset(),
         )
-        # One install; no blueprints/www/cli content to
-        # surface.
+        # One install; no www/cli content to surface.
         dests = [a.destination for a in result.actions]
-        assert dests == [config / "pyscript/modules/only.py"]
+        assert dests == [
+            config / "blueprints/automation/blueprint_toolkit/only.yaml"
+        ]
 
 
 # ---------------------------------------------------------------

@@ -168,7 +168,7 @@ def md_escape(s: str) -> str:
 
 
 # --------------------------------------------------------
-# Slugify + regex helpers (pure)
+# Slugify + regex helpers
 # --------------------------------------------------------
 
 
@@ -637,7 +637,7 @@ async def validate_payload_or_emit_config_error(
 ) -> dict[str, Any] | None:
     """Run ``schema`` over ``raw`` or emit a config-error notification.
 
-    Every native handler's ``_async_argparse`` opens with
+    Every handler's ``_async_argparse`` opens with
     the same try / except / ``_emit_config_error`` block;
     factor it here so the failure shape (``schema:`` prefix,
     fallback ``instance_id_for_config_error`` lookup, single-
@@ -1059,11 +1059,11 @@ def schedule_periodic_with_jitter(
     on shared registries / file systems / external APIs.
 
     The offset is derived from a stable hash of
-    ``instance_id`` (preserving pyscript's algorithm:
-    first 4 bytes of SHA-1, big-endian, mod the interval
-    in seconds), so a given automation always lands on
-    the same per-interval slot across restarts -- handy
-    for log readers correlating across days. Mechanically:
+    ``instance_id`` (first 4 bytes of SHA-1, big-endian,
+    mod the interval in seconds), so a given automation
+    always lands on the same per-interval slot across
+    restarts -- handy for log readers correlating across
+    days. Mechanically:
 
     1. Schedule the first call via ``async_call_later``
        at ``now + jitter_seconds``.

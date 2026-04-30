@@ -10,11 +10,12 @@ restart-recovery plumbing.
 
 Module layout:
 
-- ``logic`` -- pure-function entity-drift evaluator. Owns
-  per-device drift classification, deviceless-entity
-  collision-suffix handling, notification body assembly,
-  and the cap-and-sort glue against
-  ``helpers.prepare_notifications``. No HA-side imports.
+- ``logic`` -- entity-drift evaluator. Owns per-device
+  drift classification, deviceless-entity collision-suffix
+  handling, notification body assembly, and the
+  cap-and-sort glue against
+  ``helpers.prepare_notifications``. No HA dependencies;
+  safe to import + call outside the HA process.
 - ``handler`` -- HA wiring: vol.Schema-driven argparse,
   three-layer dispatch (entrypoint / argparse / service),
   periodic scheduling via

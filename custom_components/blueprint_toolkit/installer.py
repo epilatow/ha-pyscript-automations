@@ -1,8 +1,10 @@
 # This is AI generated code
 """Apply a ReconcilePlan to the filesystem.
 
-Split from ``reconciler.py`` so the pure planning logic can
-be exercised without any filesystem side effects. This
+Split from ``reconciler.py`` so the planning logic (no HA
+dependencies; safe to import + call outside the HA
+process) can be exercised without any filesystem side
+effects. This
 module performs synchronous I/O (``os.symlink``, ``os.unlink``,
 ``mkdir``). The HA integration (step 6) wraps calls here in
 ``hass.async_add_executor_job`` so the event loop stays

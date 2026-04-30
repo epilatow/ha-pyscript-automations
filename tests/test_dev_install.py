@@ -66,7 +66,6 @@ def _make_fake_integration(root: Path) -> Path:
     (bundled / "blueprints" / "automation" / "blueprint_toolkit").mkdir(
         parents=True
     )
-    (bundled / "pyscript" / "modules").mkdir(parents=True)
     (bundled / "www" / "blueprint_toolkit" / "docs").mkdir(parents=True)
     (bundled / "cli").mkdir(parents=True)
 
@@ -77,8 +76,6 @@ def _make_fake_integration(root: Path) -> Path:
         / "blueprint_toolkit"
         / "demo.yaml"
     ).write_text("blueprint: {}\n")
-    (bundled / "pyscript" / "blueprint_toolkit.py").write_text("# svc\n")
-    (bundled / "pyscript" / "modules" / "demo.py").write_text("# module\n")
     (bundled / "www" / "blueprint_toolkit" / "docs" / "demo.html").write_text(
         "<html>demo</html>\n"
     )
@@ -139,8 +136,6 @@ class TestFreshInstall:
         # route directly at the bundled docs dir instead.
         assert created == {
             "blueprints/automation/blueprint_toolkit/demo.yaml",
-            "pyscript/blueprint_toolkit.py",
-            "pyscript/modules/demo.py",
         }
 
     def test_symlinks_resolve_to_bundled(self, tmp_path: Path) -> None:
@@ -149,11 +144,16 @@ class TestFreshInstall:
         config.mkdir()
 
         _run_dev_install(integration_dir=integration, ha_config=config)
-        src = config / "pyscript/modules/demo.py"
+        src = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         assert src.is_symlink()
         assert os.path.realpath(src) == str(
             (
-                integration / "bundled" / "pyscript" / "modules" / "demo.py"
+                integration
+                / "bundled"
+                / "blueprints"
+                / "automation"
+                / "blueprint_toolkit"
+                / "demo.yaml"
             ).resolve()
         )
 
@@ -164,9 +164,7 @@ class TestFreshInstall:
 
         _run_dev_install(integration_dir=integration, ha_config=config)
         paths = _load_manifest(config)
-        assert (
-            len(paths) == 3
-        )  # blueprints, pyscript wrapper, pyscript module (no www, no cli)
+        assert len(paths) == 1  # blueprints only (no www, no cli)
         for p in paths:
             assert p.startswith(str(config))
 
@@ -255,7 +253,9 @@ class TestConflicts:
         config = tmp_path / "config"
         config.mkdir()
         # Pre-seed a user file at a destination.
-        conflict_path = config / "pyscript/modules/demo.py"
+        conflict_path = (
+            config / "blueprints/automation/blueprint_toolkit/demo.yaml"
+        )
         conflict_path.parent.mkdir(parents=True)
         conflict_path.write_text("# user content\n")
 
@@ -267,8 +267,6 @@ class TestConflicts:
         assert conflict_path.read_text() == "# user content\n", (
             "dev-install must not overwrite regular files"
         )
-        # Other files still got installed.
-        assert (config / "pyscript/blueprint_toolkit.py").is_symlink()
 
 
 # ---- Stale-removal path ---------------------------------------
@@ -284,11 +282,18 @@ class TestStaleRemoval:
         config.mkdir()
 
         _run_dev_install(integration_dir=integration, ha_config=config)
-        victim = config / "pyscript/modules/demo.py"
+        victim = config / "blueprints/automation/blueprint_toolkit/demo.yaml"
         assert victim.is_symlink()
 
         # Remove the source from bundled and re-run.
-        (integration / "bundled" / "pyscript" / "modules" / "demo.py").unlink()
+        (
+            integration
+            / "bundled"
+            / "blueprints"
+            / "automation"
+            / "blueprint_toolkit"
+            / "demo.yaml"
+        ).unlink()
 
         r = _run_dev_install(integration_dir=integration, ha_config=config)
         assert r.returncode == 0

@@ -10,7 +10,7 @@
 # ]
 # ///
 # This is AI generated code
-"""Integration-level tests for the native EDW handler.
+"""Integration-level tests for the EDW handler.
 
 Exercises the parts the in-process unit tests
 (``tests/test_entity_defaults_watchdog_handler.py``)

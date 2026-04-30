@@ -13,8 +13,8 @@ from typing import Any
 # Repository root
 _REPO_ROOT = Path(__file__).parent.parent
 
-# Ensure pyscript/modules is importable
-sys.path.insert(0, str(_REPO_ROOT / "pyscript" / "modules"))
+# Make ``custom_components.blueprint_toolkit.*`` importable
+sys.path.insert(0, str(_REPO_ROOT))
 
 
 # Create a temporary directory for __pycache__ and redirect
