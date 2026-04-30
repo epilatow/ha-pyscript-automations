@@ -12,18 +12,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
-_SCRIPT_PATH = REPO_ROOT / "pyscript" / "modules" / "device_watchdog.py"
-
-sys.path.insert(0, str(_SCRIPT_PATH.parent))
+sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
-from device_watchdog import (  # noqa: E402
+
+from custom_components.blueprint_toolkit.device_watchdog.logic import (  # noqa: E402, E501
     CHECK_ALL,
     CHECK_DEVICE_UPDATES,
     CHECK_DISABLED_DIAGNOSTICS,
     CHECK_UNAVAILABLE_ENTITIES,
     Config,
+    DeviceEntry,
     DeviceInfo,
     EntityInfo,
     RegistryEntry,
@@ -36,8 +36,7 @@ from device_watchdog import (  # noqa: E402
     evaluate_diagnostics,
     run_evaluation,
 )
-from helpers import (  # noqa: E402
-    DeviceEntry,
+from custom_components.blueprint_toolkit.helpers import (  # noqa: E402
     PersistentNotification,
 )
 
@@ -991,17 +990,14 @@ class TestNotificationPrefixIsolation:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/modules/device_watchdog.py",
-        "tests/test_device_watchdog.py",
+        "custom_components/blueprint_toolkit/device_watchdog/__init__.py",
+        "custom_components/blueprint_toolkit/device_watchdog/logic.py",
+        "tests/test_device_watchdog_logic.py",
     ]
     mypy_targets = [
-        "pyscript/modules/device_watchdog.py",
+        "custom_components/blueprint_toolkit/device_watchdog/logic.py",
     ]
 
 
-# -- Entry point -------------------------------------
-
 if __name__ == "__main__":
-    from conftest import run_tests
-
-    run_tests(__file__, _SCRIPT_PATH, REPO_ROOT)
+    sys.exit(pytest.main([__file__, "-v", *sys.argv[1:]]))

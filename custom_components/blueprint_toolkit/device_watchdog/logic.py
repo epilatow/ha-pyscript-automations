@@ -1,8 +1,6 @@
 # This is AI generated code
 """Business logic for device health watchdog.
 
-Does not use PyScript-injected globals.
-
 Monitors device health across integrations by checking for
 unavailable entities and stale state (no state report within
 a configurable threshold).
@@ -11,7 +9,36 @@ a configurable threshold).
 from dataclasses import dataclass, field
 from datetime import datetime
 
-import helpers
+from .. import helpers
+
+
+@dataclass
+class DeviceEntry:
+    """Device discovered during integration scan.
+
+    Locally defined rather than in the shared ``helpers``
+    module: only this port consumes the shape today. If a
+    second port grows the same need, hoist into helpers.
+    """
+
+    id: str
+    url: str
+
+    # Current device name. HA device registry
+    # ``device.name_by_user`` (if set) or ``device.name``
+    # (set by integration).
+    name: str
+
+    # Integration default name. HA device registry
+    # ``device.name``. Non-deterministic for
+    # multi-integration devices.
+    default_name: str
+
+    # Map integrations to the entity ids they provide.
+    integration_entities: dict[str, set[str]] = field(
+        default_factory=dict,
+    )
+
 
 # Check identifiers surfaced as blueprint options. Adding
 # a new check = one new constant, add it to ``CHECK_ALL``,
@@ -70,7 +97,7 @@ class RegistryEntry:
 class DeviceInfo:
     """Device with its entity state snapshots."""
 
-    de: helpers.DeviceEntry
+    de: DeviceEntry
     entities: list[EntityInfo] = field(
         default_factory=list,
     )
@@ -495,10 +522,10 @@ def run_evaluation(
 
     notifications = helpers.prepare_notifications(
         results,
-        max_notifications,
-        f"{config.notification_prefix}cap",
-        "Device watchdog: notification cap reached",
-        "devices with issues",
+        max_notifications=max_notifications,
+        cap_notification_id=f"{config.notification_prefix}cap",
+        cap_title="Device watchdog: notification cap reached",
+        cap_item_label="devices with issues",
     )
     notifications += diag_notifications
 
