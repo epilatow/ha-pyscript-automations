@@ -136,6 +136,8 @@ blueprint:
       selector:
         boolean: {}
 
+triggers: []
+
 actions:
   - action: blueprint_toolkit.entity_defaults_watchdog
     # Periodic scheduling lives in the integration handler
