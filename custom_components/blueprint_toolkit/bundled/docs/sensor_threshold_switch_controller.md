@@ -90,22 +90,34 @@ decisions without requiring ad-hoc instrumentation.
 
 ### Entity attributes (always on)
 
-After every invocation, the automation writes decision metadata to the
-`pyscript.*_state` entity as attributes. These are visible in
-**Developer Tools > States** with no configuration.
+After every invocation, the automation writes decision metadata to a
+`blueprint_toolkit.sensor_threshold_switch_controller_<slug>_state`
+entity as attributes (where `<slug>` derives from the automation
+entity_id). These are visible in **Developer Tools > States** with no
+configuration.
+
+The diagnostic entity's state value is the same as `last_action`
+(`TURN_ON`, `TURN_OFF`, or `NONE`) -- the most recent decision -- so
+dashboards keying off the state value mirror the action.
 
 | Attribute | Description |
 |---|---|
+| `instance_id` | Automation entity_id (e.g. `automation.bath_fan`) |
 | `last_action` | `TURN_ON`, `TURN_OFF`, or `NONE` |
 | `last_reason` | Human-readable reason for the action (or `n/a`) |
 | `last_event` | `SENSOR`, `SWITCH`, or `TIMER` |
 | `last_run` | ISO timestamp of the invocation |
 | `last_sensor` | Parsed sensor value (or `n/a` for non-sensor events) |
+| `last_trigger` | Trigger ID (`sensor_change`, `switch_change`, `periodic`, `manual`) |
+| `runtime` | Service-call duration in seconds |
+| `data` | JSON-encoded controller state (samples, baseline, overrides, auto_off_started_at, initialized) -- used to round-trip state across calls; surfacing it in the attrs lets advanced users inspect the rolling window |
 
 To view:
 
 1. Go to **Developer Tools > States**.
-2. Search for `pyscript.` and find your `*_state` entity.
+2. Search for
+   `blueprint_toolkit.sensor_threshold_switch_controller_*_state`
+   and find your instance's entity.
 3. Expand the attributes to see the latest decision context.
 
 ### Debug logging (opt-in)
@@ -140,14 +152,14 @@ output without editing `configuration.yaml`.
 
 ### Logger configuration (optional)
 
-For more verbose PyScript output without the debug flag, add the
+For more verbose handler output without the debug flag, add the
 following to `configuration.yaml`:
 
 ```yaml
 logger:
   default: warning
   logs:
-    custom_components.pyscript: info
+    custom_components.blueprint_toolkit.sensor_threshold_switch_controller: info
 ```
 
-This enables `log.info` level messages from all PyScript scripts.
+This enables `log.info` level messages from the STSC handler.

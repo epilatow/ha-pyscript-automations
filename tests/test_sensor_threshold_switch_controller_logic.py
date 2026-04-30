@@ -32,7 +32,6 @@ from custom_components.blueprint_toolkit.sensor_threshold_switch_controller.logi
     evaluate,
     handle_service_call,
     parse_float,
-    state_from_dict,
 )
 
 T0 = datetime(2024, 1, 15, 12, 0, 0)
@@ -124,7 +123,7 @@ class TestStateSerialization:
     def test_empty_state_round_trip(self) -> None:
         state = State()
         data = state.to_dict()
-        restored = state_from_dict(data)
+        restored = State.from_dict(data)
         assert restored.samples == []
         assert restored.baseline is None
         assert restored.overrides == []
@@ -140,7 +139,7 @@ class TestStateSerialization:
             initialized=True,
         )
         data = state.to_dict()
-        restored = state_from_dict(data)
+        restored = State.from_dict(data)
         assert len(restored.samples) == 1
         assert restored.samples[0].value == 60.0
         assert restored.samples[0].timestamp == T0
@@ -150,7 +149,7 @@ class TestStateSerialization:
         assert restored.initialized is True
 
     def test_from_dict_missing_keys(self) -> None:
-        restored = state_from_dict({})
+        restored = State.from_dict({})
         assert restored.samples == []
         assert restored.baseline is None
         assert restored.overrides == []
@@ -1190,6 +1189,104 @@ class TestHandleServiceCall:
         )
         assert result.sensor_value is None
 
+    def test_bootstrap_arms_auto_off_when_switch_on(self) -> None:
+        """Stranded-switch protection: state_data=None +
+        switch=on + auto_off_minutes>0 should arm
+        ``auto_off_started_at`` so the device isn't
+        stuck on indefinitely after HA restart."""
+        result = handle_service_call(
+            **self._call_kwargs(
+                state_data=None,
+                switch_state="on",
+                auto_off_minutes=30,
+                trigger_entity="sensor.humidity",
+                sensor_value="55.0",
+                current_time=T0,
+            ),
+        )
+        # The serialized state should carry an
+        # auto_off_started_at timestamp.
+        assert result.state_dict["auto_off_started_at"] is not None
+        # And it should be the rounded-up minute boundary
+        # of the call time (T0 is already on a minute
+        # boundary, so it stays at T0).
+        assert result.state_dict["auto_off_started_at"] == T0.isoformat()
+
+    def test_bootstrap_no_arm_when_switch_off(self) -> None:
+        """Switch off at bootstrap -> no auto-off armed."""
+        result = handle_service_call(
+            **self._call_kwargs(
+                state_data=None,
+                switch_state="off",
+                auto_off_minutes=30,
+            ),
+        )
+        assert result.state_dict["auto_off_started_at"] is None
+
+    def test_bootstrap_no_arm_when_auto_off_disabled(self) -> None:
+        """auto_off_minutes=0 means user disabled auto-off
+        entirely; the bootstrap-arm must respect that."""
+        result = handle_service_call(
+            **self._call_kwargs(
+                state_data=None,
+                switch_state="on",
+                auto_off_minutes=0,
+            ),
+        )
+        assert result.state_dict["auto_off_started_at"] is None
+
+    def test_bootstrap_arm_then_timer_fires_at_timeout(
+        self,
+    ) -> None:
+        """End-to-end: bootstrap-arm + later TIMER tick
+        sees the armed timestamp and turns off when the
+        timeout elapses. Without the bootstrap-arm the
+        TIMER path would arm on its first tick instead --
+        this test locks down the explicit-at-bootstrap
+        behaviour AND ensures the round-trip through
+        ``state_dict`` preserves the timestamp."""
+        # First call: bootstrap (state lost), switch on.
+        r1 = handle_service_call(
+            **self._call_kwargs(
+                state_data=None,
+                switch_state="on",
+                auto_off_minutes=1,
+                current_time=T0,
+            ),
+        )
+        assert r1.state_dict["auto_off_started_at"] is not None
+
+        # Second call: minute-tick after the auto-off
+        # timeout. The persisted state from r1 is fed
+        # back in.
+        r2 = handle_service_call(
+            **self._call_kwargs(
+                state_data=r1.state_dict,
+                switch_state="on",
+                auto_off_minutes=1,
+                current_time=T0 + timedelta(minutes=1, seconds=1),
+            ),
+        )
+        assert r2.action == Action.TURN_OFF
+
+    def test_malformed_blob_triggers_bootstrap_arm(self) -> None:
+        """A blob that fails ``State.from_dict`` (e.g.
+        partial-write upgrade leaves a stale shape) is
+        treated like a missing blob: fresh ``State`` plus
+        the stranded-switch arm."""
+        # ``samples`` expecting list of dicts; pass a
+        # garbage shape that crashes State.from_dict.
+        bad_blob = {"samples": [{"value": "not-a-float"}]}
+        result = handle_service_call(
+            **self._call_kwargs(
+                state_data=bad_blob,
+                switch_state="on",
+                auto_off_minutes=30,
+                current_time=T0,
+            ),
+        )
+        assert result.state_dict["auto_off_started_at"] is not None
+
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
@@ -1199,6 +1296,7 @@ class TestCodeQuality(CodeQualityBase):
     ]
     mypy_targets = [
         "custom_components/blueprint_toolkit/sensor_threshold_switch_controller/logic.py",
+        "custom_components/blueprint_toolkit/sensor_threshold_switch_controller/handler.py",
     ]
 
 

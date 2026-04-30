@@ -173,9 +173,14 @@ automatically after 30 minutes.</p>
 <p>Three complementary layers provide visibility into the automation's
 decisions without requiring ad-hoc instrumentation.</p>
 <h3>Entity attributes (always on)</h3>
-<p>After every invocation, the automation writes decision metadata to the
-<code>pyscript.*_state</code> entity as attributes. These are visible in
-<strong>Developer Tools &gt; States</strong> with no configuration.</p>
+<p>After every invocation, the automation writes decision metadata to a
+<code>blueprint_toolkit.sensor_threshold_switch_controller_&lt;slug&gt;_state</code>
+entity as attributes (where <code>&lt;slug&gt;</code> derives from the automation
+entity_id). These are visible in <strong>Developer Tools &gt; States</strong> with no
+configuration.</p>
+<p>The diagnostic entity's state value is the same as <code>last_action</code>
+(<code>TURN_ON</code>, <code>TURN_OFF</code>, or <code>NONE</code>) -- the most recent decision -- so
+dashboards keying off the state value mirror the action.</p>
 <table>
 <thead>
 <tr>
@@ -184,6 +189,10 @@ decisions without requiring ad-hoc instrumentation.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>instance_id</code></td>
+<td>Automation entity_id (e.g. <code>automation.bath_fan</code>)</td>
+</tr>
 <tr>
 <td><code>last_action</code></td>
 <td><code>TURN_ON</code>, <code>TURN_OFF</code>, or <code>NONE</code></td>
@@ -204,12 +213,26 @@ decisions without requiring ad-hoc instrumentation.</p>
 <td><code>last_sensor</code></td>
 <td>Parsed sensor value (or <code>n/a</code> for non-sensor events)</td>
 </tr>
+<tr>
+<td><code>last_trigger</code></td>
+<td>Trigger ID (<code>sensor_change</code>, <code>switch_change</code>, <code>periodic</code>, <code>manual</code>)</td>
+</tr>
+<tr>
+<td><code>runtime</code></td>
+<td>Service-call duration in seconds</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td>JSON-encoded controller state (samples, baseline, overrides, auto_off_started_at, initialized) -- used to round-trip state across calls; surfacing it in the attrs lets advanced users inspect the rolling window</td>
+</tr>
 </tbody>
 </table>
 <p>To view:</p>
 <ol>
 <li>Go to <strong>Developer Tools &gt; States</strong>.</li>
-<li>Search for <code>pyscript.</code> and find your <code>*_state</code> entity.</li>
+<li>Search for
+<code>blueprint_toolkit.sensor_threshold_switch_controller_*_state</code>
+and find your instance's entity.</li>
 <li>Expand the attributes to see the latest decision context.</li>
 </ol>
 <h3>Debug logging (opt-in)</h3>
@@ -238,13 +261,13 @@ context on every invocation.</p>
 for custom components is WARNING. Toggling the flag produces immediate
 output without editing <code>configuration.yaml</code>.</p>
 <h3>Logger configuration (optional)</h3>
-<p>For more verbose PyScript output without the debug flag, add the
+<p>For more verbose handler output without the debug flag, add the
 following to <code>configuration.yaml</code>:</p>
 <pre><code class="language-yaml">logger:
   default: warning
   logs:
-    custom_components.pyscript: info
+    custom_components.blueprint_toolkit.sensor_threshold_switch_controller: info
 </code></pre>
-<p>This enables <code>log.info</code> level messages from all PyScript scripts.</p>
+<p>This enables <code>log.info</code> level messages from the STSC handler.</p>
 </body>
 </html>

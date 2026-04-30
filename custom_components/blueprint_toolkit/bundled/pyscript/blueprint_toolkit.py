@@ -15,7 +15,6 @@ not have homeassistant installed; a top-level import
 would fail during test collection.
 """
 
-import json
 import os
 from datetime import datetime
 from enum import Enum
@@ -835,9 +834,7 @@ _PYSCRIPT_TRIGGER_KWARGS: frozenset[str] = frozenset(
 # relative to edits the user made before triggering the
 # reload).
 
-_RELOAD_MODULES: tuple[str, ...] = (
-    "helpers",
-)
+_RELOAD_MODULES: tuple[str, ...] = ("helpers",)
 
 
 _MODULE_MTIMES: dict[str, float] = {name: 0.0 for name in _RELOAD_MODULES}
@@ -941,9 +938,8 @@ def _ensure_modules_on_sys_path() -> None:
     statements via standard ``importlib``, which doesn't
     know about pyscript's modules directory unless it's on
     sys.path. Without this, any executor function that
-    imports a logic module
-    (``sensor_threshold_switch_controller``) fails with
-    ``ModuleNotFoundError``.
+    imports a logic module from ``pyscript/modules/``
+    fails with ``ModuleNotFoundError``.
 
     Called from ``_dispatch_blueprint_service`` before any
     executor-path import in a dispatch. Idempotent.
@@ -1108,276 +1104,6 @@ async def _dispatch_blueprint_service(
         argparse_fn(**blueprint_kwargs)
     finally:
         await _release_read_lock()
-
-
-# -- Sensor Threshold Switch Controller --------------
-
-
-def _stsc_debug_dict(
-    result: Any,
-    now: datetime,
-    sensor_value: str,
-) -> dict[str, str]:
-    """Build debug info dict from a ServiceResult."""
-    sv = result.sensor_value
-    return {
-        "last_action": result.action.name,
-        "last_reason": result.reason or "n/a",
-        "last_event": result.event_type,
-        "last_run": now.isoformat(),
-        "last_sensor": str(sv) if sv is not None else "n/a",
-    }
-
-
-# Parameter defaults are defined in the blueprint YAML,
-# so don't duplicate them here.
-_STSC_SERVICE_LABEL = "Sensor Threshold Switch Controller"
-
-
-def sensor_threshold_switch_controller(
-    instance_id: str,
-    target_switch_entity: str,
-    sensor_value: str,
-    switch_state: str,
-    trigger_entity: str,
-    trigger_threshold: float,
-    release_threshold: float,
-    sampling_window_seconds: int,
-    disable_window_seconds: int,
-    auto_off_minutes: int,
-    notification_service: str,
-    notification_prefix: str,
-    notification_suffix: str,
-    debug_logging: bool,
-) -> None:
-    """Evaluate sensor threshold switch controller."""
-    import sensor_threshold_switch_controller as stsc  # noqa: F821
-
-    now = datetime.now()
-    auto_name = _automation_name(instance_id)
-    tag = f"[STSC: {auto_name}]"
-
-    # Load state from HA entity attribute
-    #    (entity state is limited to 255 chars; attributes
-    #    have no practical limit)
-    key = _state_key(instance_id)
-    state_data: dict[str, Any] | None = None
-    try:
-        attrs = state.getattr(key)  # noqa: F821
-        raw = attrs.get("data", "")
-        if raw:
-            state_data = json.loads(raw)
-    except Exception:
-        pass
-
-    # Resolve friendly name
-    switch_name = target_switch_entity
-    try:
-        attrs = state.getattr(  # noqa: F821
-            target_switch_entity,
-        )
-        name = attrs.get("friendly_name", "")
-        if name:
-            switch_name = name
-    except Exception:
-        pass
-
-    # Evaluate
-    result = stsc.handle_service_call(
-        state_data=state_data,
-        switch_name=switch_name,
-        current_time=now,
-        target_switch_entity=target_switch_entity,
-        sensor_value=sensor_value,
-        switch_state=switch_state,
-        trigger_entity=trigger_entity,
-        trigger_threshold=trigger_threshold,
-        release_threshold=release_threshold,
-        sampling_window_seconds=sampling_window_seconds,
-        disable_window_seconds=disable_window_seconds,
-        auto_off_minutes=auto_off_minutes,
-        notification_prefix=notification_prefix,
-        notification_suffix=notification_suffix,
-    )
-
-    # Execute action
-    if result.action == stsc.Action.TURN_ON:
-        homeassistant.turn_on(  # noqa: F821
-            entity_id=target_switch_entity,
-        )
-    elif result.action == stsc.Action.TURN_OFF:
-        homeassistant.turn_off(  # noqa: F821
-            entity_id=target_switch_entity,
-        )
-
-    # Save state before dispatching notifications.
-    # State is load-bearing; notifications are best-
-    # effort. A notify failure must never lose state.
-    info = _stsc_debug_dict(result, now, sensor_value)
-    info["data"] = json.dumps(result.state_dict)
-    _save_state(key, now, info)
-
-    # Best-effort notification dispatch.
-    _send_notification(
-        notification_service,
-        result.notification,
-        tag,
-    )
-
-    # Debug logging (opt-in via blueprint)
-    if debug_logging:
-        log.warning(  # noqa: F821
-            "%s event=%s sw=%s baseline=%s auto_off=%s samples=%s -> %s %r",
-            tag,
-            info["last_event"],
-            switch_state,
-            result.state_dict.get("baseline"),
-            result.state_dict.get("auto_off_started_at"),
-            len(result.state_dict.get("samples", [])),
-            info["last_action"],
-            info["last_reason"],
-        )
-
-    # STSC has no persistent findings; a no-op sweep
-    # with an empty batch lets the instance-prefix
-    # orphan sweep pick up stale entrypoint / argparse
-    # notifications still lingering from prior runs.
-    _sweep_and_process_notifications(
-        hass,  # noqa: F821
-        [],
-        instance_id,
-        _notification_prefix(_STSC_SERVICE_LABEL, instance_id),
-    )
-
-
-def sensor_threshold_switch_controller_blueprint_argparse(
-    instance_id: str,
-    target_switch_entity: str,
-    sensor_value: str,
-    switch_state: str,
-    trigger_entity: str,
-    trigger_threshold_raw: str,
-    release_threshold_raw: str,
-    sampling_window_seconds_raw: str,
-    disable_window_seconds_raw: str,
-    auto_off_minutes_raw: str,
-    notification_service: str,
-    notification_prefix: str,
-    notification_suffix: str,
-    debug_logging_raw: str,
-) -> None:
-    """Parse and validate STSC blueprint inputs."""
-    debug_logging = _parse_bool(debug_logging_raw)
-    auto_name = _automation_name(instance_id)
-    tag = f"[STSC: {auto_name}]"
-
-    errors: list[str] = []
-    try:
-        trigger_threshold = float(trigger_threshold_raw)
-    except (TypeError, ValueError):
-        trigger_threshold = 0.0
-        errors.append(
-            "blueprint input: trigger_threshold: must be a number;"
-            f" got {trigger_threshold_raw!r}",
-        )
-    try:
-        release_threshold = float(release_threshold_raw)
-    except (TypeError, ValueError):
-        release_threshold = 0.0
-        errors.append(
-            "blueprint input: release_threshold: must be a number;"
-            f" got {release_threshold_raw!r}",
-        )
-    sampling_window_seconds, err = _parse_int_input(
-        sampling_window_seconds_raw,
-        10,
-        3600,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: sampling_window_seconds: {err}")
-    disable_window_seconds, err = _parse_int_input(
-        disable_window_seconds_raw,
-        0,
-        60,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: disable_window_seconds: {err}")
-    auto_off_minutes, err = _parse_int_input(
-        auto_off_minutes_raw,
-        0,
-        1440,
-    )
-    if err is not None:
-        errors.append(f"blueprint input: auto_off_minutes: {err}")
-
-    errors += _validate_entities(
-        [target_switch_entity],
-        EntityType.CONTROLLABLE,
-    )
-    errors += _validate_notification_service(notification_service)
-
-    config_error = _build_config_error_notification(
-        errors,
-        instance_id,
-        _STSC_SERVICE_LABEL,
-        debug_logging,
-        tag,
-    )
-    _process_persistent_notifications(
-        [config_error],
-        instance_id,
-    )
-    if errors:
-        return
-
-    sensor_threshold_switch_controller(
-        instance_id=instance_id,
-        target_switch_entity=target_switch_entity,
-        sensor_value=sensor_value,
-        switch_state=switch_state,
-        trigger_entity=trigger_entity,
-        trigger_threshold=trigger_threshold,
-        release_threshold=release_threshold,
-        sampling_window_seconds=sampling_window_seconds,
-        disable_window_seconds=disable_window_seconds,
-        auto_off_minutes=auto_off_minutes,
-        notification_service=notification_service,
-        notification_prefix=notification_prefix,
-        notification_suffix=notification_suffix,
-        debug_logging=debug_logging,
-    )
-
-
-_BLUEPRINT_SERVICES[_STSC_SERVICE_LABEL] = (
-    "sensor_threshold_switch_controller.yaml",
-    frozenset(
-        [
-            "instance_id",
-            "target_switch_entity",
-            "sensor_value",
-            "switch_state",
-            "trigger_entity",
-            "trigger_threshold_raw",
-            "release_threshold_raw",
-            "sampling_window_seconds_raw",
-            "disable_window_seconds_raw",
-            "auto_off_minutes_raw",
-            "notification_service",
-            "notification_prefix",
-            "notification_suffix",
-            "debug_logging_raw",
-        ],
-    ),
-    sensor_threshold_switch_controller_blueprint_argparse,
-)
-
-
-@service  # noqa: F821
-async def sensor_threshold_switch_controller_blueprint_entrypoint(
-    **kwargs: object,
-) -> None:
-    """Blueprint-facing entrypoint for STSC."""
-    await _dispatch_blueprint_service(_STSC_SERVICE_LABEL, kwargs)
 
 
 # -- Worker thread executor --------------------------

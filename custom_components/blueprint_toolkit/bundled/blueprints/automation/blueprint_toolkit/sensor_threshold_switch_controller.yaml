@@ -138,20 +138,35 @@ variables:
   target_switch_entity: !input target_switch_entity
 
 triggers:
+  # The blueprint keeps the two reactive triggers
+  # (sensor + switch state changes); the periodic
+  # minute-tick that pyscript handled here lives in the
+  # integration's
+  # ``schedule_periodic_with_jitter`` plumbing now.
   - id: sensor_change
     trigger: state
     entity_id: !input sensor_entities
   - id: switch_change
     trigger: state
     entity_id: !input target_switch_entity
-  - id: timer
-    trigger: time_pattern
-    minutes: "/1"
 
 actions:
-  - action: pyscript.sensor_threshold_switch_controller_blueprint_entrypoint
+  - action: blueprint_toolkit.sensor_threshold_switch_controller
+    # Synthetic invocations from the integration
+    # (periodic timer, restart-recovery + reload-recovery
+    # kicks) pass ``trigger_id`` + ``trigger_entity`` as
+    # flat top-level variables since HA's
+    # ``automation.trigger`` service strips the
+    # ``trigger`` key from caller variables. Defaults
+    # cover the reactive-trigger paths
+    # (``sensor_change`` / ``switch_change``); the
+    # ``trigger.entity_id`` default of ``"timer"`` keeps
+    # the logic module's ``determine_event_type``
+    # mapping the periodic / kick paths to
+    # ``EventType.TIMER``.
     data:
       instance_id: "{{ this.entity_id }}"
+      trigger_id: "{{ trigger_id | default(trigger.id, true) | default('manual', true) }}"
       target_switch_entity: "{{ target_switch_entity }}"
       sensor_value: >-
         {{ trigger.to_state.state
@@ -159,7 +174,7 @@ actions:
            else '' }}
       switch_state: "{{ states(target_switch_entity) }}"
       trigger_entity: >-
-        {{ trigger.entity_id | default('timer', true) }}
+        {{ trigger_entity | default(trigger.entity_id, true) | default('timer', true) }}
       trigger_threshold_raw: !input trigger_threshold
       release_threshold_raw: !input release_threshold
       sampling_window_seconds_raw: !input sampling_window_s
@@ -170,5 +185,11 @@ actions:
       notification_suffix: !input notification_suffix
       debug_logging_raw: !input debug_logging
 
+# ``queued`` + ``max: 10`` lets up to 10 trigger events
+# (sensor changes + switch state changes + the
+# integration's minute-tick kicks) stack up and run in
+# order. Beyond 10, HA drops new events with a warning
+# in the log -- bump if a noisy sensor pushes against
+# the cap.
 mode: queued
 max: 10

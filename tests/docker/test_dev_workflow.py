@@ -47,17 +47,14 @@ DEV_INSTALL_REL = "scripts/dev-install.py"
 NOOP_RESTART = "echo restart-stub"
 
 # Pyscript blueprint entrypoint services that should still
-# be registered. Verifying these all appear is our "pyscript
-# wrapper loaded" signal. The native integration handlers
-# (Trigger Entity Controller, Z-Wave Route Manager,
-# Reference Watchdog, Entity Defaults Watchdog, Device
-# Watchdog) live under ``blueprint_toolkit.<service>`` and
-# are NOT pyscript entrypoints, so they don't appear here.
-EXPECTED_SERVICES = frozenset(
-    {
-        "sensor_threshold_switch_controller_blueprint_entrypoint",
-    },
-)
+# be registered. The set is empty: every automation is now
+# a native handler under ``blueprint_toolkit.<service>``.
+# Kept (rather than the test deleted) until the pyscript
+# graveyard cleanup commit removes the bundled pyscript
+# wrapper entirely; at that point the surrounding
+# pyscript-services loop in this file becomes vacuous and
+# the helper / loop should go too.
+EXPECTED_SERVICES: frozenset[str] = frozenset()
 
 # HA returns blueprint paths relative to its
 # blueprints/<domain>/ directory. Verifying these are

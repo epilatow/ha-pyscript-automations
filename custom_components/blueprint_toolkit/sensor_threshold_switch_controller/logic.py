@@ -79,34 +79,40 @@ class State:
             "initialized": self.initialized,
         }
 
-    # Deserialization: use module-level state_from_dict().
-    # PyScript's AST evaluator cannot call @classmethod.
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "State":
+        """Deserialize State from JSON persistence.
 
-
-def state_from_dict(data: dict[str, Any]) -> "State":
-    """Deserialize State from JSON persistence.
-
-    Module-level function because PyScript's AST evaluator
-    cannot call @classmethod (or any built-in decorator).
-    """
-    samples = [
-        Sample(
-            value=s["value"],
-            timestamp=datetime.fromisoformat(s["timestamp"]),
+        Contract: on a malformed input shape, raises
+        ``KeyError`` (missing dict key), ``TypeError``
+        (non-iterable / non-dict where one is expected),
+        or ``ValueError`` (e.g. ``datetime.fromisoformat``
+        on a malformed string). ``handle_service_call``
+        catches exactly this set to fall back to a
+        bootstrap-arm. Any future change here that broadens
+        the raised set must update the matching except
+        clause in ``handle_service_call``.
+        """
+        samples = [
+            Sample(
+                value=s["value"],
+                timestamp=datetime.fromisoformat(s["timestamp"]),
+            )
+            for s in data.get("samples", [])
+        ]
+        overrides = [
+            datetime.fromisoformat(ts) for ts in data.get("overrides", [])
+        ]
+        auto_off_raw = data.get("auto_off_started_at")
+        return cls(
+            samples=samples,
+            baseline=data.get("baseline"),
+            overrides=overrides,
+            auto_off_started_at=(
+                datetime.fromisoformat(auto_off_raw) if auto_off_raw else None
+            ),
+            initialized=data.get("initialized", False),
         )
-        for s in data.get("samples", [])
-    ]
-    overrides = [datetime.fromisoformat(ts) for ts in data.get("overrides", [])]
-    auto_off_raw = data.get("auto_off_started_at")
-    return State(
-        samples=samples,
-        baseline=data.get("baseline"),
-        overrides=overrides,
-        auto_off_started_at=(
-            datetime.fromisoformat(auto_off_raw) if auto_off_raw else None
-        ),
-        initialized=data.get("initialized", False),
-    )
 
 
 @dataclass
@@ -196,290 +202,15 @@ _MSG_OVERRIDE_DISABLED = "Sensor override disabled for {name}"
 _MSG_AUTO_OFF_REASON = "Auto-off after {mins} minute(s)"
 
 
-# -- Module-level logic functions (pyscript-compatible) --
-
-
-def _ctrl_evaluate(
-    config: Config,
-    state: State,
-    inputs: Inputs,
-) -> Result:
-    """Dispatch to the correct handler."""
-    if inputs.event_type == EventType.SENSOR:
-        return _ctrl_handle_sensor(config, state, inputs)
-    elif inputs.event_type == EventType.SWITCH:
-        return _ctrl_handle_switch(config, state, inputs)
-    elif inputs.event_type == EventType.TIMER:
-        return _ctrl_handle_timer(config, state, inputs)
-    return Result()
-
-
-def _ctrl_handle_sensor(
-    config: Config,
-    state: State,
-    inputs: Inputs,
-) -> Result:
-    """Handle sensor value change event."""
-    if inputs.sensor_value is None:
-        return Result()
-
-    value = inputs.sensor_value
-    now = inputs.current_time
-    window = timedelta(
-        seconds=config.sampling_window_seconds,
-    )
-
-    # Prune old samples and add new one
-    state.samples = [s for s in state.samples if now - s.timestamp <= window]
-    state.samples.append(Sample(value=value, timestamp=now))
-
-    # Compute min/max over window
-    values = [s.value for s in state.samples]
-    min_val = min(values)
-    max_val = max(values)
-
-    if state.baseline is None:
-        return _ctrl_check_spike(
-            config,
-            state,
-            inputs,
-            min_val,
-            max_val,
-        )
-
-    return _ctrl_check_release(
-        config,
-        state,
-        inputs,
-        max_val,
-    )
-
-
-def _ctrl_check_spike(
-    config: Config,
-    state: State,
-    inputs: Inputs,
-    min_val: float,
-    max_val: float,
-) -> Result:
-    """Check if sensor values spiked above threshold."""
-    threshold = config.trigger_threshold
-    if max_val <= min_val + threshold:
-        return Result()
-
-    # Spike detected: set baseline
-    state.baseline = min_val
-    state.overrides = []
-    state.auto_off_started_at = None
-
-    if inputs.switch_state == "on":
-        # Already on (e.g., manual), sensor takes over
-        return Result()
-
-    name = inputs.switch_name
-    reason = _MSG_SPIKE_REASON.format(
-        max_val=max_val,
-        min_val=min_val,
-        threshold=threshold,
-    )
-    return Result(
-        action=Action.TURN_ON,
-        reason=reason,
-        notification=_MSG_SWITCH_ON.format(
-            name=name,
-            reason=reason,
-        ),
-    )
-
-
-def _ctrl_check_release(
-    config: Config,
-    state: State,
-    inputs: Inputs,
-    max_val: float,
-) -> Result:
-    """Check if sensor values dropped below release."""
-    assert state.baseline is not None
-    release = config.release_threshold
-
-    if max_val > state.baseline + release:
-        return Result()
-
-    # Release detected: clear baseline
-    old_baseline = state.baseline
-    state.baseline = None
-    state.overrides = []
-    state.auto_off_started_at = None
-
-    if inputs.switch_state == "off":
-        # Already off
-        return Result()
-
-    name = inputs.switch_name
-    reason = _MSG_RELEASE_REASON.format(
-        max_val=max_val,
-        baseline=old_baseline,
-        release=release,
-    )
-    return Result(
-        action=Action.TURN_OFF,
-        reason=reason,
-        notification=_MSG_SWITCH_OFF.format(
-            name=name,
-            reason=reason,
-        ),
-    )
-
-
-def _ctrl_handle_switch(
-    config: Config,
-    state: State,
-    inputs: Inputs,
-) -> Result:
-    """Handle switch state change event."""
-    switch_state = inputs.switch_state
-
-    # Startup recovery
-    if not state.initialized:
-        state.initialized = True
-        if (
-            switch_state == "on"
-            and state.baseline is None
-            and config.auto_off_minutes > 0
-        ):
-            state.auto_off_started_at = _round_up_to_minute(
-                inputs.current_time,
-            )
-        return Result()
-
-    if switch_state == "on":
-        if state.baseline is None:
-            # Manual on: schedule auto-off
-            if config.auto_off_minutes > 0:
-                state.auto_off_started_at = _round_up_to_minute(
-                    inputs.current_time,
-                )
-        else:
-            # Sensor managing: cancel auto-off
-            state.auto_off_started_at = None
-        return Result()
-
-    # switch_state == "off"
-    if state.baseline is not None:
-        return _ctrl_handle_manual_override(
-            config,
-            state,
-            inputs,
-        )
-
-    # Off without baseline: cancel auto-off
-    state.auto_off_started_at = None
-    return Result()
-
-
-def _ctrl_handle_manual_override(
-    config: Config,
-    state: State,
-    inputs: Inputs,
-) -> Result:
-    """Handle manual switch-off while baseline active."""
-    now = inputs.current_time
-    name = inputs.switch_name
-    window_s = config.disable_window_seconds
-
-    # Filter overrides by disable window
-    if window_s > 0:
-        window = timedelta(seconds=window_s)
-        state.overrides = [ts for ts in state.overrides if now - ts <= window]
-    else:
-        state.overrides = []
-
-    state.overrides.append(now)
-
-    should_disable = window_s > 0 and len(state.overrides) >= 2
-
-    if should_disable:
-        # Double-off: disable sensor override
-        state.baseline = None
-        state.overrides = []
-        state.auto_off_started_at = None
-        return Result(
-            notification=_MSG_OVERRIDE_DISABLED.format(
-                name=name,
-            ),
-        )
-
-    # Re-enable switch
-    reason = _MSG_OVERRIDE_ENABLE_REASON
-    return Result(
-        action=Action.TURN_ON,
-        reason=reason,
-        notification=_MSG_SWITCH_ON.format(
-            name=name,
-            reason=reason,
-        ),
-    )
-
-
-def _ctrl_handle_timer(
-    config: Config,
-    state: State,
-    inputs: Inputs,
-) -> Result:
-    """Handle periodic timer event for auto-off."""
-    # Start auto-off if switch is on with no baseline and
-    # no timer running (e.g., after HA restart with lost
-    # state, or if the switch event was missed).
-    if (
-        state.auto_off_started_at is None
-        and state.baseline is None
-        and inputs.switch_state == "on"
-        and config.auto_off_minutes > 0
-    ):
-        state.auto_off_started_at = _round_up_to_minute(
-            inputs.current_time,
-        )
-
-    if (
-        state.auto_off_started_at is not None
-        and state.baseline is None
-        and inputs.switch_state == "on"
-        and config.auto_off_minutes > 0
-    ):
-        elapsed = (
-            inputs.current_time - state.auto_off_started_at
-        ).total_seconds()
-        timeout = config.auto_off_minutes * 60
-        if elapsed >= timeout:
-            state.auto_off_started_at = None
-            name = inputs.switch_name
-            mins = config.auto_off_minutes
-            reason = _MSG_AUTO_OFF_REASON.format(
-                mins=f"{mins:g}",
-            )
-            return Result(
-                action=Action.TURN_OFF,
-                reason=reason,
-                notification=_MSG_SWITCH_OFF.format(
-                    name=name,
-                    reason=reason,
-                ),
-            )
-
-    return Result()
-
-
-# -- Controller class (delegates to module-level fns) --
+# -- Controller --
 
 
 class Controller:
-    """Wrapper class for test compatibility.
-
-    All logic lives in the ``_ctrl_*`` module-level
-    functions above so that pyscript's AST evaluator
-    (which does not reliably bind ``self``) works
-    correctly.
-    """
+    """Stateful evaluator: holds the per-instance Config
+    and dispatches each event (SENSOR / SWITCH / TIMER)
+    to the matching handler. Per-call state and inputs
+    are passed in; the controller never owns mutable
+    state of its own."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -489,8 +220,257 @@ class Controller:
         state: State,
         inputs: Inputs,
     ) -> Result:
-        """Evaluate current state and return action."""
-        return _ctrl_evaluate(self.config, state, inputs)
+        """Dispatch to the correct event-type handler."""
+        if inputs.event_type == EventType.SENSOR:
+            return self._handle_sensor(state, inputs)
+        if inputs.event_type == EventType.SWITCH:
+            return self._handle_switch(state, inputs)
+        if inputs.event_type == EventType.TIMER:
+            return self._handle_timer(state, inputs)
+        return Result()
+
+    def _handle_sensor(
+        self,
+        state: State,
+        inputs: Inputs,
+    ) -> Result:
+        """Handle sensor value change event."""
+        if inputs.sensor_value is None:
+            return Result()
+
+        value = inputs.sensor_value
+        now = inputs.current_time
+        window = timedelta(
+            seconds=self.config.sampling_window_seconds,
+        )
+
+        # Prune old samples and add new one
+        state.samples = [
+            s for s in state.samples if now - s.timestamp <= window
+        ]
+        state.samples.append(Sample(value=value, timestamp=now))
+
+        # Compute min/max over window
+        values = [s.value for s in state.samples]
+        min_val = min(values)
+        max_val = max(values)
+
+        if state.baseline is None:
+            return self._check_spike(state, inputs, min_val, max_val)
+
+        return self._check_release(state, inputs, max_val)
+
+    def _check_spike(
+        self,
+        state: State,
+        inputs: Inputs,
+        min_val: float,
+        max_val: float,
+    ) -> Result:
+        """Check if sensor values spiked above threshold."""
+        threshold = self.config.trigger_threshold
+        if max_val <= min_val + threshold:
+            return Result()
+
+        # Spike detected: set baseline
+        state.baseline = min_val
+        state.overrides = []
+        state.auto_off_started_at = None
+
+        if inputs.switch_state == "on":
+            # Already on (e.g., manual), sensor takes over
+            return Result()
+
+        name = inputs.switch_name
+        reason = _MSG_SPIKE_REASON.format(
+            max_val=max_val,
+            min_val=min_val,
+            threshold=threshold,
+        )
+        return Result(
+            action=Action.TURN_ON,
+            reason=reason,
+            notification=_MSG_SWITCH_ON.format(
+                name=name,
+                reason=reason,
+            ),
+        )
+
+    def _check_release(
+        self,
+        state: State,
+        inputs: Inputs,
+        max_val: float,
+    ) -> Result:
+        """Check if sensor values dropped below release."""
+        assert state.baseline is not None
+        release = self.config.release_threshold
+
+        if max_val > state.baseline + release:
+            return Result()
+
+        # Release detected: clear baseline
+        old_baseline = state.baseline
+        state.baseline = None
+        state.overrides = []
+        state.auto_off_started_at = None
+
+        if inputs.switch_state == "off":
+            # Already off
+            return Result()
+
+        name = inputs.switch_name
+        reason = _MSG_RELEASE_REASON.format(
+            max_val=max_val,
+            baseline=old_baseline,
+            release=release,
+        )
+        return Result(
+            action=Action.TURN_OFF,
+            reason=reason,
+            notification=_MSG_SWITCH_OFF.format(
+                name=name,
+                reason=reason,
+            ),
+        )
+
+    def _handle_switch(
+        self,
+        state: State,
+        inputs: Inputs,
+    ) -> Result:
+        """Handle switch state change event."""
+        switch_state = inputs.switch_state
+
+        # Startup recovery
+        if not state.initialized:
+            state.initialized = True
+            if (
+                switch_state == "on"
+                and state.baseline is None
+                and self.config.auto_off_minutes > 0
+            ):
+                state.auto_off_started_at = _round_up_to_minute(
+                    inputs.current_time,
+                )
+            return Result()
+
+        if switch_state == "on":
+            if state.baseline is None:
+                # Manual on: schedule auto-off
+                if self.config.auto_off_minutes > 0:
+                    state.auto_off_started_at = _round_up_to_minute(
+                        inputs.current_time,
+                    )
+            else:
+                # Sensor managing: cancel auto-off
+                state.auto_off_started_at = None
+            return Result()
+
+        # switch_state == "off"
+        if state.baseline is not None:
+            return self._handle_manual_override(state, inputs)
+
+        # Off without baseline: cancel auto-off
+        state.auto_off_started_at = None
+        return Result()
+
+    def _handle_manual_override(
+        self,
+        state: State,
+        inputs: Inputs,
+    ) -> Result:
+        """Handle manual switch-off while baseline active."""
+        now = inputs.current_time
+        name = inputs.switch_name
+        window_s = self.config.disable_window_seconds
+
+        # Filter overrides by disable window
+        if window_s > 0:
+            window = timedelta(seconds=window_s)
+            state.overrides = [
+                ts for ts in state.overrides if now - ts <= window
+            ]
+        else:
+            state.overrides = []
+
+        state.overrides.append(now)
+
+        should_disable = window_s > 0 and len(state.overrides) >= 2
+
+        if should_disable:
+            # Double-off: disable sensor override
+            state.baseline = None
+            state.overrides = []
+            state.auto_off_started_at = None
+            return Result(
+                notification=_MSG_OVERRIDE_DISABLED.format(
+                    name=name,
+                ),
+            )
+
+        # Re-enable switch
+        reason = _MSG_OVERRIDE_ENABLE_REASON
+        return Result(
+            action=Action.TURN_ON,
+            reason=reason,
+            notification=_MSG_SWITCH_ON.format(
+                name=name,
+                reason=reason,
+            ),
+        )
+
+    def _handle_timer(
+        self,
+        state: State,
+        inputs: Inputs,
+    ) -> Result:
+        """Handle periodic timer event for auto-off."""
+        # Start auto-off if switch is on with no baseline
+        # and no timer running. The bootstrap-arm in
+        # ``handle_service_call`` covers the most common
+        # post-restart case (first event after lost
+        # state); this branch covers the rest -- e.g. a
+        # SWITCH event was missed because the user toggled
+        # the switch via a different integration that
+        # didn't fire a state-change trigger.
+        if (
+            state.auto_off_started_at is None
+            and state.baseline is None
+            and inputs.switch_state == "on"
+            and self.config.auto_off_minutes > 0
+        ):
+            state.auto_off_started_at = _round_up_to_minute(
+                inputs.current_time,
+            )
+
+        if (
+            state.auto_off_started_at is not None
+            and state.baseline is None
+            and inputs.switch_state == "on"
+            and self.config.auto_off_minutes > 0
+        ):
+            elapsed = (
+                inputs.current_time - state.auto_off_started_at
+            ).total_seconds()
+            timeout = self.config.auto_off_minutes * 60
+            if elapsed >= timeout:
+                state.auto_off_started_at = None
+                name = inputs.switch_name
+                mins = self.config.auto_off_minutes
+                reason = _MSG_AUTO_OFF_REASON.format(
+                    mins=f"{mins:g}",
+                )
+                return Result(
+                    action=Action.TURN_OFF,
+                    reason=reason,
+                    notification=_MSG_SWITCH_OFF.format(
+                        name=name,
+                        reason=reason,
+                    ),
+                )
+
+        return Result()
 
 
 def determine_event_type(
@@ -553,7 +533,7 @@ def evaluate(
         switch_name=switch_name,
     )
 
-    result = _ctrl_evaluate(config, state, inputs)
+    result = Controller(config).evaluate(state, inputs)
 
     if result.notification:
         result.notification = helpers.format_notification(
@@ -607,16 +587,53 @@ def handle_service_call(
 
     Purely reactive: no sleeping, no waiting.  Auto-off
     records a start timestamp rounded up to the next
-    minute boundary; the time_pattern trigger fires
-    every minute to check expiry.
+    minute boundary; the integration's minute-tick
+    timer fires every minute to check expiry.
+
+    Stranded-switch protection: when the persisted state
+    blob is missing or malformed (HA restart, fresh
+    setup, partial-write upgrade), bootstrap a fresh
+    ``State`` AND -- if the switch is currently on with
+    auto-off enabled -- arm ``auto_off_started_at``
+    so the device isn't stuck on indefinitely waiting
+    for an event that re-arms the timer. The TIMER
+    branch of ``Controller._handle_timer`` would catch
+    this on the next minute-tick anyway, but doing it
+    explicitly at bootstrap is clearer and recovers up
+    to one tick faster (and covers the SENSOR-first
+    post-restart case where no TIMER fires until the
+    periodic timer arms).
 
     Remaining kwargs are passed through to evaluate().
     """
-    # Parse state
-    try:
-        s = state_from_dict(state_data) if state_data else State()
-    except Exception:
+    # Parse state. Track whether we ended up with a
+    # bootstrapped (empty) State so the stranded-switch
+    # arm below knows to fire.
+    bootstrapped = False
+    if state_data is None:
         s = State()
+        bootstrapped = True
+    else:
+        try:
+            s = State.from_dict(state_data)
+        except (KeyError, TypeError, ValueError):
+            # Malformed blob from a prior version -- treat
+            # as missing and rebuild from scratch.
+            s = State()
+            bootstrapped = True
+
+    if bootstrapped:
+        switch_state_in: str = str(kwargs.get("switch_state", "off"))
+        auto_off_min: int = int(kwargs.get("auto_off_minutes", 0))
+        if switch_state_in == "on" and auto_off_min > 0:
+            s.auto_off_started_at = _round_up_to_minute(current_time)
+        # Mark initialized so a subsequent SWITCH event
+        # doesn't re-run ``_handle_switch``'s startup-
+        # recovery branch (which would idempotently re-arm
+        # ``auto_off_started_at`` to the same value but
+        # muddies the contract -- after the bootstrap-arm,
+        # state is "initialized for this run").
+        s.initialized = True
 
     # Determine event type and parse sensor value
     event_type = determine_event_type(

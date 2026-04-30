@@ -265,6 +265,7 @@ class TestSetupEntry:
             "reference_watchdog",
             "entity_defaults_watchdog",
             "device_watchdog",
+            "sensor_threshold_switch_controller",
         }
         registered = set(hass.services.async_services().get(DOMAIN, {}))
         missing = expected - registered
