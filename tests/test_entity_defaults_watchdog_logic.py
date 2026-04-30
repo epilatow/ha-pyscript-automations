@@ -9,20 +9,20 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 
-_SCRIPT_PATH = (
-    REPO_ROOT / "pyscript" / "modules" / "entity_defaults_watchdog.py"
-)
-
-sys.path.insert(0, str(_SCRIPT_PATH.parent))
+sys.path.insert(0, str(REPO_ROOT))
 
 from conftest import CodeQualityBase  # noqa: E402
-from entity_defaults_watchdog import (  # noqa: E402
+
+from custom_components.blueprint_toolkit.entity_defaults_watchdog.logic import (  # noqa: E402, E501
     CHECK_ALL,
     DRIFT_CHECK_DEVICE_ENTITY_ID,
     DRIFT_CHECK_DEVICE_ENTITY_NAME,
     Config,
+    DeviceEntry,
     DeviceInfo,
     DevicelessEntityInfo,
     DriftDetail,
@@ -38,7 +38,6 @@ from entity_defaults_watchdog import (  # noqa: E402
     _matches_with_collision_suffix,
     evaluate_devices,
 )
-from helpers import DeviceEntry  # noqa: E402
 
 # -- Helpers -----------------------------------------
 
@@ -1181,17 +1180,14 @@ class TestEvaluateDeviceless:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/modules/entity_defaults_watchdog.py",
-        "tests/test_entity_defaults_watchdog.py",
+        "custom_components/blueprint_toolkit/entity_defaults_watchdog/__init__.py",
+        "custom_components/blueprint_toolkit/entity_defaults_watchdog/logic.py",
+        "tests/test_entity_defaults_watchdog_logic.py",
     ]
     mypy_targets = [
-        "pyscript/modules/entity_defaults_watchdog.py",
+        "custom_components/blueprint_toolkit/entity_defaults_watchdog/logic.py",
     ]
 
 
-# -- Entry point -------------------------------------
-
 if __name__ == "__main__":
-    from conftest import run_tests
-
-    run_tests(__file__, _SCRIPT_PATH, REPO_ROOT)
+    sys.exit(pytest.main([__file__, "-v", *sys.argv[1:]]))

@@ -1,8 +1,6 @@
 # This is AI generated code
 """Business logic for entity defaults watchdog.
 
-Does not use PyScript-injected globals.
-
 Detects entity ID and name drift from their defaults.
 Entity IDs drift when device names change after entity
 creation.  Name overrides become stale when integrations
@@ -12,7 +10,37 @@ old names.
 
 from dataclasses import dataclass, field
 
-import helpers
+from .. import helpers
+
+
+@dataclass
+class DeviceEntry:
+    """Device discovered during integration scan.
+
+    Locally defined here rather than in the shared
+    ``helpers`` module: only EDW (and the still-pyscript
+    DW) consumes this shape, so it stays port-internal
+    until DW lands and the two ports motivate hoisting.
+    """
+
+    id: str
+    url: str
+
+    # Current device name. HA device registry
+    # ``device.name_by_user`` (if set) or ``device.name``
+    # (set by integration).
+    name: str
+
+    # Integration default name. HA device registry
+    # ``device.name``. Non-deterministic for
+    # multi-integration devices.
+    default_name: str
+
+    # Map integrations to the entity ids they provide.
+    integration_entities: dict[str, set[str]] = field(
+        default_factory=dict,
+    )
+
 
 # Check identifiers surfaced as blueprint options. Adding
 # a new check = one new constant, add it to ``CHECK_ALL``,
@@ -93,7 +121,7 @@ class EntityDriftInfo:
 class DeviceInfo:
     """Device with its entity drift snapshots."""
 
-    de: helpers.DeviceEntry
+    de: DeviceEntry
     entities: list[EntityDriftInfo] = field(
         default_factory=list,
     )
@@ -921,10 +949,10 @@ def run_evaluation(
 
     notifications = helpers.prepare_notifications(
         results,
-        max_notifications,
-        f"{config.notification_prefix}cap",
-        "Entity defaults watchdog: notification cap reached",
-        "devices with drift",
+        max_notifications=max_notifications,
+        cap_notification_id=f"{config.notification_prefix}cap",
+        cap_title="Entity defaults watchdog: notification cap reached",
+        cap_item_label="devices with drift",
     )
 
     if _check_deviceless_enabled(config):
