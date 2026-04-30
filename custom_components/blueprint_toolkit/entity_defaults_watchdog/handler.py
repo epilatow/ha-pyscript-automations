@@ -1,15 +1,15 @@
 # This is AI generated code
 """HA wiring for entity_defaults_watchdog.
 
-Three-layer dispatch (entrypoint / argparse / service)
-mirroring the trigger_entity_controller, zwave_route_manager,
-and reference_watchdog ports. EDW-specific shape:
+EDW-specific shape on top of the standard three-layer
+dispatch (see ``DEVELOPMENT.md`` for the universal
+pattern):
 
 - Periodic scan via integration-owned scheduling. The
   blueprint's ``time_pattern`` minute trigger is gone;
   ``helpers.schedule_periodic_with_jitter`` arms a per-
-  instance offset so multiple watchdog instances don't
-  hammer the registries simultaneously on shared
+  instance offset so multiple instances of this blueprint
+  don't hammer the registries simultaneously on shared
   intervals.
 - Truth set (entity registry, device registry, target-
   integration filter, deviceless peers) is built on the
@@ -211,9 +211,8 @@ async def _async_argparse(
 
     # Multi-line regex inputs go through the shared helper
     # so per-line ``re.compile`` validation, empty-match
-    # rejection, and alternation join all stay consistent
-    # across watchdog ports. See
-    # ``test_helpers_lifecycle.TestValidateAndJoinRegexPatterns``
+    # rejection, and alternation join behave identically.
+    # See ``test_helpers_lifecycle.TestValidateAndJoinRegexPatterns``
     # for the parser contract.
     device_exclude_regex, dev_errors = validate_and_join_regex_patterns(
         data["device_exclude_regex_raw"],

@@ -1,15 +1,15 @@
 # This is AI generated code
 """HA wiring for reference_watchdog.
 
-Three-layer dispatch (entrypoint / argparse / service)
-mirroring the trigger_entity_controller and
-zwave_route_manager ports. RW-specific shape:
+RW-specific shape on top of the standard three-layer
+dispatch (see ``DEVELOPMENT.md`` for the universal
+pattern):
 
 - Periodic scan via integration-owned scheduling. The
   blueprint's ``time_pattern`` minute trigger is gone;
   ``helpers.schedule_periodic_with_jitter`` arms a per-
-  instance offset so multiple watchdog instances don't
-  hammer the registries simultaneously on shared
+  instance offset so multiple instances of this blueprint
+  don't hammer the registries simultaneously on shared
   intervals.
 - Truth set (entity / device / service / label registries
   + live states) is built on the event loop because HA
