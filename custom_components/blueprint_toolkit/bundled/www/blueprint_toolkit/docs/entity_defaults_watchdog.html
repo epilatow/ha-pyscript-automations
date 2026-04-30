@@ -233,23 +233,23 @@ per device.  The notification body contains up to three
 sections depending on what kind of drift was found:</p>
 <p><strong>Name overrides to clear</strong> -- entities where the name
 override should be removed:</p>
-<pre><code>- `sensor.kitchen_temp`: &quot;Old Temp&quot;
+<pre><code class="language-text">- `sensor.kitchen_temp`: &quot;Old Temp&quot;
 </code></pre>
 <p><strong>Name overrides with redundant device name</strong> -- the
 override includes the device name, which HA already
 adds automatically:</p>
-<pre><code>- `sensor.kitchen_co2`: &quot;Kitchen Sensor CO2&quot; -&gt; &quot;CO2&quot;
+<pre><code class="language-text">- `sensor.kitchen_co2`: &quot;Kitchen Sensor CO2&quot; -&gt; &quot;CO2&quot;
 </code></pre>
 <p><strong>Non-default entity IDs</strong> -- entities whose ID does
 not match what HA would assign today:</p>
-<pre><code>- `sensor.old_kitchen_temperature`
+<pre><code class="language-text">- `sensor.old_kitchen_temperature`
 </code></pre>
 <p>Deviceless drift is reported as a single aggregate
 notification with up to two sections:</p>
 <p><strong>Entity IDs do not match their names</strong> -- one bullet per
 drifted entity, with a pointer to the most useful edit
 surface:</p>
-<pre><code>- `automation.driveway_lights_on_at_sunset` -&gt; expected `automation.auto_on_sunset_lights_sunset_to_8pm`
+<pre><code class="language-text">- `automation.driveway_lights_on_at_sunset` -&gt; expected `automation.auto_on_sunset_lights_sunset_to_8pm`
   [Auto-On: Sunset Lights: Sunset to 8pm](/config/automation/edit/1669687974816)
 - `sensor.template_sensor` -&gt; expected `sensor.grid_import_power`
   Grid Import Power  -  integration [template](/config/integrations/integration/template)
@@ -262,7 +262,7 @@ entries from other integrations show the friendly name in
 plain text followed by the owning integration's name as a
 link to its config page -- scan the integration column to
 see when several flagged entities share a single source
-(e.g. five rows all tagged <code> -  integration rachio</code>) and
+(e.g. five rows all tagged <code>-  integration rachio</code>) and
 can be suppressed together via <code>exclude_integrations</code>.
 State-only entities (YAML blocks without <code>unique_id:</code>)
 have no owning integration, so they show a nudge to add
@@ -270,7 +270,7 @@ one instead.</p>
 <p><strong>Stale collision suffixes</strong> -- entities whose ID ends
 in <code>_N</code> (N &gt;= 2) but no un-suffixed or lower-<code>_N</code> peer
 exists:</p>
-<pre><code>- `automation.front_porch_light_2` -&gt; rename to `automation.front_porch_light`
+<pre><code class="language-text">- `automation.front_porch_light_2` -&gt; rename to `automation.front_porch_light`
   [Front Porch Light](/config/automation/edit/1234567890)
 </code></pre>
 <h3>Recommendation: add <code>unique_id:</code> to YAML entities</h3>
@@ -345,7 +345,7 @@ Uses <code>log.warning</code> level (HA's default for custom
 components).</p>
 <p>Example output for an automation named
 &quot;Entity Defaults Watchdog&quot;:</p>
-<pre><code>[EDW: Entity Defaults Watchdog] integrations=12
+<pre><code class="language-text">[EDW: Entity Defaults Watchdog] integrations=12
   devices=45 entities=320 device_issues=2
   entity_issues=5
 </code></pre>

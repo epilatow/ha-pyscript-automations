@@ -191,7 +191,7 @@ locks, <code>binary_sensor.X_contact</code> for door/window sensors,
 on the same device to fix it.</p>
 <h3>Route-speed precedence</h3>
 <p>Most specific wins:</p>
-<pre><code>per-client override
+<pre><code class="language-text">per-client override
   &gt; group override (dict with `entities:`)
     &gt; repeater `route_speed:`
       &gt; blueprint `Default route speed`
@@ -424,7 +424,7 @@ successful reconcile after the cooldown.</p>
 <p>Set the blueprint's <em>Debug logging</em> to on. Output appears in
 Settings -&gt; System -&gt; Logs with the tag <code>[ZRM: &lt;automation alias&gt;]</code>.</p>
 <p>Example:</p>
-<pre><code>[ZRM: Z-Wave Route Manager] configured=6 applied=4 pending=2
+<pre><code class="language-text">[ZRM: Z-Wave Route Manager] configured=6 applied=4 pending=2
   errored=0 new_timeouts=0 actions_executed=2
 </code></pre>
 <h3>Reconcile trigger semantics</h3>

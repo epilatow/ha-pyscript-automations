@@ -21,7 +21,7 @@ registration) by driving them end-to-end against HA's REST API.
 
 From the repo root:
 
-```
+```bash
 pytest -m docker tests/docker
 ```
 
@@ -36,13 +36,13 @@ layer cache.
 
 To bring up the same environment the tests use and poke it in a browser:
 
-```
+```bash
 HAPA_CONFIG_DIR=/tmp/hapa-cfg \
 HAPA_TEST_DIR=/tmp/hapa-test \
 docker compose -f tests/docker/docker-compose.yml up --build
 ```
 
-HA is at http://localhost:8123. Onboard manually via the UI or run
+HA is at <http://localhost:8123>. Onboard manually via the UI or run
 `python3 tests/docker/_harness/ha_onboard.py --base-url
 http://127.0.0.1:8123` to complete onboarding programmatically; the
 script prints an access token on stdout.

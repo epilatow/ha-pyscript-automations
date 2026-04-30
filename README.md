@@ -7,10 +7,12 @@ logic layer, making it fully testable with pytest.
 
 ## Automations
 
-- [Sensor Threshold Switch Controller](docs/sensor_threshold_switch_controller.md) -
+- [Sensor Threshold Switch Controller][stsc] -
   Controls a switch based on sensor value spikes (e.g., humidity
   for a bathroom fan). Includes manual override protection,
   double-off disable, and auto-off timer.
+
+[stsc]: docs/sensor_threshold_switch_controller.md
 
 - [Device Watchdog](docs/device_watchdog.md) -
   Monitors device health across integrations. Raises persistent
@@ -57,7 +59,7 @@ Standalone diagnostic and inspection tools that ship alongside
 the automations. Live in the bundled payload and run from the
 HA host.
 
-- [Z-Wave Network Info](custom_components/blueprint_toolkit/bundled/cli/zwave_network_info.py) -
+- [Z-Wave Network Info][zni] -
   Tabular per-node view of the Z-Wave mesh: protocol (Mesh/LR),
   signal-strength quality, configured priority routes, and
   opt-in stat columns (RX/TX counts, drop counts, drop rates,
@@ -65,6 +67,8 @@ HA host.
   columns pull from HA's recorder; current state comes from
   zwave-js-ui. Self-bootstraps a venv on first run; see `--help`
   for the full column list and aliases.
+
+[zni]: custom_components/blueprint_toolkit/bundled/cli/zwave_network_info.py
 
 ## Prerequisites
 

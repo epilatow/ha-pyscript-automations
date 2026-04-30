@@ -39,26 +39,26 @@ and configurable notifications.
 
 ### Required
 
-| Parameter | Description |
-|---|---|
+| Parameter           | Description                 |
+| ------------------- | --------------------------- |
 | Controlled entities | Entities to turn on and off |
 
 ### Optional
 
-| Parameter | Description |
-|---|---|
-| Auto-off delay | Minutes after triggers clear to turn off. Resets on new trigger. |
-| Auto-off disabling entities | When any is "on", suppresses auto-off for full manual control |
-| Trigger entities | Binary sensors that trigger activation |
-| Trigger period | When triggers activate: always, night-time, day-time |
-| Trigger forces on | Re-enable if turned off while trigger active |
-| Trigger disabling entities | When any is "on", suppresses triggers |
-| Trigger disabling period | When disabling entities are checked |
-| Notification service | e.g., "notify.mobile_app_phone" |
-| Notification prefix | Prepended to messages (supports timestamp tokens) |
-| Notification suffix | Appended to messages (supports timestamp tokens) |
-| Notification events | Which actions notify: triggered-on, forced-on, auto-off |
-| Debug logging | Log debug info to HA logs |
+| Parameter                   | Description                                                      |
+| --------------------------- | ---------------------------------------------------------------- |
+| Auto-off delay              | Minutes after triggers clear to turn off. Resets on new trigger. |
+| Auto-off disabling entities | When any is "on", suppresses auto-off for full manual control    |
+| Trigger entities            | Binary sensors that trigger activation                           |
+| Trigger period              | When triggers activate: always, night-time, day-time             |
+| Trigger forces on           | Re-enable if turned off while trigger active                     |
+| Trigger disabling entities  | When any is "on", suppresses triggers                            |
+| Trigger disabling period    | When disabling entities are checked                              |
+| Notification service        | e.g., "notify.mobile_app_phone"                                  |
+| Notification prefix         | Prepended to messages (supports timestamp tokens)                |
+| Notification suffix         | Appended to messages (supports timestamp tokens)                 |
+| Notification events         | Which actions notify: triggered-on, forced-on, auto-off          |
+| Debug logging               | Log debug info to HA logs                                        |
 
 See the blueprint UI for default values.
 
@@ -77,6 +77,7 @@ night when the bedroom is occupied:
 - **Trigger disabling period**: night-time
 
 Result:
+
 - Daytime: motion always turns on the light
 - Night + bedroom not occupied: motion turns on the light
 - Night + bedroom occupied: motion is suppressed
@@ -95,6 +96,7 @@ resets the timer without also turning the device on:
 - (No trigger entities)
 
 Result:
+
 - Manual on while motion is active: timer stays paused
 - Manual on while motion is inactive: timer starts
   immediately
@@ -143,7 +145,7 @@ output appears in **Settings > System > Logs**. Uses
 
 Example output for an automation named "Hallway Motion Light":
 
-```
+```text
 [TEC: Hallway Motion Light] event=TRIGGER_ON action=TURN_ON
   reason='trigger activated' auto_off_at=none
   trigger_on=True controlled_on=False is_day_time=True

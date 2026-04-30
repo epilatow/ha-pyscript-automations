@@ -47,17 +47,17 @@ automatically when drift is resolved.
 
 ## Configuration
 
-| Parameter | Description |
-|---|---|
-| Drift checks | Which checks to run: `device-entity-id`, `device-entity-name`, `entity-id` (deviceless), or any combination. Empty means all. |
-| Include integrations | Integration IDs to check. Empty means all integrations. Applies to device-backed entities and to registry-backed deviceless entries (e.g. `template`, `rachio`). State-only entities have no platform to filter on. |
-| Exclude integrations | Integration IDs to skip even if included. Same scope as Include integrations. |
-| Device exclude regex | Skip devices whose name matches. One pattern per line. |
-| Exclude entities | Specific entities to exclude from all checks. |
-| Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
-| Entity name exclude regex | Skip entities whose name matches. One pattern per line. |
-| Check interval (minutes) | Minutes between drift evaluations. |
-| Debug Logging | Log debug info to HA logs. |
+| Parameter                 | Description                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Drift checks              | Which checks to run: `device-entity-id`, `device-entity-name`, `entity-id` (deviceless), or any combination. Empty means all.                                                                                       |
+| Include integrations      | Integration IDs to check. Empty means all integrations. Applies to device-backed entities and to registry-backed deviceless entries (e.g. `template`, `rachio`). State-only entities have no platform to filter on. |
+| Exclude integrations      | Integration IDs to skip even if included. Same scope as Include integrations.                                                                                                                                       |
+| Device exclude regex      | Skip devices whose name matches. One pattern per line.                                                                                                                                                              |
+| Exclude entities          | Specific entities to exclude from all checks.                                                                                                                                                                       |
+| Entity ID exclude regex   | Skip entities whose ID matches. One pattern per line.                                                                                                                                                               |
+| Entity name exclude regex | Skip entities whose name matches. One pattern per line.                                                                                                                                                             |
+| Check interval (minutes)  | Minutes between drift evaluations.                                                                                                                                                                                  |
+| Debug Logging             | Log debug info to HA logs.                                                                                                                                                                                          |
 
 See the blueprint UI for default values.
 
@@ -164,7 +164,7 @@ sections depending on what kind of drift was found:
 **Name overrides to clear** -- entities where the name
 override should be removed:
 
-```
+```text
 - `sensor.kitchen_temp`: "Old Temp"
 ```
 
@@ -172,14 +172,14 @@ override should be removed:
 override includes the device name, which HA already
 adds automatically:
 
-```
+```text
 - `sensor.kitchen_co2`: "Kitchen Sensor CO2" -> "CO2"
 ```
 
 **Non-default entity IDs** -- entities whose ID does
 not match what HA would assign today:
 
-```
+```text
 - `sensor.old_kitchen_temperature`
 ```
 
@@ -190,7 +190,7 @@ notification with up to two sections:
 drifted entity, with a pointer to the most useful edit
 surface:
 
-```
+```text
 - `automation.driveway_lights_on_at_sunset` -> expected `automation.auto_on_sunset_lights_sunset_to_8pm`
   [Auto-On: Sunset Lights: Sunset to 8pm](/config/automation/edit/1669687974816)
 - `sensor.template_sensor` -> expected `sensor.grid_import_power`
@@ -205,7 +205,7 @@ entries from other integrations show the friendly name in
 plain text followed by the owning integration's name as a
 link to its config page -- scan the integration column to
 see when several flagged entities share a single source
-(e.g. five rows all tagged ` -  integration rachio`) and
+(e.g. five rows all tagged `-  integration rachio`) and
 can be suppressed together via `exclude_integrations`.
 State-only entities (YAML blocks without `unique_id:`)
 have no owning integration, so they show a nudge to add
@@ -215,7 +215,7 @@ one instead.
 in `_N` (N >= 2) but no un-suffixed or lower-`_N` peer
 exists:
 
-```
+```text
 - `automation.front_porch_light_2` -> rename to `automation.front_porch_light`
   [Front Porch Light](/config/automation/edit/1234567890)
 ```
@@ -301,7 +301,7 @@ components).
 Example output for an automation named
 "Entity Defaults Watchdog":
 
-```
+```text
 [EDW: Entity Defaults Watchdog] integrations=12
   devices=45 entities=320 device_issues=2
   entity_issues=5

@@ -52,18 +52,18 @@ addon v1.2.0 (bundling zwave-js-ui v11.16.0).
 
 ## Configuration
 
-| Parameter | Description |
-|---|---|
-| Config file path | YAML file path relative to `/config` (default `zwave_route_manager.yaml`) |
-| Z-Wave JS UI host | Usually `core-zwave-js` (default) |
-| Z-Wave JS UI port | Usually `8091` (default) |
-| Z-Wave JS UI auth token | Leave empty unless you've enabled auth |
-| Clear routes not in config | If true, removes routes on nodes not listed in the config file |
+| Parameter                    | Description                                                                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Config file path             | YAML file path relative to `/config` (default `zwave_route_manager.yaml`)                                                                  |
+| Z-Wave JS UI host            | Usually `core-zwave-js` (default)                                                                                                          |
+| Z-Wave JS UI port            | Usually `8091` (default)                                                                                                                   |
+| Z-Wave JS UI auth token      | Leave empty unless you've enabled auth                                                                                                     |
+| Clear routes not in config   | If true, removes routes on nodes not listed in the config file                                                                             |
 | Reconcile interval (minutes) | How often to check for out-of-band route drift (e.g. someone editing a route via the zwave-js-ui web UI). Lower values catch drift sooner. |
-| Pending timeout (hours) | Time before raising a notification on a node whose route hasn't been reflected |
-| Default route speed | `auto`, `100k`, `40k`, or `9600` (used when neither repeater nor client specifies one) |
-| Max notifications | Cap on per-run issue notifications; 0 = unlimited |
-| Debug logging | Per-reconcile log.warning line under `[ZRM: ...]` |
+| Pending timeout (hours)      | Time before raising a notification on a node whose route hasn't been reflected                                                             |
+| Default route speed          | `auto`, `100k`, `40k`, or `9600` (used when neither repeater nor client specifies one)                                                     |
+| Max notifications            | Cap on per-run issue notifications; 0 = unlimited                                                                                          |
+| Debug logging                | Per-reconcile log.warning line under `[ZRM: ...]`                                                                                          |
 
 ## Usage notes
 
@@ -119,7 +119,7 @@ on the same device to fix it.
 
 Most specific wins:
 
-```
+```text
 per-client override
   > group override (dict with `entities:`)
     > repeater `route_speed:`
@@ -347,7 +347,7 @@ alias>]`.
 
 Example:
 
-```
+```text
 [ZRM: Z-Wave Route Manager] configured=6 applied=4 pending=2
   errored=0 new_timeouts=0 actions_executed=2
 ```
@@ -369,13 +369,13 @@ action's `default('manual', true)`). The service handler's
 gate then decides whether each call warrants a full
 reconcile:
 
-| Signal | Action |
-|---|---|
-| `trigger_id == "manual"` (dev tools, startup, reload) | Reconcile |
-| Config file mtime changed since last run | Reconcile |
-| `now - last_reconcile > reconcile_interval_minutes` | Reconcile |
-| `reconcile_pending == true` from prior tick | Reconcile |
-| Otherwise | Update `last_run` only, exit |
+| Signal                                                | Action                       |
+| ----------------------------------------------------- | ---------------------------- |
+| `trigger_id == "manual"` (dev tools, startup, reload) | Reconcile                    |
+| Config file mtime changed since last run              | Reconcile                    |
+| `now - last_reconcile > reconcile_interval_minutes`   | Reconcile                    |
+| `reconcile_pending == true` from prior tick           | Reconcile                    |
+| Otherwise                                             | Update `last_run` only, exit |
 
 ### Why zwave-js-ui and not zwave-js-server directly?
 

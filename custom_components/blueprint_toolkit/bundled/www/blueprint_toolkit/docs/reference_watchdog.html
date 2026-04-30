@@ -180,7 +180,8 @@ notifications</li>
 </tr>
 </tbody>
 </table>
-<p><strong>Rule of thumb:</strong> by file -&gt; paths. By config entry domain -&gt; integrations. By entity -&gt; entities.</p>
+<p><strong>Rule of thumb:</strong> by file -&gt; paths. By config entry domain -&gt;
+integrations. By entity -&gt; entities.</p>
 <h3>Owner attribution</h3>
 <p>Every finding is attributed to an <strong>owner</strong> -- the
 automation, script, config block, template entity,
@@ -256,7 +257,7 @@ checking the entity registry's <code>config_entry_id</code> field:
 entries with <code>config_entry_id: null</code> are YAML-only.</p>
 <p>When an owner is YAML-only, its notification body
 includes a note like:</p>
-<pre><code>Entity: `sensor.air_filters_energy_monthly`
+<pre><code class="language-text">Entity: `sensor.air_filters_energy_monthly`
   (YAML-only, edit `utility_meters.yaml`)
 </code></pre>
 <p>No clickable URL is generated because HA has no edit
@@ -613,7 +614,7 @@ Uses <code>log.warning</code> level (HA's default for custom
 components).</p>
 <p>Example output for an automation named
 &quot;Reference Watchdog&quot;:</p>
-<pre><code>[RW: Reference Watchdog] owners=338 with_issues=43
+<pre><code class="language-text">[RW: Reference Watchdog] owners=338 with_issues=43
   findings=85 refs=819 (struct=641 jinja=59 sniff=119
   svc_skipped=13) orphans=9/184
 </code></pre>

@@ -29,7 +29,7 @@ Integration code (`__init__.py`, `manifest.json`,
 blueprints, docs, and CLI script the installer ships to
 their user-visible `/config/...` paths via symlinks.
 
-```
+```text
 custom_components/blueprint_toolkit/bundled/
     blueprints/automation/blueprint_toolkit/*.yaml
     cli/zwave_network_info.py
@@ -40,7 +40,7 @@ The repo root keeps two committed symlinks into the
 bundle for path-typing convenience and so existing test
 paths keep resolving:
 
-```
+```text
 blueprints -> custom_components/blueprint_toolkit/bundled/blueprints
 docs       -> custom_components/blueprint_toolkit/bundled/docs
 ```
@@ -307,6 +307,26 @@ Do not number steps in comments (e.g., `# 1. Parse state`).
 Numbering is unnecessary and adding/removing steps requires
 renumbering.
 
+## Markdown style
+
+Markdown files conform to `.markdownlint.json` at the repo
+root, enforced by `tests/test_markdownlint.py` (which shells
+out to `npx markdownlint-cli2`). Notable rules:
+
+- Line wrapping at 78 characters (MD013). Tables, headings,
+  and code blocks are exempt. Long URLs in text use
+  reference-style links (`[label][ref]` ... `[ref]: url`) so
+  the source line stays under the limit.
+- Numbered lists use ordered prefixes (`1./2./3./...`) per
+  MD029.
+- Code fences require a language tag (MD040). Use `text` for
+  plain output, `console` for shell sessions with prompts,
+  `bash` / `python` / etc. for actual code.
+
+`MD060/table-column-style` is disabled because it conflicts
+with the existing compact-table style (`|hi|world|`); both
+forms render identically.
+
 ## Testing
 
 Always add new tests when adding new functionality.
@@ -495,6 +515,7 @@ cannot resolve `homeassistant.*`; run
   rendered action, so if a blueprint input was renamed
   or removed the service call still arrives with the
   stale kwarg and the handler's schema rejects it:
+
   ```bash
   curl -s -X POST \
     -H "Authorization: Bearer $API_KEY" \
@@ -508,10 +529,12 @@ cannot resolve `homeassistant.*`; run
   lives under
   `blueprint_toolkit.<service>_<slug>_state`. Read it
   with:
+
   ```bash
   curl -s -H "Authorization: Bearer $API_KEY" \
     http://$HA_HOST:8123/api/states/blueprint_toolkit.<service>_<slug>_state
   ```
+
   A fresh `last_run` plus a nonzero `runtime` and no
   error attributes mean the run completed. Persistent
   notifications are no longer exposed as `/api/states`
@@ -523,4 +546,3 @@ cannot resolve `homeassistant.*`; run
 
 - Use `- component: Summary of change.` format.
 - Include a `Co-Authored-By: <AI Model XXX>` trailer for AI-assisted commits.
-

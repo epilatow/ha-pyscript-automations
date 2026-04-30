@@ -1,0 +1,18 @@
+// markdownlint-cli2 entry point. The lint-rule config lives in
+// `.markdownlint.json` (the one the user's global guidelines
+// describe). This file controls only what cli2 walks: globs +
+// ignores. `docs/` is a repo-root symlink into
+// `custom_components/blueprint_toolkit/bundled/docs/`; ignored
+// here so the bundled docs aren't linted twice.
+{
+  "config": ".markdownlint.json",
+  "globs": ["**/*.md"],
+  "ignores": [
+    "node_modules/",
+    ".venv/",
+    ".pytest_cache/",
+    "tmp/",
+    "**/.cache/",
+    "docs/"
+  ]
+}

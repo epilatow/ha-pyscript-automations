@@ -63,16 +63,16 @@ page for deletion.
 
 ## Configuration
 
-| Parameter | Description |
-|---|---|
-| Exclude paths | File-path globs to skip. Matched against the source's relative path (e.g. `plants.yaml`, `.storage/lovelace.old_dashboard`). Use this for legacy-YAML integrations not reachable by integration exclusion. |
-| Exclude integrations | Integrations to skip. Matches the `Integration:` line shown at the top of each notification -- anything rendered there can be silenced here. Built-in adapters (`automation`, `script`, `template`, `customize`, `lovelace`) are listed as quick-picks in the blueprint UI; config-entry integration domains (e.g. `group`, `homekit`, or whatever is installed in HA) can be added as custom values. Legacy YAML integrations that don't register entities (e.g. `plant`) have no `Integration:` line and **aren't filterable here** -- use `Exclude paths` for those. |
-| Exclude entities | Entities to exclude, applied symmetrically to source and target sides. Also silences source-orphan findings. |
-| Exclude entity regex | Multi-line regex, matched against entity and device reference values, applied symmetrically to source and target sides. Also silences source-orphan findings. |
-| Check disabled entities | When enabled, references to entities that exist in the registry but are disabled are reported as "Disabled-but-existing references". |
-| Check interval (minutes) | Minutes between reference-integrity evaluations (default 60 -- reference scans do more file I/O than the other watchdogs). |
-| Max source notifications | Per-owner notification cap. 0 = unlimited. The source-orphan summary is always emitted separately and is not subject to this cap. |
-| Debug logging | Log a warning-level stat line on every evaluation. |
+| Parameter                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exclude paths            | File-path globs to skip. Matched against the source's relative path (e.g. `plants.yaml`, `.storage/lovelace.old_dashboard`). Use this for legacy-YAML integrations not reachable by integration exclusion.                                                                                                                                                                                                                                                                                                                                                              |
+| Exclude integrations     | Integrations to skip. Matches the `Integration:` line shown at the top of each notification -- anything rendered there can be silenced here. Built-in adapters (`automation`, `script`, `template`, `customize`, `lovelace`) are listed as quick-picks in the blueprint UI; config-entry integration domains (e.g. `group`, `homekit`, or whatever is installed in HA) can be added as custom values. Legacy YAML integrations that don't register entities (e.g. `plant`) have no `Integration:` line and **aren't filterable here** -- use `Exclude paths` for those. |
+| Exclude entities         | Entities to exclude, applied symmetrically to source and target sides. Also silences source-orphan findings.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Exclude entity regex     | Multi-line regex, matched against entity and device reference values, applied symmetrically to source and target sides. Also silences source-orphan findings.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Check disabled entities  | When enabled, references to entities that exist in the registry but are disabled are reported as "Disabled-but-existing references".                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Check interval (minutes) | Minutes between reference-integrity evaluations (default 60 -- reference scans do more file I/O than the other watchdogs).                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Max source notifications | Per-owner notification cap. 0 = unlimited. The source-orphan summary is always emitted separately and is not subject to this cap.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Debug logging            | Log a warning-level stat line on every evaluation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 See the blueprint UI for default values.
 
@@ -82,14 +82,15 @@ See the blueprint UI for default values.
 
 Three exclusion axes, each for a specific purpose:
 
-| Want to silence | Use |
-|---|---|
-| A specific file (e.g. `plants.yaml`, an old dashboard) | `exclude_paths` |
-| All config entries from an integration (e.g. `hacs`) | `exclude_integrations` |
-| A specific entity ID you don't want flagged | `exclude_entities` |
-| A family of entity IDs matching a pattern | `exclude_entity_regex` |
+| Want to silence                                        | Use                    |
+| ------------------------------------------------------ | ---------------------- |
+| A specific file (e.g. `plants.yaml`, an old dashboard) | `exclude_paths`        |
+| All config entries from an integration (e.g. `hacs`)   | `exclude_integrations` |
+| A specific entity ID you don't want flagged            | `exclude_entities`     |
+| A family of entity IDs matching a pattern              | `exclude_entity_regex` |
 
-**Rule of thumb:** by file -> paths. By config entry domain -> integrations. By entity -> entities.
+**Rule of thumb:** by file -> paths. By config entry domain ->
+integrations. By entity -> entities.
 
 ### Owner attribution
 
@@ -129,13 +130,13 @@ Block-path format:
 
 Owner type -> URL target:
 
-| Owner | URL |
-|---|---|
-| Automation | `/config/automation/edit/<id>` |
-| Script | `/config/script/edit/<id>` |
-| Config entry | `/config/entities/?config_entry=<entry_id>` |
-| Dashboard | `/<url_path>` from the dashboards index |
-| Template entities & blocks, customize entries, generic YAML, plants, utility meters | **no URL** -- edit the file directly |
+| Owner                                                                               | URL                                         |
+| ----------------------------------------------------------------------------------- | ------------------------------------------- |
+| Automation                                                                          | `/config/automation/edit/<id>`              |
+| Script                                                                              | `/config/script/edit/<id>`                  |
+| Config entry                                                                        | `/config/entities/?config_entry=<entry_id>` |
+| Dashboard                                                                           | `/<url_path>` from the dashboards index     |
+| Template entities & blocks, customize entries, generic YAML, plants, utility meters | **no URL** -- edit the file directly        |
 
 ### YAML-only helpers
 
@@ -150,7 +151,7 @@ entries with `config_entry_id: null` are YAML-only.
 When an owner is YAML-only, its notification body
 includes a note like:
 
-```
+```text
 Entity: `sensor.air_filters_energy_monthly`
   (YAML-only, edit `utility_meters.yaml`)
 ```
@@ -211,9 +212,9 @@ file-based definer.
 
 To silence specific findings:
 
-| Want to silence | Use |
-|---|---|
-| A single orphan you want to keep | `exclude_entities` |
+| Want to silence                        | Use                    |
+| -------------------------------------- | ---------------------- |
+| A single orphan you want to keep       | `exclude_entities`     |
 | A family of orphans matching a pattern | `exclude_entity_regex` |
 
 There's no per-platform silencing toggle -- the full
@@ -293,26 +294,26 @@ After each evaluation, attributes are written to
 Search for `blueprint_toolkit.reference_watchdog_*` in
 **Developer Tools > States** to find it.
 
-| Attribute | Meaning |
-|---|---|
-| `last_run` | ISO timestamp of the most recent successful evaluation |
-| `runtime` | Wall-clock seconds the evaluation took |
-| `paths_included` | Source files actually scanned (after `exclude_paths` filtering) |
-| `paths_excluded` | Source files skipped by `exclude_paths` |
-| `owners_total` | Total owners discovered across scanned sources (including owners with zero refs) |
-| `owners_with_refs` | Owners where at least one reference was detected |
-| `owners_without_refs` | Owners scanned but no references detected -- surfaces detection gaps |
-| `owners_with_issues` | Owners with at least one broken-or-disabled finding |
-| `total_findings` | Broken-or-disabled findings across all owners |
-| `broken_entity_count` | Findings where the target entity is missing from the registry + states |
-| `broken_device_count` | Findings where the target device ID is missing |
-| `disabled_entity_count` | Findings where the target exists but is disabled (only populated when `check_disabled_entities = true`) |
-| `refs_total` | All references detected (valid + broken + disabled) |
-| `refs_structural` | References found via the `_ENTITY_KEYS` structural walk |
-| `refs_jinja` | References found via the Jinja AST extraction pass |
-| `refs_sniff` | References found via the string sniff pass |
-| `refs_service_skipped` | Sniff hits dropped by the service-name negative truth set |
-| `source_orphan_count` | Source orphans detected this run |
+| Attribute                  | Meaning                                                                                                                                                        |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `last_run`                 | ISO timestamp of the most recent successful evaluation                                                                                                         |
+| `runtime`                  | Wall-clock seconds the evaluation took                                                                                                                         |
+| `paths_included`           | Source files actually scanned (after `exclude_paths` filtering)                                                                                                |
+| `paths_excluded`           | Source files skipped by `exclude_paths`                                                                                                                        |
+| `owners_total`             | Total owners discovered across scanned sources (including owners with zero refs)                                                                               |
+| `owners_with_refs`         | Owners where at least one reference was detected                                                                                                               |
+| `owners_without_refs`      | Owners scanned but no references detected -- surfaces detection gaps                                                                                           |
+| `owners_with_issues`       | Owners with at least one broken-or-disabled finding                                                                                                            |
+| `total_findings`           | Broken-or-disabled findings across all owners                                                                                                                  |
+| `broken_entity_count`      | Findings where the target entity is missing from the registry + states                                                                                         |
+| `broken_device_count`      | Findings where the target device ID is missing                                                                                                                 |
+| `disabled_entity_count`    | Findings where the target exists but is disabled (only populated when `check_disabled_entities = true`)                                                        |
+| `refs_total`               | All references detected (valid + broken + disabled)                                                                                                            |
+| `refs_structural`          | References found via the `_ENTITY_KEYS` structural walk                                                                                                        |
+| `refs_jinja`               | References found via the Jinja AST extraction pass                                                                                                             |
+| `refs_sniff`               | References found via the string sniff pass                                                                                                                     |
+| `refs_service_skipped`     | Sniff hits dropped by the service-name negative truth set                                                                                                      |
+| `source_orphan_count`      | Source orphans detected this run                                                                                                                               |
 | `source_orphan_candidates` | Registry entries eligible for orphan evaluation (`config_entry_id=null`, platform not in the runtime-excluded list). `source_orphan_count` is always a subset. |
 
 **Invariants:**
@@ -341,11 +342,11 @@ classified as a source orphan when:
 The definer pool is platform-scoped so that consumer-
 side mentions can't hide orphans:
 
-| Platform | Pool |
-|---|---|
-| `automation` | `automations.yaml` + `.storage/automation` |
-| `script` | `scripts.yaml` + `.storage/script` |
-| `template` | `template.yaml` + generic YAML |
+| Platform        | Pool                                             |
+| --------------- | ------------------------------------------------ |
+| `automation`    | `automations.yaml` + `.storage/automation`       |
+| `script`        | `scripts.yaml` + `.storage/script`               |
+| `template`      | `template.yaml` + generic YAML                   |
 | Everything else | Generic YAML + matching `.storage/<helper>` file |
 
 Where "generic YAML" is every YAML file reachable from
@@ -444,7 +445,7 @@ components).
 Example output for an automation named
 "Reference Watchdog":
 
-```
+```text
 [RW: Reference Watchdog] owners=338 with_issues=43
   findings=85 refs=819 (struct=641 jinja=59 sniff=119
   svc_skipped=13) orphans=9/184

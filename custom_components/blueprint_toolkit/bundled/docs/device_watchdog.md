@@ -39,18 +39,18 @@ devices recover.
 
 ## Configuration
 
-| Parameter | Description |
-|---|---|
-| Include integrations | Integration IDs to monitor. Empty means all. |
-| Exclude integrations | Integration IDs to skip even if included. |
-| Device exclude regex | Skip devices whose name matches. One pattern per line. |
-| Entity ID exclude regex | Skip entities whose ID matches. One pattern per line. |
-| Entity domains to monitor | Only check entities in these domains |
-| Check interval (minutes) | Minutes between watchdog evaluations |
-| Dead device threshold (minutes) | Staleness threshold for state reports |
-| Enabled checks | Which checks to run (`unavailable-entities`, `device-updates`, `disabled-diagnostics`). Empty means all. |
-| Max device notifications | Cap on per-device notifications. 0 = unlimited. |
-| Debug logging | Log debug info to HA logs |
+| Parameter                       | Description                                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Include integrations            | Integration IDs to monitor. Empty means all.                                                             |
+| Exclude integrations            | Integration IDs to skip even if included.                                                                |
+| Device exclude regex            | Skip devices whose name matches. One pattern per line.                                                   |
+| Entity ID exclude regex         | Skip entities whose ID matches. One pattern per line.                                                    |
+| Entity domains to monitor       | Only check entities in these domains                                                                     |
+| Check interval (minutes)        | Minutes between watchdog evaluations                                                                     |
+| Dead device threshold (minutes) | Staleness threshold for state reports                                                                    |
+| Enabled checks                  | Which checks to run (`unavailable-entities`, `device-updates`, `disabled-diagnostics`). Empty means all. |
+| Max device notifications        | Cap on per-device notifications. 0 = unlimited.                                                          |
+| Debug logging                   | Log debug info to HA logs                                                                                |
 
 See the blueprint UI for default values.
 
@@ -103,7 +103,7 @@ output appears in **Settings > System > Logs**. Uses
 
 Example output for an automation named "Device Watchdog":
 
-```
+```text
 [DW: Device Watchdog] integrations=12 devices=45
   entities=320 device_issues=2 entity_issues=5
 ```

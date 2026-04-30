@@ -138,13 +138,13 @@ and switch entities.</p>
 </tr>
 <tr>
 <td><strong>Notification Prefix</strong></td>
-<td><code>STSC: </code></td>
-<td>Text prepended to notifications. Supports timestamp tokens (see below).</td>
+<td><code>'STSC: '</code></td>
+<td>Text prepended to notifications. Supports timestamp tokens (see below). Quotes show the trailing space in the default.</td>
 </tr>
 <tr>
 <td><strong>Notification Suffix</strong></td>
-<td><code> at YYYY-MM-DD HH:mm:ss</code></td>
-<td>Text appended to notifications. Supports timestamp tokens (see below).</td>
+<td><code>' at YYYY-MM-DD HH:mm:ss'</code></td>
+<td>Text appended to notifications. Supports timestamp tokens (see below). Quotes show the leading space in the default.</td>
 </tr>
 </tbody>
 </table>
@@ -154,7 +154,7 @@ replaced with the current time when the notification is sent:</p>
 <p><code>YYYY</code>, <code>YY</code>, <code>MM</code>, <code>DD</code>, <code>HH</code>, <code>mm</code>, <code>ss</code></p>
 <h2>Usage notes</h2>
 <h3>Example: Bathroom Fan Control</h3>
-<pre><code>Target Switch Entity:  switch.bathroom_fan
+<pre><code class="language-text">Target Switch Entity:  switch.bathroom_fan
 Sensor Entities:       sensor.bathroom_humidity
                        sensor.bathroom_vent_humidity
 Trigger Threshold:     10
@@ -253,7 +253,7 @@ context on every invocation.</p>
 <li>Or via SSH: <code>ha core logs 2&gt;&amp;1 | grep sensor_threshold</code>.</li>
 </ul>
 <p>Example output for an automation named &quot;Main Bath Fan Controller&quot;:</p>
-<pre><code>[STSC: Main Bath Fan Controller] event=TIMER sw=on baseline=None
+<pre><code class="language-text">[STSC: Main Bath Fan Controller] event=TIMER sw=on baseline=None
   auto_off=2026-02-21T15:19:00 samples=5 -&gt; TURN_OFF
   &quot;Auto-off after 1 minute(s)&quot;
 </code></pre>

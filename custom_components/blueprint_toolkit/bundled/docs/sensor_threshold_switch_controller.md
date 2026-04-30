@@ -36,23 +36,23 @@ and switch entities.
 
 ### Required
 
-| Parameter | Description |
-|---|---|
-| **Target Switch Entity** | The switch, fan, light, or input_boolean entity to control (e.g., `switch.bathroom_fan`). |
-| **Sensor Entities** | One or more sensors to monitor (e.g., `sensor.bathroom_humidity`). All sensors feed into a shared sampling window. Any sensor spike triggers the switch; all must settle to release. |
-| **Trigger Threshold** | Spike amount (max - min in sampling window) to turn the switch ON. Must be positive. |
-| **Release Threshold** | Amount above baseline to keep the switch ON. Must be <= trigger threshold. |
+| Parameter                | Description                                                                                                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Target Switch Entity** | The switch, fan, light, or input_boolean entity to control (e.g., `switch.bathroom_fan`).                                                                                            |
+| **Sensor Entities**      | One or more sensors to monitor (e.g., `sensor.bathroom_humidity`). All sensors feed into a shared sampling window. Any sensor spike triggers the switch; all must settle to release. |
+| **Trigger Threshold**    | Spike amount (max - min in sampling window) to turn the switch ON. Must be positive.                                                                                                 |
+| **Release Threshold**    | Amount above baseline to keep the switch ON. Must be <= trigger threshold.                                                                                                           |
 
 ### Optional
 
-| Parameter | Default | Description |
-|---|---|---|
-| **Sampling Window** | 300s | Rolling window (in seconds) for min/max calculation. |
-| **Disable Window** | 10s | Time window for double-off detection. Two manual switch-off operations within this window disable the sensor override. Set to 0 to disable. |
-| **Auto-Off Timeout** | 30m | Minutes before auto-off after manual switch activation. Set to 0 to disable. |
-| **Notification Service** | *(empty)* | Service name for notifications (e.g., `notify` or `notify.mobile_app_phone`). Leave empty to disable. |
-| **Notification Prefix** | `STSC: ` | Text prepended to notifications. Supports timestamp tokens (see below). |
-| **Notification Suffix** | ` at YYYY-MM-DD HH:mm:ss` | Text appended to notifications. Supports timestamp tokens (see below). |
+| Parameter                | Default                     | Description                                                                                                                                 |
+| ------------------------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sampling Window**      | 300s                        | Rolling window (in seconds) for min/max calculation.                                                                                        |
+| **Disable Window**       | 10s                         | Time window for double-off detection. Two manual switch-off operations within this window disable the sensor override. Set to 0 to disable. |
+| **Auto-Off Timeout**     | 30m                         | Minutes before auto-off after manual switch activation. Set to 0 to disable.                                                                |
+| **Notification Service** | *(empty)*                   | Service name for notifications (e.g., `notify` or `notify.mobile_app_phone`). Leave empty to disable.                                       |
+| **Notification Prefix**  | `'STSC: '`                  | Text prepended to notifications. Supports timestamp tokens (see below). Quotes show the trailing space in the default.                      |
+| **Notification Suffix**  | `' at YYYY-MM-DD HH:mm:ss'` | Text appended to notifications. Supports timestamp tokens (see below). Quotes show the leading space in the default.                        |
 
 ### Timestamp Tokens
 
@@ -65,7 +65,7 @@ replaced with the current time when the notification is sent:
 
 ### Example: Bathroom Fan Control
 
-```
+```text
 Target Switch Entity:  switch.bathroom_fan
 Sensor Entities:       sensor.bathroom_humidity
                        sensor.bathroom_vent_humidity
@@ -100,17 +100,17 @@ The diagnostic entity's state value is the same as `last_action`
 (`TURN_ON`, `TURN_OFF`, or `NONE`) -- the most recent decision -- so
 dashboards keying off the state value mirror the action.
 
-| Attribute | Description |
-|---|---|
-| `instance_id` | Automation entity_id (e.g. `automation.bath_fan`) |
-| `last_action` | `TURN_ON`, `TURN_OFF`, or `NONE` |
-| `last_reason` | Human-readable reason for the action (or `n/a`) |
-| `last_event` | `SENSOR`, `SWITCH`, or `TIMER` |
-| `last_run` | ISO timestamp of the invocation |
-| `last_sensor` | Parsed sensor value (or `n/a` for non-sensor events) |
-| `last_trigger` | Trigger ID (`sensor_change`, `switch_change`, `periodic`, `manual`) |
-| `runtime` | Service-call duration in seconds |
-| `data` | JSON-encoded controller state (samples, baseline, overrides, auto_off_started_at, initialized) -- used to round-trip state across calls; surfacing it in the attrs lets advanced users inspect the rolling window |
+| Attribute      | Description                                                                                                                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instance_id`  | Automation entity_id (e.g. `automation.bath_fan`)                                                                                                                                                                 |
+| `last_action`  | `TURN_ON`, `TURN_OFF`, or `NONE`                                                                                                                                                                                  |
+| `last_reason`  | Human-readable reason for the action (or `n/a`)                                                                                                                                                                   |
+| `last_event`   | `SENSOR`, `SWITCH`, or `TIMER`                                                                                                                                                                                    |
+| `last_run`     | ISO timestamp of the invocation                                                                                                                                                                                   |
+| `last_sensor`  | Parsed sensor value (or `n/a` for non-sensor events)                                                                                                                                                              |
+| `last_trigger` | Trigger ID (`sensor_change`, `switch_change`, `periodic`, `manual`)                                                                                                                                               |
+| `runtime`      | Service-call duration in seconds                                                                                                                                                                                  |
+| `data`         | JSON-encoded controller state (samples, baseline, overrides, auto_off_started_at, initialized) -- used to round-trip state across calls; surfacing it in the attrs lets advanced users inspect the rolling window |
 
 To view:
 
@@ -140,7 +140,8 @@ To view logs:
 - Or via SSH: `ha core logs 2>&1 | grep sensor_threshold`.
 
 Example output for an automation named "Main Bath Fan Controller":
-```
+
+```text
 [STSC: Main Bath Fan Controller] event=TIMER sw=on baseline=None
   auto_off=2026-02-21T15:19:00 samples=5 -> TURN_OFF
   "Auto-off after 1 minute(s)"
