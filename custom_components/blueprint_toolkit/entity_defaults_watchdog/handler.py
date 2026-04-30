@@ -500,18 +500,7 @@ def _build_device_inputs(
                 entry = ent_reg.async_get(eid)
                 if entry is None:
                     continue
-                expected_id: str | None
-                try:
-                    expected_id = str(
-                        ent_reg.async_regenerate_entity_id(entry),
-                    )
-                except (AttributeError, TypeError):
-                    # AttributeError: method missing in
-                    # older HA cores. TypeError: signature
-                    # changed under us. Treat as "can't
-                    # compute" rather than failing the
-                    # whole scan.
-                    expected_id = None
+                expected_id = str(ent_reg.async_regenerate_entity_id(entry))
                 has_name_override = entry.name is not None
                 current_name = str(
                     entry.name or entry.original_name or "",
