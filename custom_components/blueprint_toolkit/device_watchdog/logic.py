@@ -348,9 +348,7 @@ def _build_notification_message(
             f"Integrations: {', '.join(integrations)}",
         )
 
-    sorted_unavail = [(e.entity_id, i, e) for i, e in enumerate(unavailable)]
-    sorted_unavail.sort()
-    for _, _, entity in sorted_unavail:
+    for entity in sorted(unavailable, key=lambda e: e.entity_id):
         lines.append(
             f"Unavailable entity: {entity.entity_id}",
         )
@@ -370,7 +368,14 @@ def _build_notification_message(
                 " minutes. No prior updates detected.",
             )
 
-    assert len(lines) > 1, "Expected unavailable or stale content but got none"
+    # Guard the contract: callers must only invoke this when
+    # there's actual content to render. Stripped under
+    # ``python -O`` if expressed as ``assert``; promoted to
+    # an explicit ``ValueError`` so the invariant holds in
+    # every interpreter mode.
+    if len(lines) <= 1:
+        msg = "Expected unavailable or stale content but got none"
+        raise ValueError(msg)
 
     return "\n".join(lines)
 
@@ -555,15 +560,13 @@ def run_evaluation(
         notifications=notifications,
         all_integrations_count=all_integrations_count,
         stat_entities=sum(
-            [
-                r.entities_evaluated + r.entities_filtered
-                for r in results
-                if not r.device_excluded
-            ]
+            r.entities_evaluated + r.entities_filtered
+            for r in results
+            if not r.device_excluded
         ),
-        stat_devices_excluded=sum([1 for r in results if r.device_excluded]),
-        stat_entities_excluded=sum([r.entities_filtered for r in results]),
+        stat_devices_excluded=sum(1 for r in results if r.device_excluded),
+        stat_entities_excluded=sum(r.entities_filtered for r in results),
         issues_count=len(issues),
-        stat_entity_issues=sum([len(r.unavailable_entities) for r in issues]),
-        stat_stale=sum([1 for r in issues if r.is_stale]),
+        stat_entity_issues=sum(len(r.unavailable_entities) for r in issues),
+        stat_stale=sum(1 for r in issues if r.is_stale),
     )

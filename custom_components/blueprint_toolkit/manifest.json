@@ -1,7 +1,7 @@
 {
   "domain": "blueprint_toolkit",
   "name": "Blueprint Toolkit",
-  "version": "0.0.33",
+  "version": "0.0.34",
   "documentation": "https://github.com/epilatow/ha-blueprint-toolkit",
   "issue_tracker": "https://github.com/epilatow/ha-blueprint-toolkit/issues",
   "codeowners": [

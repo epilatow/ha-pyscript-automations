@@ -116,7 +116,7 @@ _SCHEMA = vol.Schema(
             vol.Coerce(int), vol.Range(min=1, max=10080)
         ),
         vol.Required("dead_device_threshold_minutes_raw"): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=525600)
+            vol.Coerce(int), vol.Range(min=1, max=10080)
         ),
         vol.Required("enabled_checks_raw"): vol.All(
             cv.ensure_list, [vol.Coerce(str)]
@@ -363,7 +363,12 @@ async def _async_service_layer(
             "entities_excluded": ev.stat_entities_excluded,
             "device_issues": ev.issues_count,
             "entity_issues": ev.stat_entity_issues,
-            "stale_devices": ev.stat_stale,
+            # Pyscript-era attribute name; preserve verbatim
+            # so operators' diagnostic-state queries don't
+            # silently break across the port. The doc at
+            # ``bundled/docs/device_watchdog.md`` describes
+            # this name.
+            "device_stale_issues": ev.stat_stale,
         },
     )
 
@@ -428,10 +433,7 @@ def _entity_state_snapshot(
     """Read entity state + last_reported timestamp.
 
     Returns ``(state_value, last_reported)`` or ``None``
-    if the entity has no current state. Mirrors the
-    pyscript ``_read_entity_state`` shape but pulls
-    directly off ``hass.states`` rather than pyscript's
-    ``state.get`` / ``state.get(<eid>.last_reported)``.
+    if the entity has no current state.
     """
     st = hass.states.get(entity_id)
     if st is None:

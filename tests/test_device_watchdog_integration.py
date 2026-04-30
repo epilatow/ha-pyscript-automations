@@ -352,11 +352,21 @@ class TestServiceLayerScan:
             "entities_excluded",
             "device_issues",
             "entity_issues",
-            "stale_devices",
+            "device_stale_issues",
         ):
             assert key in attrs, f"missing diagnostic attr: {key}"
         # Trigger label propagates from the payload.
         assert attrs["last_trigger"] == "manual"
+
+
+# Per-device + disabled-diagnostic notification link-prefix
+# coverage is deferred; ``ha_tmpl.integration_entities`` in
+# the pytest-HACC harness returns nothing for ad-hoc
+# registry entries even when ``platform=`` matches, so the
+# scan never reaches the per-device builder. See
+# ``tmp/native-port-followups.md`` for the cross-port
+# follow-up that adds this coverage with a proper mock-
+# integration setup.
 
 
 class TestCodeQuality(CodeQualityBase):
