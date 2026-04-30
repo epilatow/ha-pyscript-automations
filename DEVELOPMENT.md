@@ -1,311 +1,213 @@
 # Development Guide
 
+Process content for working on this repo: code review, doc
+hygiene, testing, deploys, releases. The companion
+[AUTOMATIONS.md](AUTOMATIONS.md) covers conventions + patterns
+specific to writing or modifying an automation -- read that
+when adding a new automation, modifying an existing one, or
+reviewing such a change.
+
 ## Repo layout
 
-This repo ships as a HACS-distributed custom integration.
-Two external constraints drive the top-level layout;
-everything below that is our own convention.
+This repo ships as a HACS-distributed custom integration. Two
+external constraints drive the top-level layout; everything
+below that is our own convention.
 
 Home Assistant's custom-integration loader looks for
-integrations at `/config/custom_components/<domain>/`,
-where `<domain>` matches the integration's `manifest.json`
-domain. That's why the repo's installable code lives
-under `custom_components/blueprint_toolkit/` --
-when HACS (or a developer's manual install) puts that
-subtree at `/config/custom_components/blueprint_toolkit/`,
-HA finds it.
+integrations at `/config/custom_components/<domain>/`, where
+`<domain>` matches the integration's `manifest.json` domain.
+That's why the repo's installable code lives under
+`custom_components/blueprint_toolkit/` -- when HACS (or a
+developer's manual install) puts that subtree at
+`/config/custom_components/blueprint_toolkit/`, HA finds it.
 
-HACS itself only downloads files from the repo that live
-under `custom_components/<name>/`; it discards everything
-outside that subtree at install time. So every file we
-want users to receive has to live inside
-`custom_components/blueprint_toolkit/`.
+HACS itself only downloads files from the repo that live under
+`custom_components/<name>/`; it discards everything outside
+that subtree at install time. So every file we want users to
+receive has to live inside `custom_components/blueprint_toolkit/`.
 
 Integration code (`__init__.py`, `manifest.json`,
-`reconciler.py`, `installer.py`, `config_flow.py`,
-`repairs.py`, etc.) lives at the
-`custom_components/blueprint_toolkit/` level. The
-`bundled/` subdirectory is our own convention for the
-blueprints, docs, and CLI script the installer ships to
-their user-visible `/config/...` paths via symlinks.
+`reconciler.py`, `installer.py`, `config_flow.py`, `repairs.py`,
+etc.) lives at the `custom_components/blueprint_toolkit/`
+level. Each per-automation handler lives in a subpackage
+(`<service>/handler.py`, `<service>/logic.py`). The `bundled/`
+subdirectory ships blueprints, docs, and CLI scripts to
+user-visible `/config/...` paths via symlinks. See
+[AUTOMATIONS.md](AUTOMATIONS.md) for the full per-automation
+layout.
 
-```text
-custom_components/blueprint_toolkit/bundled/
-    blueprints/automation/blueprint_toolkit/*.yaml
-    cli/zwave_network_info.py
-    docs/*.md
-```
-
-The repo root keeps two committed symlinks into the
-bundle for path-typing convenience and so existing test
-paths keep resolving:
+The repo root keeps two committed symlinks into the bundle for
+path-typing convenience:
 
 ```text
 blueprints -> custom_components/blueprint_toolkit/bundled/blueprints
 docs       -> custom_components/blueprint_toolkit/bundled/docs
 ```
 
-These are real git symlinks (mode 120000). They live
-outside HACS's download path and are never shipped to
-users.
+These are real git symlinks (mode 120000). They live outside
+HACS's download path and are never shipped to users.
 
-**POSIX filesystem required for development.** The repo
-uses mode-120000 symlinks that Windows (with default git
-settings) checks out as text files containing the target
-path, which breaks tests, install scripts, and deploys.
-Use macOS or Linux; WSL2 works too.
+**POSIX filesystem required for development.** The repo uses
+mode-120000 symlinks that Windows (with default git settings)
+checks out as text files containing the target path, which
+breaks tests, install scripts, and deploys. Use macOS or
+Linux; WSL2 works too.
 
-Brand assets for the HA integration live at `assets/` at
-the repo root (source SVG + 256/512 PNG renders). They
-are only consumed by a future PR to `home-assistant/brands`;
-they do not ship inside the bundle because HA's UI only
-reads brand assets from the brands CDN.
+Brand assets for the HA integration live at `assets/` at the
+repo root (source SVG + 256/512 PNG renders). They are only
+consumed by a future PR to `home-assistant/brands`; they do not
+ship inside the bundle because HA's UI only reads brand assets
+from the brands CDN.
 
-## Architecture
-
-All automations follow a three-layer architecture:
-
-1. **Blueprint** (`bundled/blueprints/automation/blueprint_toolkit/<service>.yaml`)
-   -- defines HA triggers and user-configurable inputs.
-   Calls the integration's
-   `blueprint_toolkit.<service>` action. Contains no
-   logic.
-2. **Handler** (`<service>/handler.py`) -- the HA wiring
-   layer. Registered as the `blueprint_toolkit.<service>`
-   service via `helpers.register_blueprint_handler`.
-   Validates inputs (voluptuous schema + cross-field
-   checks against `hass.states` / `hass.services`),
-   loads/saves state, calls the logic module, and
-   executes the returned action against HA. No business
-   logic.
-3. **Logic module** (`<service>/logic.py`) -- pure
-   business logic. Testable with pytest. Does not import
-   `homeassistant.*` (cannot call `state.get()`,
-   `homeassistant.turn_on()`, etc.). May reference HA
-   concepts (entity IDs, integration names, device
-   classes) as data.
-
-**Execution model**: purely reactive. No sleeping, no
-waiting, no scheduling. Trigger fires, logic evaluates,
-action executes, exit. Timeouts use the "record timestamp,
-check on periodic trigger" pattern.
-
-## File Conventions
-
-### AI generated code header
-
-All Python files begin with `# This is AI generated code`.
+## File conventions
 
 ### Shebangs
 
 - **Executable scripts** (test files, `run_all.py`) use the
   PEP 723 shebang `#!/usr/bin/env -S uv run --script` with
   inline dependency declarations.
-- **Module files** (handler.py, logic.py, helpers.py,
-  etc.) have no shebang. They are imported, not executed
-  directly.
+- **Module files** (handler.py, logic.py, helpers.py, etc.)
+  have no shebang. They are imported, not executed directly.
 
 ### Test files
 
-- Must be executable (`chmod +x`) with a `__main__`
-  entry point calling `conftest.run_tests()`.
+- Must be executable (`chmod +x`) with a `__main__` entry
+  point calling `conftest.run_tests()`.
 - Use pytest.
 - Use `autospec=True` for all mocks.
-- Include a `TestCodeQuality(CodeQualityBase)` class
-  that specifies `ruff_targets` and `mypy_targets` for
-  the module under test.
+- Include a `TestCodeQuality(CodeQualityBase)` class that
+  specifies `ruff_targets` and `mypy_targets` for the module
+  under test.
 
-## Naming Conventions
+### Comments
 
-### Service wrapper inputs
+Comments should not repeat what the code is doing. When used
+they should augment the code: provide additional context,
+explain the why, document non-obvious requirements or side
+effects, flag invariants the type system can't enforce.
 
-Parameters that get transformed (parsed, cast, or
-normalized) use a `_raw` suffix. The parsed local variable
-uses the same name without the suffix:
+- Don't number steps in comments (`# 1. Parse state`).
+  Numbering is unnecessary and adding / removing steps
+  requires renumbering.
+- Don't reference user-reported bugs ("Regression guard for
+  the user-reported bug where ..."). Describe what the code
+  does and the constraint it enforces; bug history belongs
+  in the commit message.
 
-```python
-def my_service(
-    auto_off_minutes_raw: str,   # transformed
-    instance_id: str,            # pass-through
-) -> None:
-    auto_off_minutes = int(auto_off_minutes_raw)
-```
+### ASCII only
 
-Parameters that pass through unchanged (e.g.,
-`instance_id`, `trigger_entity_id`, `notification_service`)
-have no suffix.
+Source files, comments, commit messages, docs, PR bodies,
+etc. are ASCII only. The only carve-out is test fixtures
+that simulate non-ASCII input that the code under test
+must handle. Common slips to watch for and the ASCII
+replacements:
 
-### Booleans
+- Em / en dashes (`--` instead).
+- Curly quotes (straight `'` and `"`).
+- Ellipsis (`...` instead).
+- Unicode arrows (`->` instead).
+- Unicode bullets (`-` or `*` instead).
 
-Use `_parse_bool()` for boolean inputs. Never compare
-against strings like `"true"` inline:
+## Doc-sync rule
 
-```python
-# Good
-debug_logging = _parse_bool(debug_logging_raw)
+**Documentation is part of the change, not a follow-up.**
+When code changes, every doc that describes that code
+changes in the same commit. No exceptions, no "I'll do the
+docs in a follow-up" -- doc and code commit together so
+reviewers see both at once.
 
-# Bad
-debug_logging = str(debug_logging_raw).lower() == "true"
-```
+Before committing a code change, walk through every
+markdown file the change could touch and verify it still
+matches reality. The pre-commit checklist:
 
-### Time units
+- `bundled/docs/<service>.md` -- if the automation's
+  inputs, attributes, or behavior changed, update the
+  service doc and re-run `scripts/render_docs.py` to
+  regenerate the HTML. The drift test
+  (`tests/test_docs_rendered.py`) enforces the markdown +
+  HTML pair.
+- `AUTOMATIONS.md` -- update when conventions, shared
+  helpers, naming rules, or per-automation file layout
+  change.
+- `DEVELOPMENT.md` -- update when dev-process tooling
+  changes: new test conventions, new lint rules, new
+  release script, **renamed or removed CLI flags on
+  `dev-deploy.py` / `dev-install.py` / `release.py`**, new
+  required steps in the develop / test / commit cycle.
+- `DEVELOPMENT_AGENT.md` -- update when agent-specific
+  workflow changes (review protocol, file markers, etc.).
+- `README.md` -- update when an automation is added,
+  removed, or its one-line blurb changes.
 
-Use full words for time unit suffixes: `_seconds`,
-`_minutes`. Never abbreviate to `_s`, `_m`, or `_min`.
+Stale, invalid, and broken docs waste every reader's
+time -- users follow steps that no longer work, devs
+chase behaviors the code stopped doing. **Every code
+change is a potential doc change.** This repo documents
+not just CLI surfaces and behaviors but also conventions:
+architectural patterns, naming rules, schema shapes,
+helper APIs, test layout, lifecycle wiring, notification
+formats, and more. Before finalizing the commit message,
+grep the repo for any symbol, flag, convention, or
+behavior the diff touched and update every doc that
+mentions it.
 
-### Debug toggle
+## Per-automation docs
 
-The debug logging toggle is named `debug_logging` in all
-blueprints, service wrappers, and documentation.
-
-### User-facing enum values
-
-User-facing enum values (exposed in blueprints) use dashes:
-`"night-time"`, `"day-time"`, `"triggered-on"`,
-`"auto-off"`.
-
-## Blueprint Conventions
-
-### Metadata
-
-All blueprints include `author: epilatow` in the blueprint
-metadata block.
-
-### Defaults
-
-Parameter defaults are defined only in the blueprint YAML.
-Service wrapper functions do not duplicate defaults -- the
-blueprint is the single source of truth.
-
-### Input validation
-
-Validate all blueprint inputs in the service wrapper and
-generate persistent notifications for configuration errors.
-See `_validate_entities()` and
-`_manage_config_error_persistent_notification()`.
-
-### Entity domain filtering
-
-Use the `domain:` selector in blueprints to restrict entity
-selection. Also validate domains at runtime via
-`_validate_entities()` with `EntityType.CONTROLLABLE` or
-`EntityType.BINARY`.
-
-## Type Annotations
-
-All code has type annotations and mypy strict enforcement:
-
-- **Logic modules** (`<service>/logic.py`) -- fully
-  typed, checked by mypy strict.
-- **Handlers** (`<service>/handler.py`) -- fully typed,
-  checked by mypy strict.
-- **mypy configuration** lives in `pyproject.toml`.
-
-## Notifications
-
-Use friendly names (not raw entity IDs) in all user-facing
-notification messages. The handler resolves friendly names
-via `helpers.automation_friendly_name(hass, instance_id)`
-and passes them to the logic module.
-
-## Implementation Details in Code
-
-Implementation details ("how it works" internals) belong in
-code comments (e.g., the `evaluate()` docstring), not in
-user-facing documentation. User docs should describe what
-the automation does and how to configure it.
-
-## Automation Docs
-
-User-facing documentation for each automation lives in
-`docs/<automation_name>.md`. Every automation doc follows
-the same top-level section order so users find the same
-information in the same place across automations:
-
-1. **Summary** -- one paragraph describing what the
-   automation does.
-2. **Features** -- bulleted list of capabilities.
-3. **Requirements** -- prerequisite HA config.
-4. **Usage** -- install + enable steps.
-5. **Configuration** -- blueprint input table.
-6. **Usage notes** -- examples, exclusion cheatsheets,
-   behavior gotchas, and any user-facing detail that
-   doesn't fit under Configuration.
-7. **Developer notes** -- state attributes, debug log
-   format, detection-mechanism internals, known
-   limitations, and follow-ups.
-
-User-facing sections come first so users don't have to
-scroll past developer notes to find their config.
-Developers read the whole file, so the ordering has no
-cost for them.
-
-Don't introduce new top-level sections. Anything that
-doesn't fit an existing bucket goes under "Usage notes"
-(if user-facing) or "Developer notes" (if internal) as a
-sub-heading.
+The per-automation user-doc structure (Summary / Features /
+Requirements / etc.) lives in `AUTOMATIONS.md`. This section
+covers the rendering pipeline.
 
 ### Rendered HTML
 
-The markdown sources under `docs/` are rendered to HTML
-that ships alongside the integration so HACS users can
-click a "Full documentation" link from each blueprint
-directly to a local page.
+The markdown sources under `docs/` are rendered to HTML that
+ships alongside the integration so HACS users can click a "Full
+documentation" link from each blueprint directly to a local
+page.
 
 - Source: `custom_components/blueprint_toolkit/bundled/docs/*.md`
-  (also reachable via the `docs/` symlink at the repo
-  root).
+  (also reachable via the `docs/` symlink at the repo root).
 - Rendered:
   `custom_components/blueprint_toolkit/bundled/www/blueprint_toolkit/docs/*.html`.
   Committed alongside the source.
-- Renderer: `scripts/render_docs.py` (CommonMark +
-  tables, minimal inline-CSS template, `markdown-it-py`
-  pinned for deterministic output). Idempotent -- it
-  only writes files whose content changed.
+- Renderer: `scripts/render_docs.py` (CommonMark + tables,
+  minimal inline-CSS template, `markdown-it-py` pinned for
+  deterministic output). Idempotent -- it only writes files
+  whose content changed.
 
-After editing any `*.md`, **re-run the renderer and
-commit the regenerated HTML in the same commit**:
+After editing any `*.md`, **re-run the renderer and commit the
+regenerated HTML in the same commit**:
 
 ```bash
 scripts/render_docs.py
 ```
 
 A drift test (`tests/test_docs_rendered.py`) runs
-`scripts/render_docs.py --check` and fails if the
-committed HTML is out of date, if a markdown source is
-missing its HTML counterpart, or if an orphan HTML has
-no matching source. The test's failure message points
-at the render command.
+`scripts/render_docs.py --check` and fails if the committed
+HTML is out of date, if a markdown source is missing its HTML
+counterpart, or if an orphan HTML has no matching source. The
+test's failure message points at the render command.
 
 #### How rendered HTML reaches the user's browser
 
-The rendered HTML is **not** installed under
-`/config/www/`. HA's default `/local/` static handler:
+The rendered HTML is **not** installed under `/config/www/`.
+HA's default `/local/` static handler:
 
-- Is only registered at HA startup if `/config/www/`
-  already exists (our integration runs after that).
-- Refuses to follow symlinks whose targets escape
-  `/config/www/`, which is exactly what an installed
-  symlink-into-bundled would do.
+- Is only registered at HA startup if `/config/www/` already
+  exists (our integration runs after that).
+- Refuses to follow symlinks whose targets escape `/config/www/`,
+  which is exactly what an installed symlink-into-bundled
+  would do.
 
-Instead, the integration's `async_setup_entry`
-registers its own aiohttp static route at
-`/local/blueprint_toolkit/docs/` pointing
-directly at the bundled docs directory. Real files,
+Instead, the integration's `async_setup_entry` registers its
+own aiohttp static route at `/local/blueprint_toolkit/docs/`
+pointing directly at the bundled docs directory. Real files,
 no symlinks, no dependency on `/config/www/`.
 
-**dev-install limitation**: users on the
-`scripts/dev-install.py` path don't load the HA
-integration, so the static route is never registered
-and the blueprints' `/local/.../docs/...html` links
-404. Read the markdown sources under
-`bundled/docs/` directly during dev work.
-
-## Comments
-
-Do not number steps in comments (e.g., `# 1. Parse state`).
-Numbering is unnecessary and adding/removing steps requires
-renumbering.
+**dev-install limitation**: users on the `scripts/dev-install.py`
+path don't load the HA integration, so the static route is
+never registered and the blueprints' `/local/.../docs/...html`
+links 404. Read the markdown sources under `bundled/docs/`
+directly during dev work.
 
 ## Markdown style
 
@@ -314,9 +216,9 @@ root, enforced by `tests/test_markdownlint.py` (which shells
 out to `npx markdownlint-cli2`). Notable rules:
 
 - Line wrapping at 78 characters (MD013). Tables, headings,
-  and code blocks are exempt. Long URLs in text use
-  reference-style links (`[label][ref]` ... `[ref]: url`) so
-  the source line stays under the limit.
+  and code blocks are exempt. Long URLs in text use reference-
+  style links (`[label][ref]` ... `[ref]: url`) so the source
+  line stays under the limit.
 - Numbered lists use ordered prefixes (`1./2./3./...`) per
   MD029.
 - Code fences require a language tag (MD040). Use `text` for
@@ -327,19 +229,35 @@ out to `npx markdownlint-cli2`). Notable rules:
 with the existing compact-table style (`|hi|world|`); both
 forms render identically.
 
+### Prefer lists over tables
+
+In developer-facing markdown (this file, `AUTOMATIONS.md`,
+`DEVELOPMENT_AGENT.md`, `README.md`), prefer bulleted lists
+over markdown tables. Tables are unreadable in plain text:
+the columns wrap on narrow terminals, the cells run together,
+and the headers blend into the body. We read these files in
+`vim` / `less` / `git diff` more than in a rendered viewer,
+so the source-readability matters more than the rendered
+prettiness.
+
+User-facing docs under `bundled/docs/<service>.md` are
+exempt -- those are read in HTML / on GitHub more than in
+plain text, and tabular layout works well for the
+configuration / attribute reference sections those docs
+carry.
+
 ## Testing
 
 Always add new tests when adding new functionality.
 
-All tool configuration lives in `pyproject.toml`. Tool
-caches are redirected to `/tmp/` to avoid polluting the
-repo.
+All tool configuration lives in `pyproject.toml`. Tool caches
+are redirected to `/tmp/` to avoid polluting the repo.
 
 ### No global pip installs
 
-Never run `pip install`. All dependencies are declared
-inline via PEP 723 script metadata and resolved
-automatically by `uv`. Run tools via `uvx <tool> [args]`.
+Never run `pip install`. All dependencies are declared inline
+via PEP 723 script metadata and resolved automatically by `uv`.
+Run tools via `uvx <tool> [args]`.
 
 ### Running tests
 
@@ -350,70 +268,68 @@ automatically by `uv`. Run tools via `uvx <tool> [args]`.
 ./tests/run_all.py --coverage
 
 # Single test file
-./tests/test_sensor_threshold_switch_controller.py
-./tests/test_sensor_threshold_switch_controller.py --verbose
+./tests/test_<service>_logic.py
+./tests/test_<service>_logic.py --verbose
 ```
 
 ### Docker test harness (opt-in, slow)
 
-`tests/docker/` spins up a real HA container and
-exercises `scripts/dev-install.py` and
-`scripts/dev-deploy.py` end-to-end. Not run by
-`tests/run_all.py`; opt in with `pytest -m docker
-tests/docker`. See `tests/docker/README.md` for details
-and for how to bring the same environment up for
-interactive browser-based development.
+`tests/docker/` spins up a real HA container and exercises
+`scripts/dev-install.py` and `scripts/dev-deploy.py`
+end-to-end. Not run by `tests/run_all.py`; opt in with
+`pytest -m docker tests/docker`. See `tests/docker/README.md`.
 
 ### pytest-homeassistant-custom-component harness
 
 `tests/test_hacc_harness.py` uses
 [`pytest-homeassistant-custom-component`](https://pypi.org/project/pytest-homeassistant-custom-component/)
-to stand up an in-process HA instance for tests that need
-real HA machinery. Pinned to a specific HA release in the
-file's PEP 723 dependency block; first run downloads HA
-into a uv-script env (~minute), subsequent runs are
-cached. Runs in the default suite via `tests/run_all.py`.
+to stand up an in-process HA instance for tests that need real
+HA machinery. Pinned to a specific HA release in the file's PEP
+723 dependency block; first run downloads HA into a uv-script
+env (~minute), subsequent runs are cached. Runs in the default
+suite via `tests/run_all.py`.
 
-`tests/test_integration.py` uses the same harness to
-exercise the integration's async lifecycle (config flow,
-options flow, async_setup_entry, async_remove_entry).
+`tests/test_integration.py` and per-automation
+`tests/test_<service>_integration.py` files use the same
+harness to exercise the integration's async lifecycle and
+each handler's full call path (config flow, service
+registration, argparse error paths, state-entity attributes).
 
 ### Manifest version bump rule
 
 The integration version in
-`custom_components/blueprint_toolkit/manifest.json`
-must increment with every commit that changes anything
-under `custom_components/`, and stay equal otherwise.
+`custom_components/blueprint_toolkit/manifest.json` must
+increment with every commit that changes anything under
+`custom_components/`, and stay equal otherwise.
 `tests/test_manifest.py` enforces both this rule and the
 canonical formatting (`json.dumps(..., indent=2)` plus a
 trailing newline) in the default test run.
 
-Before committing any change under `custom_components/`,
-bump the patch:
+Before committing any change under `custom_components/`, bump
+the patch:
 
 ```bash
 scripts/bump-manifest-version.py
 ```
 
 The script rewrites `manifest.json` and re-stages it. For
-non-patch bumps (a deliberate minor or major graduation),
-edit the manifest by hand instead -- the test only
-checks that the version is strictly greater than the
-parent's, not that it's exactly +1.
+non-patch bumps (a deliberate minor or major graduation), edit
+the manifest by hand instead -- the test only checks that the
+version is strictly greater than the parent's, not that it's
+exactly +1.
 
 ### Releasing (tag + GitHub release)
 
-HACS surfaces installable versions from GitHub Releases.
-Once at least one Release exists in the repo, HACS shows
-only Releases as version candidates -- commits pushed to
-master between Releases are invisible to users until the
-next Release is published. (Pre-first-Release, HACS
-falls back to tracking the latest commit SHA, but that
-state ends as soon as the first Release lands and never
-returns.) Tagging and releasing are kept separate from
-`git push` so a manifest bump can sit on master without
-auto-publishing -- run `scripts/release.py` only when you
-want HACS users to see the new version:
+HACS surfaces installable versions from GitHub Releases. Once
+at least one Release exists in the repo, HACS shows only
+Releases as version candidates -- commits pushed to master
+between Releases are invisible to users until the next Release
+is published. (Pre-first-Release, HACS falls back to tracking
+the latest commit SHA, but that state ends as soon as the first
+Release lands and never returns.) Tagging and releasing are
+kept separate from `git push` so a manifest bump can sit on
+master without auto-publishing -- run `scripts/release.py`
+only when you want HACS users to see the new version:
 
 ```bash
 git push                       # land commits on origin
@@ -422,26 +338,25 @@ scripts/release.py --dry-run   # see what it would do
 ```
 
 The script reads the version from HEAD's `manifest.json`,
-creates the local annotated tag `vX.Y.Z` if missing,
-pushes the tag, and creates the GitHub release via `gh`
-(release notes default to HEAD's commit body). Each step
-is idempotent, so re-running after a partial failure
-picks up where the previous run stopped.
+creates the local annotated tag `vX.Y.Z` if missing, pushes the
+tag, and creates the GitHub release via `gh` (release notes
+default to HEAD's commit body). Each step is idempotent, so
+re-running after a partial failure picks up where the previous
+run stopped.
 
-Refuses if HEAD isn't reachable from `origin/master` --
-push commits before publishing the release.
+Refuses if HEAD isn't reachable from `origin/master` -- push
+commits before publishing the release.
 
-Non-bumping commits at HEAD (docs-only follow-ups,
-comment fixes, etc.) are detected (the version's tag
-already exists at an older ancestor commit) and the
-script exits cleanly without creating a duplicate
-release.
+Non-bumping commits at HEAD (docs-only follow-ups, comment
+fixes, etc.) are detected (the version's tag already exists at
+an older ancestor commit) and the script exits cleanly without
+creating a duplicate release.
 
 ### Code quality
 
-Lint, format, and type checks are included in each test
-file's `TestCodeQuality` class and run automatically as
-part of the test suite:
+Lint, format, and type checks are included in each test file's
+`TestCodeQuality` class and run automatically as part of the
+test suite:
 
 - `test_ruff_lint` -- ruff linting
 - `test_ruff_format` -- ruff formatting
@@ -455,94 +370,104 @@ uvx ruff format .
 ```
 
 mypy is run via each test file's
-`TestCodeQuality(CodeQualityBase)` class, which installs
-Home Assistant + voluptuous via PEP 723 inline deps.
-Bare `uvx mypy` from a checkout without those deps
-cannot resolve `homeassistant.*`; run
-`./tests/run_all.py` instead.
-
-### Python code style
-
-- Line wrap at 80 characters.
-- Be strongly typed. Use dataclasses for structured data,
-  not `Dict[str, Any]`.
+`TestCodeQuality(CodeQualityBase)` class, which installs Home
+Assistant + voluptuous via PEP 723 inline deps. Bare `uvx mypy`
+from a checkout without those deps cannot resolve
+`homeassistant.*`; run `./tests/run_all.py` instead.
 
 ## HA deployment testing
 
-- **Deploy with `scripts/dev-deploy.py`.** Ships every
-  git-tracked file to the install path on the HA host
-  (default `/root/ha-blueprint-toolkit`; outside
-  `/config/` so it never collides with a HACS install),
-  removes files the host has under owned top-level
-  entries that git does not, then invokes
-  `scripts/dev-install.py` on the host to reconcile the
-  `/config/...` symlinks, and finally runs the reload
-  services. Refuses to run if the working tree has any
-  uncommitted or untracked files. `--dry-run` prints the
-  plan without touching the host, `--force-reloads` runs
-  both API reloads unconditionally, `--ha-restart` runs
-  `ha core restart` instead of the API reloads,
-  `--allow-dirty` skips the clean-tree check and ships
-  working-tree content as-is (tracked files with local
-  edits plus any untracked files `.gitignore` does not
-  exclude) -- intended for iterative dev, not production
-  deploys. `--cli-symlink-dir` is passed through to
-  `dev-install.py` when set; if omitted, the CLI
-  script is not symlinked anywhere.
+The repo ships two scripts that move local edits onto a
+running HA host: `scripts/dev-deploy.py` (run from the dev
+machine) and `scripts/dev-install.py` (run on the HA host
+itself; invoked by `dev-deploy.py`). The pair is for
+iterative dev work against a real HA instance, not for
+end-user installs (those go through HACS).
 
-- **`scripts/dev-install.py` runs on the HA host.** Plain
-  Python (no uv). Reads the checked-out repo under
-  `--repo-dir` and reconciles its bundled payload into
-  `/config/blueprints/`, `/config/www/blueprint_toolkit/`,
-  and optionally `<cli-symlink-dir>/` as symlinks
-  pointing back into the bundled subtree. Idempotent;
-  tracks state in
-  `<ha-config>/.blueprint_toolkit.manifest.json`
-  so stale symlinks from renamed or removed bundled
-  files get cleaned up on the next run. Refuses to
-  overwrite regular files at any destination; existing
-  symlinks whose targets match the bundled marker are
-  treated as ours and rewritten. Invoked by
-  `dev-deploy.py` on every push, but can also be run
-  directly on the host during debugging.
+### `scripts/dev-deploy.py` (dev-machine side)
 
-- **Run `automation.reload` after blueprint changes.**
-  Re-reads `automations.yaml` *and* re-renders
-  blueprint-backed automation actions from the current
-  blueprint YAML. Needed when you touch any
-  `blueprints/automation/blueprint_toolkit/*.yaml`
-  file. Without this, HA keeps dispatching the cached
-  rendered action, so if a blueprint input was renamed
-  or removed the service call still arrives with the
-  stale kwarg and the handler's schema rejects it:
+Builds a fresh timestamped copy of the integration on the
+HA host under `<workspace>/<YYYYMMDD_HHMMSS>/blueprint_toolkit/`
+(default workspace: `/config/ha-blueprint-toolkit`), flips
+`/config/custom_components/blueprint_toolkit` to a symlink
+pointing at the new build, runs the bundled
+`scripts/dev-install.py` on the host to refresh the
+`/config/blueprints/` symlinks, and restarts HA via the
+configured restart command. The first run preserves the
+HACS-installed integration as
+`<workspace>/<vX.Y.Z>/blueprint_toolkit/`; subsequent runs
+leave that snapshot alone.
 
-  ```bash
-  curl -s -X POST \
-    -H "Authorization: Bearer $API_KEY" \
-    http://$HA_HOST:8123/api/services/automation/reload
-  ```
+HA is **always restarted** after a deploy (or restore).
+Integration code changes (`custom_components/.../*.py`)
+require a Python-level reload that the config-entry reload
+API doesn't provide; the restart is the only reliable way.
 
-- **Fetch the diagnostic state entity.** Each blueprint-
-  backed automation writes a state entity on each
-  successful run with `last_run`, `runtime`, and
-  per-automation diagnostic attributes. The entity ID
-  lives under
-  `blueprint_toolkit.<service>_<slug>_state`. Read it
-  with:
+By default the working tree must be clean. Useful flags:
 
-  ```bash
-  curl -s -H "Authorization: Bearer $API_KEY" \
-    http://$HA_HOST:8123/api/states/blueprint_toolkit.<service>_<slug>_state
-  ```
+- `--restore` -- reverse a prior deploy. Reinstates the
+  preserved HACS snapshot at
+  `/config/custom_components/blueprint_toolkit` and removes
+  the workspace, leaving the host as if dev-deploy had never
+  run.
+- `--allow-dirty` -- skip the clean-tree check and ship
+  working-tree content as-is (tracked files with local edits
+  plus untracked files not matching `.gitignore`). For
+  iterative dev only.
+- `--dry-run` -- print the plan and exit without touching
+  the host.
+- `--host <user@host>` -- ssh target. Default
+  `root@homeassistant`.
+- `--workspace <path>` -- on-host directory for build
+  snapshots. Default `/config/ha-blueprint-toolkit`.
+- `--ha-config <path>` -- HA's config dir on the host.
+  Default `/config`.
+- `--cli-symlink-dir <path>` -- passed to `dev-install.py`'s
+  `--cli-symlink-dir`; controls where the bundled CLI
+  scripts get symlinked. Omit to skip CLI install.
+- `--ha-restart-cmd <cmd>` -- shell command run on the host
+  after deploy. Default `ha core restart`. Override for
+  test environments without the supervisor CLI.
 
-  A fresh `last_run` plus a nonzero `runtime` and no
-  error attributes mean the run completed. Persistent
-  notifications are no longer exposed as `/api/states`
-  entities in HA 2026.4+; fetch them via the websocket
-  `persistent_notification/get` command when you need to
-  verify notification content.
+### `scripts/dev-install.py` (HA-host side)
 
-## Commit Messages
+Plain Python (no uv). Reads the checked-out repo under
+`--repo-dir` and reconciles its bundled payload into
+`/config/blueprints/` (and optionally
+`<cli-symlink-dir>/`) as symlinks pointing back into the
+bundled subtree. Idempotent; tracks state in
+`<ha-config>/.blueprint_toolkit.manifest.json` so stale
+symlinks from renamed or removed bundled files get cleaned
+up on the next run. Refuses to overwrite regular files at
+any destination; existing symlinks whose targets match the
+bundled marker are treated as ours and rewritten. Invoked
+by `dev-deploy.py` on every push, but can also be run
+directly on the host during debugging.
+
+Flags: `--ha-config <path>` (default `/config`),
+`--cli-symlink-dir <path>` (omit to skip CLI), `--dry-run`.
+
+### Reading state from a deployed instance
+
+Each blueprint-backed automation writes a diagnostic state
+entity on every successful run with `last_run`, `runtime`,
+and per-automation attributes. The entity ID lives under
+`blueprint_toolkit.<service>_<slug>_state`:
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  http://$HA_HOST:8123/api/states/blueprint_toolkit.<service>_<slug>_state
+```
+
+Persistent notifications aren't exposed as `/api/states`
+entities in HA 2026.4+; fetch them via the websocket
+`persistent_notification/get` command when you need to
+verify notification content.
+
+## Commit messages
 
 - Use `- component: Summary of change.` format.
-- Include a `Co-Authored-By: <AI Model XXX>` trailer for AI-assisted commits.
+- Include a `Co-Authored-By: <AI Model XXX>` trailer for
+  AI-assisted commits.
+- Don't restate the manifest version bump in the commit
+  message; the bump is automatic and restating is noise.
