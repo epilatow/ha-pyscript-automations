@@ -996,6 +996,7 @@ class TestCodeQuality(CodeQualityBase):
     ]
     mypy_targets = [
         "custom_components/blueprint_toolkit/device_watchdog/logic.py",
+        "custom_components/blueprint_toolkit/device_watchdog/handler.py",
     ]
 
 

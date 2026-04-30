@@ -71,6 +71,12 @@ class Config:
     # the service wrapper's orphan sweep can safely scope
     # dismissals to one instance.
     notification_prefix: str = ""
+    # Carried onto every ``PersistentNotification`` we
+    # construct so the dispatcher can prepend
+    # ``Automation: [name](edit-link)\n`` to the body.
+    # ``None`` in pure-Python tests where the Config
+    # carries no real instance binding.
+    instance_id: str | None = None
 
 
 @dataclass
@@ -123,6 +129,11 @@ class DeviceResult:
     newest_timestamp: datetime | None
     entities_evaluated: int
     entities_filtered: int
+    # Stamped from ``Config.instance_id`` at evaluation
+    # time so ``to_notification`` can hand the dispatcher
+    # the automation entity_id needed for the
+    # ``Automation: [name](edit-link)\n`` body prefix.
+    instance_id: str | None = None
 
     def to_notification(
         self,
@@ -133,6 +144,7 @@ class DeviceResult:
             notification_id=self.notification_id,
             title=self.notification_title,
             message=self.notification_message,
+            instance_id=self.instance_id,
         )
 
 
@@ -230,6 +242,7 @@ def evaluate_diagnostics(
                     notification_id=notification_id,
                     title=f"{device.de.name}: Disabled Diagnostics",
                     message=message,
+                    instance_id=config.instance_id,
                 ),
             )
         else:
@@ -239,6 +252,7 @@ def evaluate_diagnostics(
                     notification_id=notification_id,
                     title="",
                     message="",
+                    instance_id=config.instance_id,
                 ),
             )
     return results
@@ -389,6 +403,7 @@ def _evaluate_device(
             newest_timestamp=None,
             entities_evaluated=0,
             entities_filtered=0,
+            instance_id=config.instance_id,
         )
 
     kept, filtered_out = _filter_entities(
@@ -439,6 +454,7 @@ def _evaluate_device(
         newest_timestamp=newest_ts,
         entities_evaluated=len(kept),
         entities_filtered=len(filtered_out),
+        instance_id=config.instance_id,
     )
 
 
@@ -509,10 +525,12 @@ def run_evaluation(
 ) -> EvaluationResult:
     """Run device evaluation in a worker thread.
 
-    Called via ``@pyscript_executor`` trampoline so the
-    event loop stays responsive. The service wrapper
-    builds the device list on the main thread (requires
-    HA registries), then hands it off here.
+    Called from the handler via
+    ``hass.async_add_executor_job`` so the heavy per-device
+    classification + notification body assembly stays off
+    the event loop. The handler builds the device list on
+    the loop (registries are loop-only) then hands it off
+    here.
     """
     results = evaluate_devices(config, devices, current_time)
 
@@ -526,6 +544,7 @@ def run_evaluation(
         cap_notification_id=f"{config.notification_prefix}cap",
         cap_title="Device watchdog: notification cap reached",
         cap_item_label="devices with issues",
+        instance_id=config.instance_id,
     )
     notifications += diag_notifications
 

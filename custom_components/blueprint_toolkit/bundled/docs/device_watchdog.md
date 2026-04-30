@@ -77,10 +77,11 @@ same devices are shown -- only the panel ordering varies.
 ### Entity attributes
 
 After each evaluation, attributes are written to
-`pyscript.<automation-name>_state` (e.g.,
-`pyscript.automation_device_watchdog_state`). Search
-for `pyscript.*_state` in Developer Tools > States
-to find it.
+`blueprint_toolkit.device_watchdog_<slug>_state` where
+`<slug>` derives from the automation entity_id (e.g.
+`blueprint_toolkit.device_watchdog_my_check_state`).
+Search for `blueprint_toolkit.device_watchdog_*_state`
+in Developer Tools > States to find it.
 
 - `last_run`: ISO timestamp of last evaluation
 - `runtime`: Evaluation time in seconds
