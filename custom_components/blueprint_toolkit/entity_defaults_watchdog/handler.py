@@ -195,8 +195,8 @@ async def _async_argparse(
 
     # Drift-check cross-validation: each requested check
     # must be in CHECK_ALL. Empty list means "all checks"
-    # (matches pyscript convention; mirrors the
-    # include_integrations empty == all pattern).
+    # (mirrors the include_integrations empty-means-all
+    # pattern in this same handler).
     drift_checks_raw: list[str] = list(data["drift_checks_raw"])
     unknown_checks = [c for c in drift_checks_raw if c not in logic.CHECK_ALL]
     if unknown_checks:
@@ -313,7 +313,11 @@ async def _async_service_layer(
         include_integrations,
         exclude_integrations,
     )
-    devices = _build_device_inputs(hass, target_integrations)
+    devices = _build_device_inputs(
+        hass,
+        all_integrations,
+        target_integrations,
+    )
     deviceless_entities, peers_by_domain = _build_deviceless_inputs(
         hass,
         logic.DEVICELESS_DOMAINS,
@@ -429,6 +433,7 @@ def _resolve_target_integrations(
 
 def _build_device_inputs(
     hass: HomeAssistant,
+    all_integration_ids: list[str],
     target_integrations: set[str],
 ) -> list[logic.DeviceInfo]:
     """Walk registries to build ``DeviceInfo`` per device.
@@ -440,10 +445,14 @@ def _build_device_inputs(
     device's ``integration_entities`` map carries every
     integration the device touches but only the targeted
     ones contribute ``EntityDriftInfo`` rows.
+
+    ``all_integration_ids`` is threaded in by the caller
+    (already computed for filter resolution) so we don't
+    re-walk the entity registry here just to enumerate
+    integrations.
     """
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
-    all_integration_ids = _all_integration_ids(hass)
 
     device_map: dict[str, logic.DeviceEntry] = {}
     # Map device_id -> {integration_id -> [entity_id]} for

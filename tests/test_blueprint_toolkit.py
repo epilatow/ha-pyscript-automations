@@ -3320,11 +3320,7 @@ class TestImportBan:
         {
             "helpers",
             "device_watchdog",
-            "entity_defaults_watchdog",
             "sensor_threshold_switch_controller",
-            "trigger_entity_controller",
-            "zwave_route_manager",
-            "zwave_js_ui_bridge",
         }
     )
 
@@ -3894,11 +3890,7 @@ class TestPyScriptCompatibility:
             {
                 "helpers",
                 "device_watchdog",
-                "entity_defaults_watchdog",
                 "sensor_threshold_switch_controller",
-                "trigger_entity_controller",
-                "zwave_route_manager",
-                "zwave_js_ui_bridge",
             }
         )
 
@@ -3959,11 +3951,7 @@ class TestPyScriptCompatibility:
             {
                 "helpers",
                 "device_watchdog",
-                "entity_defaults_watchdog",
                 "sensor_threshold_switch_controller",
-                "trigger_entity_controller",
-                "zwave_route_manager",
-                "zwave_js_ui_bridge",
             }
         )
 

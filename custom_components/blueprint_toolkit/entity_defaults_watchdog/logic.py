@@ -17,10 +17,9 @@ from .. import helpers
 class DeviceEntry:
     """Device discovered during integration scan.
 
-    Locally defined here rather than in the shared
-    ``helpers`` module: only EDW (and the still-pyscript
-    DW) consumes this shape, so it stays port-internal
-    until DW lands and the two ports motivate hoisting.
+    Locally defined rather than in the shared ``helpers``
+    module: only this port consumes the shape today. If a
+    second port grows the same need, hoist into helpers.
     """
 
     id: str
@@ -568,7 +567,7 @@ def _build_notification_message(
         for d in name_redundant:
             expected = d.expected_name or ""
             lines.append(
-                f'- `{d.entity_id}`: "{d.current_name}" \u2192 "{expected}"',
+                f'- `{d.entity_id}`: "{d.current_name}" -> "{expected}"',
             )
         lines.append(
             "  The override includes the device name,"
@@ -613,7 +612,7 @@ def _build_notification_message(
         )
         lines.append(
             "3. Fix names before recreating IDs"
-            ' \u2014 "Recreate entity IDs" uses the'
+            ' -- "Recreate entity IDs" uses the'
             " current name to compute the new ID."
             " Clearing a name override may reveal"
             " additional non-default IDs on the"
@@ -957,8 +956,10 @@ def run_evaluation(
 ) -> EvaluationResult:
     """Run entity defaults evaluation in a worker thread.
 
-    Called via ``@pyscript_executor`` trampoline so the
-    event loop stays responsive.
+    Called from the handler via
+    ``hass.async_add_executor_job`` so the heavy per-device
+    drift classification + notification body assembly stays
+    off the event loop.
     """
     results = evaluate_devices(config, devices)
 

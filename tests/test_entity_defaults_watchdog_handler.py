@@ -12,15 +12,18 @@
 # ]
 # ///
 # This is AI generated code
-"""Unit tests for ``entity_defaults_watchdog.handler``'s lifecycle code.
+"""Unit tests for ``entity_defaults_watchdog.handler``.
 
 Covers the parts that don't require booting HA: mutator
 callbacks, ``_ensure_timer`` re-arm sequencing,
 ``_async_kick_for_recovery`` payload shape, periodic-
-callback context-propagation regression tests, schema-level
-input rejection, and the blueprint <-> schema drift check.
-The argparse + service layers are exercised end-to-end on a
-real HA host.
+callback context-propagation regression tests, argparse
+field validation (``drift_checks`` cross-validation,
+multi-line regex helper delegation, schema-level int
+rejection), and the blueprint <-> schema drift check. The
+service layer's full build-and-apply loop is exercised
+in ``test_entity_defaults_watchdog_integration.py``
+against the pytest-HACC harness.
 """
 
 from __future__ import annotations
@@ -391,8 +394,8 @@ class TestArgparseDriftChecks(_ArgparseHarness):
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
         # Empty input -> CHECK_ALL forwarded to the service
-        # layer (matches pyscript behaviour + the
-        # blueprint description).
+        # layer (mirrors the blueprint description that
+        # documents empty-means-all).
         from custom_components.blueprint_toolkit.entity_defaults_watchdog import (  # noqa: E402, E501, PLC0415
             logic,
         )
@@ -567,14 +570,12 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
 # Argparse: int-input rejection (schema-level)
 # --------------------------------------------------------
 #
-# Pre-port pyscript hand-rolled ``_parse_int_input`` produced
-# user-facing error messages for non-numeric and
-# out-of-range integer inputs. The native schema replaces
-# that with ``vol.All(vol.Coerce(int), vol.Range(...))``;
-# rejections flow through ``vol.MultipleInvalid`` and the
-# ``schema:`` prefix in the emit-config-error call. These
-# tests recover that explicit coverage at the native API
-# surface.
+# Schema-level validation:
+# ``vol.All(vol.Coerce(int), vol.Range(min=..., max=...))``
+# rejects non-numeric and out-of-range integers; rejections
+# flow through ``vol.MultipleInvalid`` and surface as a
+# config-error notification carrying the offending field
+# name (the ``schema:`` prefix the helper prepends).
 
 
 class TestArgparseIntValidation(_ArgparseHarness):
