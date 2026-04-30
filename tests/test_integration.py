@@ -263,6 +263,7 @@ class TestSetupEntry:
             "trigger_entity_controller",
             "zwave_route_manager",
             "reference_watchdog",
+            "entity_defaults_watchdog",
         }
         registered = set(hass.services.async_services().get(DOMAIN, {}))
         missing = expected - registered

@@ -67,6 +67,7 @@ class HomeAssistantStubs:
     helpers_cv: types.ModuleType
     helpers_dr: types.ModuleType
     helpers_er: types.ModuleType
+    helpers_template: types.ModuleType
     event: types.ModuleType
     util: types.ModuleType
     util_dt: types.ModuleType
@@ -147,6 +148,13 @@ def install_homeassistant_stubs(
     )
     helpers_er.async_get = lambda _hass: None  # type: ignore[attr-defined]
 
+    helpers_template = types.ModuleType(
+        "homeassistant.helpers.template",
+    )
+    helpers_template.integration_entities = (  # type: ignore[attr-defined]
+        lambda _h, _i: []
+    )
+
     # Default no-op stubs for the two HA helpers a handler
     # might subscribe to. Per-port test files swap these for
     # capture-list variants that record invocations.
@@ -174,6 +182,7 @@ def install_homeassistant_stubs(
     sys.modules["homeassistant.helpers.device_registry"] = helpers_dr
     sys.modules["homeassistant.helpers.entity_registry"] = helpers_er
     sys.modules["homeassistant.helpers.event"] = event
+    sys.modules["homeassistant.helpers.template"] = helpers_template
     sys.modules["homeassistant.util"] = util
     sys.modules["homeassistant.util.dt"] = util_dt
 
@@ -187,6 +196,7 @@ def install_homeassistant_stubs(
         helpers_cv=helpers_cv,
         helpers_dr=helpers_dr,
         helpers_er=helpers_er,
+        helpers_template=helpers_template,
         event=event,
         util=util,
         util_dt=util_dt,

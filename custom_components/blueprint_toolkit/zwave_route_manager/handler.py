@@ -1,9 +1,9 @@
 # This is AI generated code
 """HA wiring for zwave_route_manager.
 
-Three-layer dispatch (entrypoint / argparse / service)
-mirroring the trigger_entity_controller port. ZRM-specific
-additions:
+ZRM-specific shape on top of the standard three-layer
+dispatch (see ``DEVELOPMENT.md`` for the universal
+pattern):
 
 - Periodic reconcile timer per instance via
   ``async_track_time_interval`` (replaces the

@@ -17,10 +17,9 @@ from .. import helpers
 class DeviceEntry:
     """Device discovered during integration scan.
 
-    Locally defined here rather than in the shared
-    ``helpers`` module: only EDW (and the still-pyscript
-    DW) consumes this shape, so it stays port-internal
-    until DW lands and the two ports motivate hoisting.
+    Locally defined rather than in the shared ``helpers``
+    module: only this port consumes the shape today. If a
+    second port grows the same need, hoist into helpers.
     """
 
     id: str
@@ -103,6 +102,13 @@ class Config:
     # the service wrapper's orphan sweep can safely scope
     # dismissals to one instance.
     notification_prefix: str = ""
+    # Carried onto every ``PersistentNotification`` we
+    # construct so the dispatcher can prepend
+    # ``Automation: [name](edit-link)\n`` to the body.
+    # ``None`` in pure-Python tests where the Config
+    # carries no real instance binding; the dispatcher
+    # silently skips the header in that case.
+    instance_id: str | None = None
 
 
 @dataclass
@@ -216,6 +222,11 @@ class DeviceResult:
     drifted_entities: list[DriftDetail]
     entities_checked: int
     entities_excluded: int
+    # Stamped from ``Config.instance_id`` at evaluation
+    # time so ``to_notification`` can hand the dispatcher
+    # the automation entity_id needed for the
+    # ``Automation: [name](edit-link)\n`` body prefix.
+    instance_id: str | None = None
 
     def to_notification(
         self,
@@ -226,6 +237,7 @@ class DeviceResult:
             notification_id=self.notification_id,
             title=self.notification_title,
             message=self.notification_message,
+            instance_id=self.instance_id,
         )
 
 
@@ -555,7 +567,7 @@ def _build_notification_message(
         for d in name_redundant:
             expected = d.expected_name or ""
             lines.append(
-                f'- `{d.entity_id}`: "{d.current_name}" \u2192 "{expected}"',
+                f'- `{d.entity_id}`: "{d.current_name}" -> "{expected}"',
             )
         lines.append(
             "  The override includes the device name,"
@@ -600,7 +612,7 @@ def _build_notification_message(
         )
         lines.append(
             "3. Fix names before recreating IDs"
-            ' \u2014 "Recreate entity IDs" uses the'
+            ' -- "Recreate entity IDs" uses the'
             " current name to compute the new ID."
             " Clearing a name override may reveal"
             " additional non-default IDs on the"
@@ -647,6 +659,7 @@ def _evaluate_device(
             drifted_entities=[],
             entities_checked=0,
             entities_excluded=0,
+            instance_id=config.instance_id,
         )
 
     drifted: list[DriftDetail] = []
@@ -684,6 +697,7 @@ def _evaluate_device(
         drifted_entities=drifted,
         entities_checked=len(device.entities) - excluded,
         entities_excluded=excluded,
+        instance_id=config.instance_id,
     )
 
 
@@ -942,8 +956,10 @@ def run_evaluation(
 ) -> EvaluationResult:
     """Run entity defaults evaluation in a worker thread.
 
-    Called via ``@pyscript_executor`` trampoline so the
-    event loop stays responsive.
+    Called from the handler via
+    ``hass.async_add_executor_job`` so the heavy per-device
+    drift classification + notification body assembly stays
+    off the event loop.
     """
     results = evaluate_devices(config, devices)
 
@@ -953,6 +969,7 @@ def run_evaluation(
         cap_notification_id=f"{config.notification_prefix}cap",
         cap_title="Entity defaults watchdog: notification cap reached",
         cap_item_label="devices with drift",
+        instance_id=config.instance_id,
     )
 
     if _check_deviceless_enabled(config):
@@ -977,6 +994,7 @@ def run_evaluation(
             notification_id=deviceless.notification_id,
             title=deviceless.notification_title,
             message=deviceless.notification_message,
+            instance_id=config.instance_id,
         ),
     )
 

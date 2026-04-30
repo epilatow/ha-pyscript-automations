@@ -136,15 +136,23 @@ blueprint:
       selector:
         boolean: {}
 
-triggers:
-  - trigger: time_pattern
-    minutes: "/1"
+triggers: []
 
 actions:
-  - action: pyscript.entity_defaults_watchdog_blueprint_entrypoint
+  - action: blueprint_toolkit.entity_defaults_watchdog
+    # Periodic scheduling lives in the integration handler
+    # (``schedule_periodic_with_jitter``); the blueprint
+    # has no triggers of its own. Manual UI runs land here
+    # with ``trigger`` undefined, which collapses to
+    # ``"manual"``; integration-fired ticks pass
+    # ``trigger_id: "periodic"`` as a flat top-level
+    # variable (HA's automation.trigger service clobbers
+    # ``variables.trigger`` with ``{"platform": None}`` so
+    # ``trigger.*`` overrides are silently dropped -- pass
+    # flat keys instead).
     data:
       instance_id: "{{ this.entity_id }}"
-      trigger_platform_raw: "{{ trigger.platform | default('manual', true) }}"
+      trigger_id: "{{ trigger_id | default('manual', true) }}"
       drift_checks_raw: !input drift_checks
       include_integrations_raw: !input include_integrations
       exclude_integrations_raw: !input exclude_integrations
@@ -156,7 +164,7 @@ actions:
       max_device_notifications_raw: !input max_device_notifications
       debug_logging_raw: !input debug_logging
 
-# Triggers every minute but most invocations exit
-# immediately (interval gate). If a real evaluation
-# overlaps the next tick, dropping it is fine.
+# A single in-flight scan at a time per instance: if a
+# manual trigger arrives while a periodic tick is still
+# evaluating, drop it.
 mode: single
