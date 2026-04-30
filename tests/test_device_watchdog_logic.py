@@ -569,10 +569,10 @@ class TestBuildNotificationMessage:
         )
         assert "/config/devices/device/abc" in msg
 
-    def test_asserts_on_no_issues(self) -> None:
+    def test_raises_on_no_issues(self) -> None:
         """Calling with no unavailable and not stale is a bug."""
         device = _device()
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError, match="unavailable or stale"):
             _build_notification_message(
                 device,
                 [],
@@ -996,6 +996,7 @@ class TestCodeQuality(CodeQualityBase):
     ]
     mypy_targets = [
         "custom_components/blueprint_toolkit/device_watchdog/logic.py",
+        "custom_components/blueprint_toolkit/device_watchdog/handler.py",
     ]
 
 
