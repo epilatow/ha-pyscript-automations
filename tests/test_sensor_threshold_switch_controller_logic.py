@@ -13,18 +13,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 
-# Path to the module under test (used for coverage)
-_SCRIPT_PATH = (
-    REPO_ROOT / "pyscript" / "modules" / "sensor_threshold_switch_controller.py"
-)
-
-# Ensure pyscript/modules is importable whether run
-# via pytest or directly via uv run --script.
-sys.path.insert(0, str(_SCRIPT_PATH.parent))
+sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
 from conftest import CodeQualityBase  # noqa: E402
-from sensor_threshold_switch_controller import (  # noqa: E402
+
+from custom_components.blueprint_toolkit.sensor_threshold_switch_controller.logic import (  # noqa: E402, E501
     Action,
     Config,
     Controller,
@@ -1199,15 +1193,14 @@ class TestHandleServiceCall:
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
-        "pyscript/modules/sensor_threshold_switch_controller.py",
-        "tests/test_sensor_threshold_switch_controller.py",
+        "custom_components/blueprint_toolkit/sensor_threshold_switch_controller/__init__.py",
+        "custom_components/blueprint_toolkit/sensor_threshold_switch_controller/logic.py",
+        "tests/test_sensor_threshold_switch_controller_logic.py",
     ]
     mypy_targets = [
-        "pyscript/modules/sensor_threshold_switch_controller.py",
+        "custom_components/blueprint_toolkit/sensor_threshold_switch_controller/logic.py",
     ]
 
 
 if __name__ == "__main__":
-    from conftest import run_tests
-
-    run_tests(__file__, _SCRIPT_PATH, REPO_ROOT)
+    sys.exit(pytest.main([__file__, "-v", *sys.argv[1:]]))

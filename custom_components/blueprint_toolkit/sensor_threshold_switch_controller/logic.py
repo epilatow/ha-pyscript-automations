@@ -1,8 +1,6 @@
 # This is AI generated code
 """Business logic for sensor-threshold-based switch control.
 
-Does not use PyScript-injected globals.
-
 Controls a switch based on sensor value spikes (e.g., humidity),
 with manual override protection, auto-off, and notifications.
 """
@@ -13,7 +11,7 @@ from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import Any
 
-import helpers
+from .. import helpers
 
 
 class EventType(Enum):

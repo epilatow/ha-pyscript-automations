@@ -837,7 +837,6 @@ _PYSCRIPT_TRIGGER_KWARGS: frozenset[str] = frozenset(
 
 _RELOAD_MODULES: tuple[str, ...] = (
     "helpers",
-    "sensor_threshold_switch_controller",
 )
 
 
