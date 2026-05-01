@@ -372,31 +372,15 @@ async def _async_service_layer(
         notification_suffix=notification_suffix,
     )
 
-    # Execute the action. ``call.context`` propagates so
-    # the logbook attributes the turn_on/off to the user
-    # who triggered the automation, not to the integration.
-    if result.action == logic.Action.TURN_ON:
-        await hass.services.async_call(
-            "homeassistant",
-            "turn_on",
-            {"entity_id": target_switch_entity},
-            context=call.context,
-            blocking=False,
-        )
-    elif result.action == logic.Action.TURN_OFF:
-        await hass.services.async_call(
-            "homeassistant",
-            "turn_off",
-            {"entity_id": target_switch_entity},
-            context=call.context,
-            blocking=False,
-        )
+    # STSC has no persistent-finding stream of its own; the
+    # sweep just cleans up stale config-error notifications
+    # left over from a prior bad config.
+    await process_persistent_notifications_with_sweep(
+        hass,
+        [],
+        sweep_prefix=notif_prefix,
+    )
 
-    # Persist state + diagnostic attrs in one call.
-    # State is load-bearing (the next tick's spike
-    # detection depends on it), so save it BEFORE
-    # dispatching the notification -- a notify failure
-    # must never lose state.
     update_instance_state(
         hass,
         service_tag=_SERVICE_TAG,
@@ -422,8 +406,26 @@ async def _async_service_layer(
         },
     )
 
-    # Best-effort notification dispatch. Failures don't
-    # abort -- state already saved.
+    # ``call.context`` propagates so the logbook attributes
+    # the turn_on/off to the user who triggered the
+    # automation, not to the integration.
+    if result.action == logic.Action.TURN_ON:
+        await hass.services.async_call(
+            "homeassistant",
+            "turn_on",
+            {"entity_id": target_switch_entity},
+            context=call.context,
+            blocking=False,
+        )
+    elif result.action == logic.Action.TURN_OFF:
+        await hass.services.async_call(
+            "homeassistant",
+            "turn_off",
+            {"entity_id": target_switch_entity},
+            context=call.context,
+            blocking=False,
+        )
+
     if notification_service and result.notification:
         await _async_send_notification(
             hass,
@@ -432,15 +434,6 @@ async def _async_service_layer(
             call.context,
             tag,
         )
-
-    # STSC has no persistent-finding stream of its own;
-    # the sweep cleans up stale config-error notifications
-    # left over from a prior bad config.
-    await process_persistent_notifications_with_sweep(
-        hass,
-        [],
-        sweep_prefix=notif_prefix,
-    )
 
     if debug_logging:
         _LOGGER.warning(

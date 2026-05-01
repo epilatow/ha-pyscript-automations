@@ -344,6 +344,31 @@ State value defaults to `"ok"`. Trigger-driven handlers override with the
 decision name (e.g. `result.action.name`); periodic / watchdog handlers leave
 it alone.
 
+### Service-layer exit ordering
+
+The load-bearing invariant: **state must save before notify dispatch** -- a
+notify failure must not lose state. Beyond that, every handler's service layer
+composes the same five operations (PN sweep, state write, notify push, action
+dispatch, debug log), and the canonical order across the integration is:
+
+1. **Sweep PNs.** Dispatch the per-instance persistent-notification set for
+   this run via `process_persistent_notifications_with_sweep`. Clears stale
+   config-error / per-finding entries from prior runs and emits the current
+   findings.
+2. **Update state.** Write the diagnostic state entity via
+   `update_instance_state`. Records what we did this run.
+3. **Action dispatch.** `homeassistant.turn_on` / `turn_off` / etc, for
+   handlers that drive entities.
+4. **Notify dispatch.** Best-effort push to `notify.<service>` for handlers
+   that have one (STSC + TEC today). Always after step 2 -- a notify failure
+   must not lose state.
+5. **Debug log.** A single `_LOGGER.warning(...)` line, gated on the
+   per-instance `debug_logging` toggle, summarising the decision. One line, at
+   the end -- not interleaved through the scan.
+
+Handlers that don't need a step (no notify path, no action dispatch, nothing
+to log) just skip it. The remaining steps stay in the order above.
+
 ### Async tasks must be entry-scoped
 
 Async tasks scheduled by the handler must be entry-scoped, not hass-scoped.
