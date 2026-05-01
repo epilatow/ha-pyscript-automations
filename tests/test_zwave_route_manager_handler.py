@@ -44,6 +44,7 @@ sys.path.insert(0, str(REPO_ROOT))
 import pytest  # noqa: E402
 from _handler_stubs import install_homeassistant_stubs  # noqa: E402
 from conftest import (  # noqa: E402
+    BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
     CodeQualityBase,
 )
@@ -632,6 +633,17 @@ class TestBlueprintSchemaDrift(BlueprintSchemaDriftBase):
 
     handler = handler
     blueprint_filename = "zwave_route_manager.yaml"
+
+
+class TestBlueprintDefaultsRoundTrip(BlueprintDefaultsRoundTripBase):
+    """Blueprint input defaults must satisfy the schema."""
+
+    handler = handler
+    blueprint_filename = "zwave_route_manager.yaml"
+    template_defaults = {
+        "instance_id": "automation.zrm_default_check",
+        "trigger_id": "manual",
+    }
 
 
 class TestCodeQuality(CodeQualityBase):

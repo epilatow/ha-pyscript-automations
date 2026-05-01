@@ -44,6 +44,7 @@ sys.path.insert(0, str(REPO_ROOT))
 import pytest  # noqa: E402
 from _handler_stubs import install_homeassistant_stubs  # noqa: E402
 from conftest import (  # noqa: E402
+    BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
     CodeQualityBase,
 )
@@ -502,6 +503,21 @@ class TestBlueprintSchemaDrift(BlueprintSchemaDriftBase):
 
     handler = handler
     blueprint_filename = "sensor_threshold_switch_controller.yaml"
+
+
+class TestBlueprintDefaultsRoundTrip(BlueprintDefaultsRoundTripBase):
+    """Blueprint input defaults must satisfy the schema."""
+
+    handler = handler
+    blueprint_filename = "sensor_threshold_switch_controller.yaml"
+    template_defaults = {
+        "instance_id": "automation.stsc_default_check",
+        "trigger_id": "manual",
+        "target_switch_entity": "switch.fan",
+        "sensor_value": "0",
+        "switch_state": "off",
+        "trigger_entity": "sensor.humidity",
+    }
 
 
 class TestCodeQuality(CodeQualityBase):

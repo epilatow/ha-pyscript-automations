@@ -321,3 +321,90 @@ class BlueprintSchemaDriftBase:
             f"{action_name!r} does not match the registered "
             f"service {expected!r}"
         )
+
+
+class BlueprintDefaultsRoundTripBase(BlueprintSchemaDriftBase):
+    """Base for per-handler blueprint-defaults-vs-schema round-trip checks.
+
+    Subclass per handler test file::
+
+        class TestBlueprintDefaultsRoundTrip(BlueprintDefaultsRoundTripBase):
+            handler = my_handler_module
+            blueprint_filename = "my_handler.yaml"
+            template_defaults = {
+                "instance_id": "automation.test",
+                "trigger_id": "manual",
+            }
+
+    Without this guard a blueprint edit that bumps an input
+    default out of the schema's range silently lands every
+    newly-created automation in ``unavailable`` until the user
+    notices and edits the value.
+
+    Reads the first action's ``data:`` block; for each schema-
+    required key whose ``data:`` value is a ``!input <name>``
+    reference (recorded by the permissive loader as just the
+    bare input name), looks up the input's ``default:`` in
+    the blueprint's ``input:`` block and feeds that into a
+    payload. Templated values (``"{{ ... }}"`` strings, e.g.
+    ``instance_id: "{{ this.entity_id }}"``) come from
+    ``template_defaults`` -- subclasses must supply a
+    test-time stand-in for each templated key. Anything else
+    in ``data:`` is passed through verbatim.
+
+    The constructed payload is then run through
+    ``handler._SCHEMA``; any ``vol.Invalid`` raised fails
+    the test.
+    """
+
+    template_defaults: dict[str, Any] = {}  # subclass override
+
+    def test_blueprint_defaults_pass_schema(self) -> None:
+        bp = self._load_blueprint()
+        action = self._first_action(bp)
+        data: dict[str, Any] = dict(action.get("data") or {})
+        inputs: dict[str, Any] = (
+            (bp.get("blueprint") or {}).get("input") or {}
+        )
+        schema_keys = self._required_keys(self.handler._SCHEMA)
+
+        payload: dict[str, Any] = {}
+        missing_overrides: list[str] = []
+        for key in sorted(schema_keys):
+            # ``template_defaults`` always wins -- subclasses
+            # use it both for templated ``data:`` keys (e.g.
+            # ``instance_id: "{{ this.entity_id }}"``) and for
+            # blueprint inputs that intentionally lack a
+            # ``default:`` (the user-must-supply case, e.g.
+            # TEC's ``controlled_entities``).
+            if key in self.template_defaults:
+                payload[key] = self.template_defaults[key]
+                continue
+            value = data.get(key)
+            if isinstance(value, str) and value in inputs:
+                # ``!input <name>`` reference -- look up the
+                # input's default.
+                input_def = inputs[value]
+                if isinstance(input_def, dict) and "default" in input_def:
+                    payload[key] = input_def["default"]
+                else:
+                    missing_overrides.append(
+                        f"{key} (input {value!r} has no default; supply via"
+                        " ``template_defaults``)"
+                    )
+            elif isinstance(value, str) and "{{" in value:
+                missing_overrides.append(
+                    f"{key} (templated; supply via ``template_defaults``)"
+                )
+            else:
+                payload[key] = value
+
+        assert not missing_overrides, (
+            "blueprint defaults are missing for these schema-required keys:\n"
+            + "\n".join(f"  - {entry}" for entry in missing_overrides)
+        )
+
+        # Should not raise -- if the blueprint defaults are
+        # outside the schema's accepted range, this is the
+        # canary.
+        self.handler._SCHEMA(payload)
