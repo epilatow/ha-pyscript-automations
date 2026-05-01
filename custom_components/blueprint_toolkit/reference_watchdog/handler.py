@@ -33,7 +33,6 @@ pattern):
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -142,7 +141,7 @@ def _instances(hass: HomeAssistant) -> dict[str, RwInstanceState]:
 
 async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
     """Service handler -- thin wrapper, hands off to argparse."""
-    await _async_argparse(hass, call)
+    await _async_argparse(hass, call, now=dt_util.now())
 
 
 # --------------------------------------------------------
@@ -159,6 +158,8 @@ _emit_config_error = make_emit_config_error(
 async def _async_argparse(
     hass: HomeAssistant,
     call: ServiceCall,
+    *,
+    now: datetime,
 ) -> None:
     """Validate, build context, dispatch to the service layer."""
     raw = dict(call.data)
@@ -202,6 +203,7 @@ async def _async_argparse(
     await _async_service_layer(
         hass,
         call,
+        now=now,
         instance_id=instance_id,
         trigger_id=data["trigger_id"],
         exclude_paths=exclude_paths,
@@ -224,6 +226,7 @@ async def _async_service_layer(
     hass: HomeAssistant,
     call: ServiceCall,
     *,
+    now: datetime,
     instance_id: str,
     trigger_id: str,
     exclude_paths: list[str],
@@ -236,7 +239,6 @@ async def _async_service_layer(
     debug_logging: bool,
 ) -> None:
     """Run a scan + dispatch notifications + persist diagnostics."""
-    started = time.monotonic()
     state = _instances(hass).setdefault(
         instance_id,
         RwInstanceState(instance_id=instance_id),
@@ -249,7 +251,6 @@ async def _async_service_layer(
     if entry is not None:
         _ensure_timer(hass, entry, state, check_interval_minutes)
 
-    now = dt_util.now()
     notif_prefix = notification_prefix(_SERVICE, instance_id)
     tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
@@ -296,7 +297,7 @@ async def _async_service_layer(
         service_tag=_SERVICE_TAG,
         instance_id=instance_id,
         last_run=now,
-        runtime=time.monotonic() - started,
+        runtime=(dt_util.now() - now).total_seconds(),
         extra_attributes={
             "last_trigger": trigger_id or "",
             "paths_included": ev.paths_included,

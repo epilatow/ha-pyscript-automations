@@ -46,7 +46,6 @@ rename signal).
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -228,7 +227,7 @@ async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
     ``_SCHEMA``) for forward-compat with future blueprint
     inputs.
     """
-    await _async_argparse(hass, call)
+    await _async_argparse(hass, call, now=dt_util.now())
 
 
 # --------------------------------------------------------
@@ -251,6 +250,8 @@ _emit_config_error = make_emit_config_error(
 async def _async_argparse(
     hass: HomeAssistant,
     call: ServiceCall,
+    *,
+    now: datetime,
 ) -> None:
     """Validate the call, build a Config, dispatch to the service layer."""
     raw = dict(call.data)
@@ -349,6 +350,7 @@ async def _async_argparse(
         hass,
         call.context,
         config,
+        now=now,
         instance_id=instance_id,
         trigger_entity_id=data["trigger_entity_id"],
         trigger_to_state=data["trigger_to_state"],
@@ -391,6 +393,7 @@ async def _async_service_layer(
     context: Context,
     config: logic.Config,
     *,
+    now: datetime,
     instance_id: str,
     trigger_entity_id: str,
     trigger_to_state: str,
@@ -398,13 +401,10 @@ async def _async_service_layer(
     debug_logging: bool,
 ) -> None:
     """Read HA state, build Inputs, evaluate, apply Result."""
-    started = time.monotonic()
     state = _instances(hass).setdefault(
         instance_id,
         TecInstanceState(instance_id=instance_id),
     )
-
-    now = dt_util.now()
 
     all_disabling = (
         config.trigger_disabling_entities + config.auto_off_disabling_entities
@@ -440,7 +440,7 @@ async def _async_service_layer(
         service_tag=_SERVICE_TAG,
         instance_id=instance_id,
         last_run=now,
-        runtime=time.monotonic() - started,
+        runtime=(dt_util.now() - now).total_seconds(),
         state=result.action.name,
         extra_attributes={
             "last_event": event_type.name,

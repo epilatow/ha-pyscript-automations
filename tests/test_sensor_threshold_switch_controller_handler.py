@@ -386,7 +386,7 @@ class TestArgparseSchemaRejection(_ArgparseHarness):
                 trigger_threshold_raw="not-a-number",
             ),
         )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == [], (
             "service layer must NOT run when schema rejects an input"
@@ -409,7 +409,7 @@ class TestArgparseSchemaRejection(_ArgparseHarness):
                 sampling_window_seconds_raw=99999,
             ),
         )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == []
         assert len(self.config_errors) == 1

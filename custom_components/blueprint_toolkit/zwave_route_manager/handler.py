@@ -35,7 +35,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -229,7 +228,7 @@ def _instances(hass: HomeAssistant) -> dict[str, ZrmInstanceState]:
 
 async def _async_entrypoint(hass: HomeAssistant, call: ServiceCall) -> None:
     """Service handler -- thin wrapper, hands off to argparse."""
-    await _async_argparse(hass, call)
+    await _async_argparse(hass, call, now=dt_util.now())
 
 
 # --------------------------------------------------------
@@ -249,6 +248,8 @@ _emit_config_error = make_emit_config_error(
 async def _async_argparse(
     hass: HomeAssistant,
     call: ServiceCall,
+    *,
+    now: datetime,
 ) -> None:
     """Validate, build context, dispatch to the service layer."""
     raw = dict(call.data)
@@ -284,6 +285,7 @@ async def _async_argparse(
     await _async_service_layer(
         hass,
         call,
+        now=now,
         instance_id=instance_id,
         trigger_id=data["trigger_id"],
         config_file_path=data["config_file_path"],
@@ -323,6 +325,7 @@ async def _async_service_layer(
     hass: HomeAssistant,
     call: ServiceCall,
     *,
+    now: datetime,
     instance_id: str,
     trigger_id: str,
     config_file_path: str,
@@ -337,7 +340,6 @@ async def _async_service_layer(
     debug_logging: bool,
 ) -> None:
     """Reconcile pass: gate, fetch nodes, plan, apply, notify."""
-    started = time.monotonic()
     state = _instances(hass).setdefault(
         instance_id,
         ZrmInstanceState(instance_id=instance_id),
@@ -357,7 +359,7 @@ async def _async_service_layer(
         await _do_reconcile(
             hass,
             state,
-            started=started,
+            now=now,
             trigger_id=trigger_id,
             config_file_path=config_file_path,
             host=host,
@@ -376,7 +378,7 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     hass: HomeAssistant,
     state: ZrmInstanceState,
     *,
-    started: float,
+    now: datetime,
     trigger_id: str,
     config_file_path: str,
     host: str,
@@ -391,7 +393,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
 ) -> None:
     instance_id = state.instance_id
     notif_prefix = notification_prefix(_SERVICE, instance_id)
-    now = dt_util.now()
     tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
     # File-mtime change detection: edit the YAML and the next
@@ -446,7 +447,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             hass,
             state,
             now=now,
-            started=started,
             current_mtime=current_mtime,
             trigger_id=trigger_id,
             mark_pending=True,
@@ -476,7 +476,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             hass,
             state,
             now=now,
-            started=started,
             current_mtime=current_mtime,
             trigger_id=trigger_id,
         )
@@ -490,7 +489,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             hass,
             state,
             now=now,
-            started=started,
             current_mtime=current_mtime,
             trigger_id=trigger_id,
         )
@@ -548,7 +546,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             hass,
             state,
             now=now,
-            started=started,
             current_mtime=current_mtime,
             trigger_id=trigger_id,
             mark_pending=True,
@@ -588,7 +585,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             hass,
             state,
             now=now,
-            started=started,
             current_mtime=current_mtime,
             trigger_id=trigger_id,
             mark_pending=True,
@@ -616,7 +612,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             hass,
             state,
             now=now,
-            started=started,
             current_mtime=current_mtime,
             trigger_id=trigger_id,
             mark_pending=True,
@@ -647,7 +642,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
             hass,
             state,
             now=now,
-            started=started,
             current_mtime=current_mtime,
             trigger_id=trigger_id,
             mark_pending=True,
@@ -696,7 +690,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
                 hass,
                 state,
                 now=now,
-                started=started,
                 current_mtime=current_mtime,
                 trigger_id=trigger_id,
                 mark_pending=True,
@@ -718,7 +711,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
                 hass,
                 state,
                 now=now,
-                started=started,
                 current_mtime=current_mtime,
                 trigger_id=trigger_id,
                 mark_pending=True,
@@ -858,7 +850,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         hass,
         state,
         now=now,
-        started=started,
         current_mtime=current_mtime,
         trigger_id=trigger_id,
     )
@@ -887,7 +878,6 @@ def _persist_diagnostic(
     state: ZrmInstanceState,
     *,
     now: datetime,
-    started: float,
     current_mtime: float,
     trigger_id: str,
     mark_pending: bool = False,
@@ -930,7 +920,7 @@ def _persist_diagnostic(
         service_tag=_SERVICE_TAG,
         instance_id=state.instance_id,
         last_run=now,
-        runtime=time.monotonic() - started,
+        runtime=(dt_util.now() - now).total_seconds(),
         extra_attributes=attrs,
     )
 

@@ -406,7 +406,7 @@ class TestArgparseMultilineRegex:
                 ),
             ),
         )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.config_errors == [[]], (
             f"argparse should produce no errors; got {self.config_errors}"
@@ -433,7 +433,7 @@ class TestArgparseMultilineRegex:
                 exclude_entity_regex_raw="foo\n[invalid",
             ),
         )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == [], (
             "service layer must NOT run when argparse has errors"
@@ -446,7 +446,7 @@ class TestArgparseMultilineRegex:
 
         h = _MockHass()
         call = _FakeServiceCall(_valid_argparse_payload())
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
@@ -484,7 +484,7 @@ class TestArgparseMultilineRegex:
                     exclude_entity_regex_raw="foo\nbar",
                 ),
             )
-            asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+            asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
         finally:
             handler.validate_and_join_regex_patterns = real  # type: ignore[assignment]
 
@@ -539,7 +539,7 @@ class TestArgparseSlugListValidation:
                 exclude_integrations_raw=["zwave-js"],
             ),
         )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == []
         assert len(self.config_errors) == 1
@@ -579,7 +579,7 @@ class TestArgparseIntValidation:
                 check_interval_minutes_raw="not-a-number",
             ),
         )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == [], (
             "service layer must NOT run when schema rejects an input"
@@ -602,7 +602,7 @@ class TestArgparseIntValidation:
                 max_source_notifications_raw=9999,
             ),
         )
-        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == []
         assert len(self.config_errors) == 1
