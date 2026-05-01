@@ -359,14 +359,109 @@ class TestServiceLayerScan:
         assert attrs["last_trigger"] == "manual"
 
 
-# Per-device + disabled-diagnostic notification link-prefix
-# coverage is deferred; ``ha_tmpl.integration_entities`` in
-# the pytest-HACC harness returns nothing for ad-hoc
-# registry entries even when ``platform=`` matches, so the
-# scan never reaches the per-device builder. See
-# ``tmp/native-port-followups.md`` for the cross-port
-# follow-up that adds this coverage with a proper mock-
-# integration setup.
+class TestPerDeviceLinkPrefix:
+    async def test_per_device_notification_carries_automation_link(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        """DW's per-device notification must carry the
+        ``Automation: [name](link)`` prefix the dispatcher
+        prepends. Same regression guard EDW + RW have for
+        their finding notifications.
+
+        Pattern: ``template.integration_entities()`` looks
+        up entries by config-entry title, so a mock
+        ``MockConfigEntry(title="fake_integration")`` plus
+        a registry entry tied to it is enough to drive a
+        full scan through the per-device builder.
+        """
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        await _setup_integration(hass)
+        # Register the automation entity for the link.
+        hass.states.async_set(
+            "automation.dw_finding",
+            "on",
+            {"friendly_name": "DW: Finding", "id": "9999"},
+        )
+
+        fake_entry = _mock_config_entry(
+            domain="fake_integration",
+            title="fake_integration",
+        )
+        fake_entry.add_to_hass(hass)
+
+        dev_reg = dr.async_get(hass)
+        ent_reg = er.async_get(hass)
+
+        device = dev_reg.async_get_or_create(
+            config_entry_id=fake_entry.entry_id,
+            identifiers={("fake_integration", "device-1")},
+            name="Test Device",
+        )
+        entry = ent_reg.async_get_or_create(
+            domain="binary_sensor",
+            platform="fake_integration",
+            unique_id="unavail-1",
+            device_id=device.id,
+            config_entry=fake_entry,
+            original_name="unavail",
+        )
+        # Mark the entity unavailable so DW flags it. Use
+        # the actual entity_id HA assigned (the registry
+        # appends the platform name to disambiguate from
+        # other ``binary_sensor.unavail`` entries).
+        hass.states.async_set(
+            entry.entity_id,
+            "unavailable",
+            {"friendly_name": "Unavail"},
+        )
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE,
+            _valid_payload(
+                instance_id="automation.dw_finding",
+                include_integrations=["fake_integration"],
+                enabled_checks=["unavailable-entities"],
+            ),
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+        from homeassistant.components.persistent_notification import (
+            _async_get_or_create_notifications,
+        )
+
+        notifs: dict[str, Any] = _async_get_or_create_notifications(hass)
+        # Find the per-device notification (suffix
+        # ``device_<device_id>``).
+        # Diagnostic-state introspection helps if the
+        # finding doesn't materialize -- the per-port stat
+        # extras tell us what DW saw.
+        state = hass.states.get(
+            "blueprint_toolkit.dw_dw_finding_state",
+        )
+        attrs = state.attributes if state else {}
+        per_device = [
+            (nid, body)
+            for nid, body in notifs.items()
+            if nid.startswith(
+                "blueprint_toolkit_device_watchdog__"
+                "automation.dw_finding__device_"
+            )
+        ]
+        assert per_device, (
+            f"expected per-device notification; "
+            f"diagnostic state attrs: {attrs}; "
+            f"got notifs: {sorted(notifs.keys())}"
+        )
+        nid, payload = per_device[0]
+        body: str = payload["message"]
+        assert body.startswith(
+            "Automation: [DW: Finding](/config/automation/edit/9999)\n",
+        ), f"missing automation-link prefix; body was: {body[:200]!r}"
 
 
 class TestCodeQuality(CodeQualityBase):
