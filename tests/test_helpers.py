@@ -25,7 +25,9 @@ from custom_components.blueprint_toolkit.helpers import (  # noqa: E402
     format_notification,
     format_timestamp,
     matches_pattern,
+    notification_prefix,
     prepare_notifications,
+    resolve_target_integrations,
     slugify,
 )
 
@@ -104,6 +106,45 @@ class TestMatchesPattern:
 
     def test_invalid_regex_no_crash(self) -> None:
         assert not matches_pattern("test", "[invalid")
+
+
+class TestNotificationPrefix:
+    def test_format(self) -> None:
+        assert (
+            notification_prefix("device_watchdog", "automation.dw_main")
+            == "blueprint_toolkit_device_watchdog__automation.dw_main__"
+        )
+
+
+class TestResolveTargetIntegrations:
+    def test_empty_include_means_all(self) -> None:
+        assert resolve_target_integrations(
+            ["zwave_js", "shelly", "rachio"], [], []
+        ) == {"zwave_js", "shelly", "rachio"}
+
+    def test_include_narrows(self) -> None:
+        assert resolve_target_integrations(
+            ["zwave_js", "shelly", "rachio"], ["zwave_js"], []
+        ) == {"zwave_js"}
+
+    def test_exclude_subtracts(self) -> None:
+        assert resolve_target_integrations(
+            ["zwave_js", "shelly", "rachio"], [], ["shelly"]
+        ) == {"zwave_js", "rachio"}
+
+    def test_exclude_overrides_include(self) -> None:
+        # Belt-and-suspenders: a value in both lists is
+        # excluded.
+        assert resolve_target_integrations(
+            ["zwave_js", "shelly"], ["zwave_js", "shelly"], ["shelly"]
+        ) == {"zwave_js"}
+
+    def test_exclude_unknown_no_crash(self) -> None:
+        # Excluding something not in the all-set is a
+        # no-op (set.discard, not set.remove).
+        assert resolve_target_integrations(
+            ["zwave_js"], [], ["never_installed"]
+        ) == {"zwave_js"}
 
 
 class TestSlugify:

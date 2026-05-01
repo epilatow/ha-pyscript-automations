@@ -114,6 +114,21 @@ Schema validators:
   names like `3_day_blinds`. Produces a config-error message that names the
   offending value(s) and explains the charset.
 
+Cross-handler accessors:
+
+- `entry_for_domain(hass)` -- returns the integration's lone config entry
+  (single-entry integration) or `None`. Used by every native handler to scope
+  task lifecycle to the entry.
+- `notification_prefix(service, instance_id)` -- returns
+  `blueprint_toolkit_{service}__{instance_id}__`, the per-instance prefix
+  every notification ID under a handler shares. Per-category suffix is
+  appended at each call site.
+- `all_integration_ids(hass)` -- distinct integration IDs across the entity
+  registry. Watchdog truth-set seed.
+- `resolve_target_integrations(all, include, exclude)` -- apply include /
+  exclude filters; empty `include` means "all" (matches the watchdog
+  blueprints' documented behaviour).
+
 Notification + formatting:
 
 - `format_timestamp(template, dt)` -- `YYYY/MM/DD/HH/mm/ss` token expansion in

@@ -69,6 +69,7 @@ from ..helpers import (
     make_config_error_notification,
     make_emit_config_error,
     md_escape,
+    notification_prefix,
     prepare_notifications,
     process_persistent_notifications,
     process_persistent_notifications_with_sweep,
@@ -389,7 +390,7 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     debug_logging: bool,
 ) -> None:
     instance_id = state.instance_id
-    notif_prefix = _notification_prefix(instance_id)
+    notif_prefix = notification_prefix(_SERVICE, instance_id)
     now = dt_util.now()
     tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
@@ -996,16 +997,6 @@ def _paths_to_storage(
 # --------------------------------------------------------
 # Notification builders
 # --------------------------------------------------------
-
-
-def _notification_prefix(instance_id: str) -> str:
-    """Common prefix for the ZRM notification family.
-
-    Extra category-specific suffix is appended per
-    notification kind. Trailing ``__`` keeps the suffix
-    parseable per the helpers convention.
-    """
-    return f"blueprint_toolkit_{_SERVICE}__{instance_id}__"
 
 
 def _api_notification(

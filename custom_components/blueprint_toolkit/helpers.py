@@ -60,6 +60,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from .const import DOMAIN
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import Event, HomeAssistant, ServiceCall
 
 _LOGGER = logging.getLogger(__name__)
@@ -99,6 +100,69 @@ def cv_ha_domain_list(value: object) -> list[str]:
         )
         raise vol.Invalid(msg)
     return items
+
+
+# --------------------------------------------------------
+# Cross-handler accessors
+# --------------------------------------------------------
+
+
+def entry_for_domain(hass: HomeAssistant) -> ConfigEntry | None:
+    """Return the integration's lone config entry, if loaded.
+
+    Single-entry integration: every native handler grabs
+    the same entry to scope task lifecycle. Returns
+    ``None`` when the integration is not loaded.
+    """
+    entries = hass.config_entries.async_entries(DOMAIN)
+    return entries[0] if entries else None
+
+
+def notification_prefix(service: str, instance_id: str) -> str:
+    """Common prefix for a handler's notification family.
+
+    Format: ``blueprint_toolkit_{service}__{instance_id}__``.
+    Per-category suffix is appended at each call site;
+    the trailing ``__`` keeps the field separator parseable
+    (HA entity IDs never contain ``__``).
+    """
+    return f"blueprint_toolkit_{service}__{instance_id}__"
+
+
+def all_integration_ids(hass: HomeAssistant) -> list[str]:
+    """All distinct integration IDs across the entity registry.
+
+    Used by the watchdog handlers to populate the truth set
+    that include / exclude filters then narrow.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    ent_reg = er.async_get(hass)
+    integrations: set[str] = set()
+    for entry in ent_reg.entities.values():
+        if entry.platform:
+            integrations.add(entry.platform)
+    return sorted(integrations)
+
+
+def resolve_target_integrations(
+    all_integrations: list[str],
+    include: list[str],
+    exclude: list[str],
+) -> set[str]:
+    """Apply include / exclude filters to a list of integrations.
+
+    Empty ``include`` means "all integrations" (matches every
+    watchdog blueprint's documented behaviour). ``exclude`` is
+    then subtracted from the resulting set.
+    """
+    if include:
+        target = set(include)
+    else:
+        target = set(all_integrations)
+    for ex in exclude:
+        target.discard(ex)
+    return target
 
 
 # --------------------------------------------------------

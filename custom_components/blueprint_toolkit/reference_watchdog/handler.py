@@ -52,7 +52,9 @@ from ..helpers import (
     BlueprintHandlerSpec,
     automation_friendly_name,
     cv_ha_domain_list,
+    entry_for_domain,
     make_emit_config_error,
+    notification_prefix,
     process_persistent_notifications_with_sweep,
     register_blueprint_handler,
     schedule_periodic_with_jitter,
@@ -131,17 +133,6 @@ def _instances(hass: HomeAssistant) -> dict[str, RwInstanceState]:
     bucket = spec_bucket(entries[0], _SERVICE)
     instances: dict[str, RwInstanceState] = bucket.setdefault("instances", {})
     return instances
-
-
-def _entry(hass: HomeAssistant) -> ConfigEntry | None:
-    """Return our integration's config entry, if any.
-
-    Single-entry integration; returns the lone entry or
-    ``None`` if the integration is not loaded. Used by
-    timer-arming to scope task lifecycle to the entry.
-    """
-    entries = hass.config_entries.async_entries(DOMAIN)
-    return entries[0] if entries else None
 
 
 # --------------------------------------------------------
@@ -254,12 +245,12 @@ async def _async_service_layer(
     # Make sure the periodic timer is armed with the
     # current interval (handles first-run + interval
     # changes mid-flight).
-    entry = _entry(hass)
+    entry = entry_for_domain(hass)
     if entry is not None:
         _ensure_timer(hass, entry, state, check_interval_minutes)
 
     now = dt_util.now()
-    notif_prefix = _notification_prefix(instance_id)
+    notif_prefix = notification_prefix(_SERVICE, instance_id)
     tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
     config = logic.Config(
@@ -345,11 +336,6 @@ async def _async_service_layer(
             ev.source_orphan_count,
             ev.source_orphan_candidates,
         )
-
-
-def _notification_prefix(instance_id: str) -> str:
-    """Common prefix for the RW notification family."""
-    return f"blueprint_toolkit_{_SERVICE}__{instance_id}__"
 
 
 # --------------------------------------------------------

@@ -50,11 +50,15 @@ from homeassistant.util import dt as dt_util
 from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
+    all_integration_ids,
     automation_friendly_name,
     cv_ha_domain_list,
+    entry_for_domain,
     make_emit_config_error,
+    notification_prefix,
     process_persistent_notifications_with_sweep,
     register_blueprint_handler,
+    resolve_target_integrations,
     schedule_periodic_with_jitter,
     spec_bucket,
     unregister_blueprint_handler,
@@ -135,17 +139,6 @@ def _instances(hass: HomeAssistant) -> dict[str, EdwInstanceState]:
     bucket = spec_bucket(entries[0], _SERVICE)
     instances: dict[str, EdwInstanceState] = bucket.setdefault("instances", {})
     return instances
-
-
-def _entry(hass: HomeAssistant) -> ConfigEntry | None:
-    """Return our integration's config entry, if any.
-
-    Single-entry integration; returns the lone entry or
-    ``None`` if the integration is not loaded. Used by
-    timer-arming to scope task lifecycle to the entry.
-    """
-    entries = hass.config_entries.async_entries(DOMAIN)
-    return entries[0] if entries else None
 
 
 # --------------------------------------------------------
@@ -281,12 +274,12 @@ async def _async_service_layer(
     # Make sure the periodic timer is armed with the
     # current interval (handles first-run + interval
     # changes mid-flight).
-    entry = _entry(hass)
+    entry = entry_for_domain(hass)
     if entry is not None:
         _ensure_timer(hass, entry, state, check_interval_minutes)
 
     now = dt_util.now()
-    notif_prefix = _notification_prefix(instance_id)
+    notif_prefix = notification_prefix(_SERVICE, instance_id)
     tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
     config = logic.Config(
@@ -301,8 +294,8 @@ async def _async_service_layer(
 
     # Resolve target integrations + assemble inputs on the
     # event loop -- the registries we walk are loop-only.
-    all_integrations = _all_integration_ids(hass)
-    target_integrations = _resolve_target_integrations(
+    all_integrations = all_integration_ids(hass)
+    target_integrations = resolve_target_integrations(
         all_integrations,
         include_integrations,
         exclude_integrations,
@@ -385,44 +378,9 @@ async def _async_service_layer(
         )
 
 
-def _notification_prefix(instance_id: str) -> str:
-    """Common prefix for the EDW notification family."""
-    return f"blueprint_toolkit_{_SERVICE}__{instance_id}__"
-
-
 # --------------------------------------------------------
 # Truth-set assembly (event-loop only)
 # --------------------------------------------------------
-
-
-def _all_integration_ids(hass: HomeAssistant) -> list[str]:
-    """All distinct integration IDs across the entity registry."""
-    ent_reg = er.async_get(hass)
-    integrations: set[str] = set()
-    for entry in ent_reg.entities.values():
-        if entry.platform:
-            integrations.add(entry.platform)
-    return sorted(integrations)
-
-
-def _resolve_target_integrations(
-    all_integrations: list[str],
-    include: list[str],
-    exclude: list[str],
-) -> set[str]:
-    """Apply include / exclude filters to ``all_integrations``.
-
-    Empty include means "all integrations" (matches the
-    blueprint's documented behaviour). Exclude is then
-    subtracted from the resulting set.
-    """
-    if include:
-        target = set(include)
-    else:
-        target = set(all_integrations)
-    for ex in exclude:
-        target.discard(ex)
-    return target
 
 
 def _build_device_inputs(

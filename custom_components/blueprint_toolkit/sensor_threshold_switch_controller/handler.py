@@ -57,6 +57,7 @@ from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
     automation_friendly_name,
+    entry_for_domain,
     instance_state_entity_id,
     make_emit_config_error,
     parse_notification_service,
@@ -68,6 +69,13 @@ from ..helpers import (
     update_instance_state,
     validate_payload_or_emit_config_error,
 )
+
+# STSC takes a user-supplied ``notification_prefix`` string
+# (the per-instance body prefix, e.g. ``"STSC: "``) as a
+# blueprint input. Alias the helper that builds the per-
+# instance notification-ID prefix so the two don't collide
+# inside the service layer.
+from ..helpers import notification_prefix as _notification_id_prefix
 from . import logic
 
 _LOGGER = logging.getLogger(__name__)
@@ -180,12 +188,6 @@ def _instances(hass: HomeAssistant) -> dict[str, StscInstanceState]:
     bucket = spec_bucket(entries[0], _SERVICE)
     instances: dict[str, StscInstanceState] = bucket.setdefault("instances", {})
     return instances
-
-
-def _entry(hass: HomeAssistant) -> ConfigEntry | None:
-    """Return our integration's config entry, if any."""
-    entries = hass.config_entries.async_entries(DOMAIN)
-    return entries[0] if entries else None
 
 
 # --------------------------------------------------------
@@ -329,12 +331,12 @@ async def _async_service_layer(
 
     # Make sure the periodic timer is armed (idempotent;
     # arms once per instance and stays until teardown).
-    entry = _entry(hass)
+    entry = entry_for_domain(hass)
     if entry is not None:
         _ensure_timer(hass, entry, state)
 
     now = dt_util.now()
-    notif_prefix = _notification_prefix(instance_id)
+    notif_prefix = _notification_id_prefix(_SERVICE, instance_id)
     tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
     # Load the persistent state blob from the diagnostic
@@ -451,11 +453,6 @@ async def _async_service_layer(
             result.action.name,
             result.reason,
         )
-
-
-def _notification_prefix(instance_id: str) -> str:
-    """Common prefix for the STSC notification family."""
-    return f"blueprint_toolkit_{_SERVICE}__{instance_id}__"
 
 
 # --------------------------------------------------------
