@@ -83,7 +83,8 @@ service_tag: str        # short tag for logs/notifs; "TEC"
 service_name: str       # human-readable; "Trigger Entity Controller"
 blueprint_path: str     # "blueprint_toolkit/<service>.yaml"
 service_handler         # async (hass, ServiceCall) -> None
-kick                    # async (hass, entity_id) -> None
+kick_variables          # dict[str, Any] | None  (flat ``automation.trigger``
+                        #   variables for restart-recovery)
 on_reload               # callback (hass) -> None
 on_entity_remove        # callback (hass, entity_id) -> None
 on_entity_rename        # callback (hass, old_id, new_id) -> None
@@ -213,6 +214,22 @@ Lifecycle wiring:
   (best-effort).
 - `schedule_periodic_with_jitter(...)` -- per-instance jittered periodic
   scheduling that hands the action through an entry-scoped task.
+- `make_periodic_trigger_callback(hass, instance_id, *, instances_getter, extra_variables=None)`
+  -- canonical `automation.trigger` callback (`trigger_id="periodic"` plus
+  optional flat extra variables) for handlers that run a periodic scan. Drops
+  silently if the instance has been removed between scheduling and firing.
+- `kick_via_automation_trigger(hass, entity_id, variables)` -- thin
+  `automation.trigger` wrapper consumed by every handler's restart-recovery
+  `_async_kick_for_recovery` and any other synthetic invocation path.
+  `variables` is flat; nested `trigger.*` overrides get silently dropped by
+  HA's `automation.trigger`.
+- `make_lifecycle_mutators(...)` -- factory returning a `LifecycleMutators`
+  (`on_reload`, `on_entity_remove`, `on_entity_rename`, `on_teardown`).
+  Required kwargs: `instances_getter`, `cancel_field`, `service_tag`,
+  `logger`. Optional: `reset_armed_interval_on_reload` (default `False`).
+  Reads the cancel- callable via `getattr(s, cancel_field, None)` so the same
+  helper works for both `cancel_timer` and `cancel_wakeup`-flavoured state
+  objects.
 
 ## Schema + argparse
 
@@ -386,32 +403,53 @@ reach for `async_track_time_interval` directly, do it yourself.
 ## Spec + lifecycle
 
 - **Per-instance state dataclass** (e.g. `<Service>InstanceState`) with
-  `instance_id`, `cancel_wakeup` (if applicable), and ONLY transient state.
-  Diagnostic fields go through `update_instance_state`, not on the dataclass.
+  `instance_id`, the cancel-callable for any pending work (`cancel_timer` for
+  periodic handlers, `cancel_wakeup` for one-shot TEC), and ONLY transient
+  state. Diagnostic fields go through `update_instance_state`, not on the
+  dataclass.
 - **`_instances(hass)` accessor** that resolves the single entry via
   `hass.config_entries.async_entries(DOMAIN)[0]`, then
   `spec_bucket(entry, _SERVICE).setdefault("instances", {})`. Returns `{}`
   when no entry is loaded.
-- **`_kick_for_recovery(hass, entity_id)`** if the handler needs
-  restart-recovery (sends a synthetic event the automation reacts to; for TEC
-  it's a TIMER).
-- **Mutator callbacks**: `_on_reload`, `_on_entity_remove`,
-  `_on_entity_rename`, `_on_teardown`. Each is a small `@callback` function
-  that touches the `_instances` map.
+- **Periodic-tick callback** -- if the handler runs a periodic scan, call
+  `helpers.make_periodic_trigger_callback(...)` (kwargs:
+  `instances_getter=_instances`, `service_tag=_SERVICE_TAG`, `logger=_LOGGER`,
+  optional `extra_variables=`) inside `_ensure_timer` and hand the result to
+  `helpers.schedule_periodic_with_jitter` (or `async_track_time_interval` for
+  non-jittered cases). The helper bakes in the swallow-and-WARN-log behavior
+  for transient `automation.trigger` failures (a single failed tick is
+  self-healing -- the next tick fires anyway). Per-handler
+  `_make_periodic_callback` shims have been removed; call the helper directly.
+- **Restart-recovery kick** -- handlers that need restart-recovery set
+  `kick_variables=` on `_SPEC` to a flat `automation.trigger` variables dict
+  (e.g. `{"trigger_id": "manual"}` for the watchdogs, TEC's synthetic TIMER
+  `{"trigger_entity_id": "timer", "trigger_to_state": ""}`). The
+  `register_blueprint_handler` dispatcher invokes
+  `kick_via_automation_trigger` against each discovered automation;
+  per-handler `_async_kick_for_recovery` wrappers have been removed. The
+  blueprint action reads the flat top-level keys; HA's `automation.trigger`
+  strips any nested `trigger.*` overrides.
+- **Mutator callbacks** -- one `helpers.make_lifecycle_mutators(...)` call
+  (kwargs: `instances_getter=_instances`, `cancel_field=...`,
+  `service_tag=_SERVICE_TAG`, `logger=_LOGGER`, optional
+  `reset_armed_interval_on_reload=`) returns a `LifecycleMutators` dataclass
+  with `on_reload`, `on_entity_remove`, `on_entity_rename`, `on_teardown`.
+  Bind each to a module-level alias (`_on_reload = _MUTATORS.on_reload`, etc.)
+  and reference the aliases from `_SPEC` -- the aliases keep per-handler unit
+  tests that call `handler._on_reload(h)` working without each having to reach
+  into `_MUTATORS`. Don't hand-roll the four `@callback` functions; the helper
+  already wraps them.
 - **`_SPEC = BlueprintHandlerSpec(...)`** -- only set the hooks the handler
   actually needs.
 - **`async_register(hass, entry)`** and **`async_unregister(hass, entry)`**
   are one-line delegations to `register_blueprint_handler` /
   `unregister_blueprint_handler`.
 
-For the late-imported HA `@callback` decorator, suppress mypy's
-`untyped-decorator` warning at the use site:
-
-```python
-@callback  # type: ignore[untyped-decorator]
-def _on_reload(hass: HomeAssistant) -> None:
-    ...
-```
+`make_lifecycle_mutators`'s `cancel_field` parameter is the attribute name of
+the cancel-callable on the per-instance state object;
+`reset_armed_interval_on_reload=True` clears `armed_interval_minutes` to 0 on
+reload (set for handlers whose `_ensure_timer` re-arm decision compares
+against that field).
 
 ## Blueprint YAML
 

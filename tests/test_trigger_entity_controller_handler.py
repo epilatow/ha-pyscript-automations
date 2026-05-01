@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -43,6 +42,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
 from _handler_stubs import install_homeassistant_stubs  # noqa: E402
+from _handler_test_base import (  # noqa: E402
+    FrozenNow,
+    MockEntry,
+    MockHass,
+)
 from conftest import (  # noqa: E402
     BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
@@ -50,12 +54,7 @@ from conftest import (  # noqa: E402
     HandlerArgparseGuardsBase,
 )
 
-
-class _FrozenNow:
-    value = datetime(2024, 1, 15, 12, 0, 0)
-
-
-_stubs = install_homeassistant_stubs(frozen_now=_FrozenNow.value)
+_stubs = install_homeassistant_stubs(frozen_now=FrozenNow.value)
 
 # Capture every async_call_later invocation; tests inspect.
 _ACL_CALLS: list[tuple[float, Callable[..., Any]]] = []
@@ -105,69 +104,17 @@ handler.async_call_later = _async_call_later  # type: ignore[attr-defined]
 # --------------------------------------------------------
 
 
-@dataclass
-class _MockServices:
-    # ``calls`` records ``(domain, name, data)``; ``kwargs``
-    # records the keyword args (``context=``, ``blocking=``)
-    # for the matching index.
-    calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
-    kwargs: list[dict[str, Any]] = field(default_factory=list)
+def _make_hass() -> MockHass:
+    """MockHass pre-seeded with a single config entry.
 
-    async def async_call(
-        self,
-        domain: str,
-        name: str,
-        data: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        self.calls.append((domain, name, dict(data or {})))
-        self.kwargs.append(dict(kwargs))
-
-
-@dataclass
-class _MockRuntimeData:
-    """Stand-in for the IntegrationData on entry.runtime_data."""
-
-    handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-@dataclass
-class _MockEntry:
-    """Stand-in for HA's ConfigEntry. Carries runtime_data."""
-
-    entry_id: str = "mock_entry"
-    runtime_data: _MockRuntimeData = field(default_factory=_MockRuntimeData)
-
-
-@dataclass
-class _MockConfigEntries:
-    """Stand-in for ``hass.config_entries``.
-
-    The handler's ``_instances`` accessor uses
-    ``hass.config_entries.async_entries(DOMAIN)`` to find
-    the (single-instance) integration's entry; this mock
-    returns whatever entries the test stashed.
+    The handler's ``_instances`` accessor reads
+    ``hass.config_entries.async_entries(DOMAIN)``, so seeding
+    one entry up-front keeps each test from having to wire
+    it explicitly.
     """
-
-    entries: list[_MockEntry] = field(default_factory=list)
-
-    def async_entries(self, _domain: str) -> list[_MockEntry]:
-        return self.entries
-
-
-@dataclass
-class _MockHass:
-    services: _MockServices = field(default_factory=_MockServices)
-    data: dict[str, Any] = field(default_factory=dict)
-    config_entries: _MockConfigEntries = field(
-        default_factory=_MockConfigEntries,
-    )
-
-    def __post_init__(self) -> None:
-        # Seed a single config entry so the handler's
-        # ``_instances`` accessor finds runtime_data
-        # without each test having to wire it up.
-        self.config_entries.entries.append(_MockEntry())
+    h = MockHass()
+    h.config_entries.entries.append(MockEntry())
+    return h
 
 
 def _reset_acl_state() -> None:
@@ -201,7 +148,7 @@ def _make_state(
 
 class TestOnReload:
     def test_cancels_every_pending_wakeup(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         cancelled: list[str] = []
 
         def _make_canceller(name: str) -> Callable[[], None]:
@@ -236,7 +183,7 @@ class TestOnReload:
 
 class TestOnEntityRemove:
     def test_drops_state_and_cancels_wakeup(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         cancelled: list[str] = []
         instances = handler._instances(hass)  # type: ignore[arg-type]
         instances["automation.gone"] = _make_state(
@@ -254,7 +201,7 @@ class TestOnEntityRemove:
         assert cancelled == ["gone"]
 
     def test_no_crash_when_instance_unknown(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         # Fresh hass.data; calling on an unknown id should not raise.
         handler._on_entity_remove(  # type: ignore[arg-type]
             hass,
@@ -262,7 +209,7 @@ class TestOnEntityRemove:
         )
 
     def test_no_crash_when_no_pending_wakeup(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         instances = handler._instances(hass)  # type: ignore[arg-type]
         instances["automation.foo"] = _make_state(
             "automation.foo",
@@ -274,7 +221,7 @@ class TestOnEntityRemove:
 
 class TestOnEntityRename:
     def test_moves_state_to_new_id(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         instances = handler._instances(hass)  # type: ignore[arg-type]
         old_state = _make_state("automation.old")
         instances["automation.old"] = old_state
@@ -290,7 +237,7 @@ class TestOnEntityRename:
         assert old_state.instance_id == "automation.new"
 
     def test_no_crash_when_unknown_old_id(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         handler._on_entity_rename(  # type: ignore[arg-type]
             hass,
             "automation.unknown",
@@ -300,7 +247,7 @@ class TestOnEntityRename:
 
 class TestOnTeardown:
     def test_cancels_all_and_clears_map(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         cancelled: list[str] = []
         instances = handler._instances(hass)  # type: ignore[arg-type]
         instances["automation.a"] = _make_state(
@@ -326,9 +273,9 @@ class TestOnTeardown:
 class TestApplyAutoOffAt:
     def test_arms_wakeup_at_correct_delay(self) -> None:
         _reset_acl_state()
-        hass = _MockHass()
+        hass = _make_hass()
         state = _make_state()
-        target = _FrozenNow.value + timedelta(minutes=2)
+        target = FrozenNow.value + timedelta(minutes=2)
 
         handler._apply_auto_off_at(hass, state, target)  # type: ignore[arg-type]
 
@@ -341,11 +288,11 @@ class TestApplyAutoOffAt:
 
     def test_clears_pending_wakeup_when_auto_off_none(self) -> None:
         _reset_acl_state()
-        hass = _MockHass()
+        hass = _make_hass()
         cancelled: list[bool] = []
         state = _make_state(
             cancel_wakeup=lambda: cancelled.append(True),
-            auto_off_at=_FrozenNow.value + timedelta(minutes=5),
+            auto_off_at=FrozenNow.value + timedelta(minutes=5),
         )
 
         handler._apply_auto_off_at(hass, state, None)  # type: ignore[arg-type]
@@ -357,12 +304,12 @@ class TestApplyAutoOffAt:
 
     def test_replaces_prior_wakeup(self) -> None:
         _reset_acl_state()
-        hass = _MockHass()
+        hass = _make_hass()
         cancelled: list[bool] = []
         state = _make_state(
             cancel_wakeup=lambda: cancelled.append(True),
         )
-        target = _FrozenNow.value + timedelta(minutes=3)
+        target = FrozenNow.value + timedelta(minutes=3)
 
         handler._apply_auto_off_at(hass, state, target)  # type: ignore[arg-type]
 
@@ -372,9 +319,9 @@ class TestApplyAutoOffAt:
 
     def test_past_target_clamps_delay_to_zero(self) -> None:
         _reset_acl_state()
-        hass = _MockHass()
+        hass = _make_hass()
         state = _make_state()
-        target = _FrozenNow.value - timedelta(minutes=1)
+        target = FrozenNow.value - timedelta(minutes=1)
 
         handler._apply_auto_off_at(hass, state, target)  # type: ignore[arg-type]
 
@@ -394,20 +341,20 @@ class TestMakeWakeup:
     async def test_fires_automation_trigger_with_synthetic_timer(
         self,
     ) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         instances = handler._instances(hass)  # type: ignore[arg-type]
         # The wakeup closure looks up its instance by id and
         # bails if absent. Pre-arm a fake state so it
         # proceeds to the service call.
         state = _make_state(
             "automation.foo",
-            auto_off_at=_FrozenNow.value + timedelta(minutes=1),
+            auto_off_at=FrozenNow.value + timedelta(minutes=1),
             cancel_wakeup=lambda: None,
         )
         instances["automation.foo"] = state
         wakeup = handler._make_wakeup(hass, "automation.foo")  # type: ignore[arg-type]
 
-        await wakeup(_FrozenNow.value)
+        await wakeup(FrozenNow.value)
 
         # The closure cleared the cancel handle now that the
         # timer has fired.
@@ -449,7 +396,7 @@ class TestMakeWakeup:
         # context) instead of generating a fresh per-run
         # context, which would break logbook attribution
         # of the downstream ``homeassistant.turn_off``.
-        hass = _MockHass()
+        hass = _make_hass()
         instances = handler._instances(hass)  # type: ignore[arg-type]
         instances["automation.foo"] = _make_state(
             "automation.foo",
@@ -457,19 +404,19 @@ class TestMakeWakeup:
         )
         wakeup = handler._make_wakeup(hass, "automation.foo")  # type: ignore[arg-type]
 
-        await wakeup(_FrozenNow.value)
+        await wakeup(FrozenNow.value)
 
         assert "context" not in hass.services.kwargs[0]
 
     @pytest.mark.asyncio
     async def test_no_op_when_instance_state_gone(self) -> None:
-        hass = _MockHass()
+        hass = _make_hass()
         wakeup = handler._make_wakeup(  # type: ignore[arg-type]
             hass,
             "automation.never_seen",
         )
         # Should be a clean no-op: no service call.
-        await wakeup(_FrozenNow.value)
+        await wakeup(FrozenNow.value)
         assert hass.services.calls == []
 
 
@@ -478,32 +425,19 @@ class TestMakeWakeup:
 # --------------------------------------------------------
 
 
-class TestKickForRecovery:
-    @pytest.mark.asyncio
-    async def test_emits_synthetic_timer_trigger(self) -> None:
-        hass = _MockHass()
-        await handler._async_kick_for_recovery(  # type: ignore[arg-type]
-            hass,
-            "automation.foo",
-        )
-        assert hass.services.calls == [
-            (
-                "automation",
-                "trigger",
-                {
-                    "entity_id": "automation.foo",
-                    "skip_condition": True,
-                    "variables": {
-                        "trigger_entity_id": (handler._TIMER_TRIGGER_ENTITY_ID),
-                        "trigger_to_state": "",
-                    },
-                },
-            ),
-        ]
+class TestKickWiring:
+    def test_spec_kick_variables_match(self) -> None:
+        # Synthetic-TIMER payload the dispatcher fires
+        # against each TEC automation at startup recovery.
+        # ``trigger_entity_id == "timer"`` reaches the
+        # catch-up branch in ``logic._handle_timer``.
+        assert handler._SPEC.kick_variables == {
+            "trigger_entity_id": handler._TIMER_TRIGGER_ENTITY_ID,
+            "trigger_to_state": "",
+        }
         # Regression guard against re-introducing the
-        # ``trigger.*`` namespace -- see _make_wakeup
-        # docstring for why HA strips it.
-        assert "trigger" not in hass.services.calls[0][2]["variables"]
+        # ``trigger.*`` namespace -- HA strips it.
+        assert "trigger" not in (handler._SPEC.kick_variables or {})
 
 
 # --------------------------------------------------------

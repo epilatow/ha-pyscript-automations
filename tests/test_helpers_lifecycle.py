@@ -820,7 +820,7 @@ class TestRegisterBlueprintHandler:
         hass = _MockHass(is_running=True)
 
         entry = _MockEntry()
-        spec = _make_spec(kick=_kick_stub)
+        spec = _make_spec(kick_variables={"trigger_id": "test"})
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
             entry,  # type: ignore[arg-type]
@@ -845,7 +845,7 @@ class TestRegisterBlueprintHandler:
         hass = _MockHass(is_running=False)
 
         entry = _MockEntry()
-        spec = _make_spec(kick=_kick_stub)
+        spec = _make_spec(kick_variables={"trigger_id": "test"})
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
             entry,  # type: ignore[arg-type]
@@ -883,7 +883,7 @@ class TestRegisterBlueprintHandler:
         hass = _MockHass(is_running=True)
 
         entry = _MockEntry()
-        spec = _make_spec(kick=_kick_stub)
+        spec = _make_spec(kick_variables={"trigger_id": "test"})
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
             entry,  # type: ignore[arg-type]
@@ -933,7 +933,7 @@ class TestUnregisterBlueprintHandler:
 
         entry = _MockEntry()
         spec = _make_spec(
-            kick=_kick_stub,
+            kick_variables={"trigger_id": "test"},
             on_entity_remove=lambda _h, _e: None,
         )
         await helpers.register_blueprint_handler(
@@ -1005,7 +1005,7 @@ class TestUnregisterBlueprintHandler:
         hass = _MockHass(is_running=False)
 
         entry = _MockEntry()
-        spec = _make_spec(kick=_kick_stub)
+        spec = _make_spec(kick_variables={"trigger_id": "test"})
         await helpers.register_blueprint_handler(
             hass,  # type: ignore[arg-type]
             entry,  # type: ignore[arg-type]
@@ -1197,7 +1197,7 @@ class TestListenerDispatch:
         entry = _MockEntry()
         on_reload_calls: list[bool] = []
         spec = _make_spec(
-            kick=_kick_stub,
+            kick_variables={"trigger_id": "test"},
             on_reload=lambda _h: on_reload_calls.append(True),
         )
         await helpers.register_blueprint_handler(

@@ -2,33 +2,54 @@
 """Shared helpers for blueprint_toolkit subpackages.
 
 Utility surface that subpackage logic + handler modules
-share. Lifted incrementally as ports land (today: TEC;
-future: DW, EDW, RW, STSC, ZWRM).
+share across all six native ports (DW, EDW, RW, STSC,
+TEC, ZRM).
 
 Three flavours of symbol live here:
 
-- **Pure** (no HA imports): ``format_timestamp``,
-  ``format_notification``, ``md_escape``, ``slugify``,
-  ``matches_pattern``, ``validate_and_join_regex_patterns``,
+- **Pure** (no HA imports anywhere): ``notification_prefix``,
+  ``resolve_target_integrations``, ``format_timestamp``,
+  ``format_notification``, ``parse_notification_service``,
+  ``md_escape``, ``slugify``, ``matches_pattern``,
+  ``validate_and_join_regex_patterns``,
   ``PersistentNotification``,
   ``make_config_error_notification``,
-  ``parse_entity_registry_update``. Safe to import from
-  non-HA test environments.
-- **Runtime-HA** (uses the runtime ``hass`` argument
-  but doesn't import HA at module scope):
+  ``instance_id_for_config_error``,
+  ``parse_entity_registry_update``,
+  ``instance_state_entity_id``, ``CappableResult``,
+  ``IssueNotification``, ``BlueprintHandlerSpec``,
+  ``LifecycleMutators``. Safe to import from non-HA test
+  environments.
+- **Runtime-HA** (takes a runtime ``hass`` / ``entry`` /
+  ``ConfigEntry`` arg but doesn't import HA inside the
+  function): ``entry_for_domain``,
+  ``all_integration_ids``,
   ``process_persistent_notifications``,
-  ``emit_config_error``,
+  ``process_persistent_notifications_with_sweep``,
+  ``emit_config_error``, ``make_emit_config_error``,
   ``validate_payload_or_emit_config_error``,
-  ``recover_at_startup``. Module import succeeds outside
-  HA; calling the function needs a real ``HomeAssistant``
-  instance.
-- **Lifecycle** (late-imports HA inside the function):
+  ``prepare_notifications``, ``automation_friendly_name``,
+  ``update_instance_state``,
+  ``make_periodic_trigger_callback``,
+  ``kick_via_automation_trigger``, ``spec_bucket``. Module
+  import succeeds outside HA; calling the function needs
+  the real HA object the signature names.
+- **Lifecycle** (late-imports HA inside the function so
+  module import stays cheap): ``cv_ha_domain_list``,
   ``discover_automations_using_blueprint``,
+  ``recover_at_startup``,
+  ``schedule_periodic_with_jitter``,
+  ``make_lifecycle_mutators``,
   ``register_blueprint_handler``,
-  ``unregister_blueprint_handler``,
-  ``schedule_periodic_with_jitter``. Module import still
+  ``unregister_blueprint_handler``. Module import still
   succeeds outside HA; calling these forces the late
   import.
+
+When you add a new public symbol to this file, classify
+it into the right group above. The classification is the
+contract that lets test-only code import what it needs
+without dragging in HA at module-scope; leaving a new
+helper unclassified silently breaks that contract.
 
 Subsystem identifier convention:
 
@@ -1284,6 +1305,219 @@ def schedule_periodic_with_jitter(
 
 
 # --------------------------------------------------------
+# Periodic-tick + automation.trigger helpers
+# --------------------------------------------------------
+
+
+def make_periodic_trigger_callback(
+    hass: HomeAssistant,
+    instance_id: str,
+    *,
+    instances_getter: Callable[[HomeAssistant], dict[str, Any]],
+    service_tag: str,
+    logger: logging.Logger,
+    extra_variables: dict[str, Any] | None = None,
+) -> Callable[[datetime], Awaitable[Any]]:
+    """Build the canonical periodic-tick callback for blueprint handlers.
+
+    Returns an async callable suitable for
+    ``schedule_periodic_with_jitter`` /
+    ``async_track_time_interval`` which fires
+    ``automation.trigger`` against ``instance_id`` with
+    ``trigger_id="periodic"`` plus any caller-supplied
+    ``extra_variables`` merged in flat (NOT under
+    ``trigger.*`` -- HA's ``automation.trigger`` service
+    unconditionally clobbers the ``trigger`` key with
+    ``{"platform": None}``).
+
+    Drops silently if the instance has been removed between
+    scheduling and firing -- callers pass an
+    ``instances_getter`` that returns the per-handler
+    instance map keyed by automation entity_id.
+
+    Swallows + WARN-logs ``automation.trigger`` failures.
+    A single failed tick is a self-healing transient (the
+    next tick fires anyway), and surfacing the exception
+    would knock the timer task down. ``service_tag`` and
+    ``logger`` parameterize the log line so each handler's
+    operator sees ``[STSC] periodic automation.trigger
+    failed for <entity>`` (or its ``[DW]`` / ``[EDW]`` /
+    etc. equivalent).
+    """
+    base_vars: dict[str, Any] = {"trigger_id": "periodic"}
+    if extra_variables:
+        base_vars.update(extra_variables)
+
+    async def _on_tick(_now: datetime) -> None:
+        if instance_id not in instances_getter(hass):
+            return
+        try:
+            await hass.services.async_call(
+                "automation",
+                "trigger",
+                {
+                    "entity_id": instance_id,
+                    "skip_condition": True,
+                    "variables": dict(base_vars),
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "[%s] periodic automation.trigger failed for %s;"
+                " next tick will retry",
+                service_tag,
+                instance_id,
+                exc_info=True,
+            )
+
+    return _on_tick
+
+
+async def kick_via_automation_trigger(
+    hass: HomeAssistant,
+    entity_id: str,
+    variables: dict[str, Any],
+) -> None:
+    """Fire ``automation.trigger`` against ``entity_id``.
+
+    Used by every handler's ``kick`` lifecycle hook to
+    bootstrap restart-recovery, and by any other synthetic
+    invocation path (manual scans, etc.). ``variables``
+    keys must be flat (NOT under ``trigger.*``) -- HA's
+    ``automation.trigger`` service unconditionally clobbers
+    the ``trigger`` key with ``{"platform": None}``, so any
+    nested ``trigger:`` overrides get silently dropped.
+    """
+    await hass.services.async_call(
+        "automation",
+        "trigger",
+        {
+            "entity_id": entity_id,
+            "skip_condition": True,
+            "variables": dict(variables),
+        },
+    )
+
+
+# --------------------------------------------------------
+# Lifecycle mutator factory
+# --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LifecycleMutators:
+    """The four standard per-instance mutator callbacks.
+
+    Returned by ``make_lifecycle_mutators``; each field
+    matches the corresponding hook on
+    ``BlueprintHandlerSpec`` so callers can wire them
+    directly:
+
+    .. code-block:: python
+
+        _MUTATORS = make_lifecycle_mutators(...)
+        _SPEC = BlueprintHandlerSpec(
+            ...,
+            on_reload=_MUTATORS.on_reload,
+            on_entity_remove=_MUTATORS.on_entity_remove,
+            on_entity_rename=_MUTATORS.on_entity_rename,
+            on_teardown=_MUTATORS.on_teardown,
+        )
+    """
+
+    on_reload: Callable[[HomeAssistant], None]
+    on_entity_remove: Callable[[HomeAssistant, str], None]
+    on_entity_rename: Callable[[HomeAssistant, str, str], None]
+    on_teardown: Callable[[HomeAssistant], None]
+
+
+def make_lifecycle_mutators(
+    *,
+    instances_getter: Callable[[HomeAssistant], dict[str, Any]],
+    cancel_field: str,
+    service_tag: str,
+    logger: logging.Logger,
+    reset_armed_interval_on_reload: bool = False,
+) -> LifecycleMutators:
+    """Build the four standard lifecycle mutator callbacks.
+
+    Every blueprint handler keeps a per-instance state map
+    keyed by automation entity_id and shares an
+    almost-identical shape for the four mutator callbacks
+    plumbed through ``BlueprintHandlerSpec``: cancel pending
+    timers / wakeups on reload, drop tracked state on
+    removal, move tracked state on rename, clear everything
+    on teardown.
+
+    ``cancel_field`` is the attribute name of the cancel-
+    callable on each instance-state object (typically
+    ``cancel_timer`` for periodic handlers,
+    ``cancel_wakeup`` for one-shot handlers like TEC).
+    Reading via ``getattr`` keeps this generic across the
+    field-name variants without forcing a shared dataclass
+    base.
+
+    ``reset_armed_interval_on_reload`` clears
+    ``armed_interval_minutes`` to 0 on reload; set ``True``
+    for handlers whose ``_ensure_timer`` re-arm decision
+    compares against this field (DW / EDW / RW / ZRM) and
+    leave ``False`` for handlers with no such field
+    (STSC / TEC).
+    """
+    from homeassistant.core import callback  # noqa: PLC0415
+
+    @callback  # type: ignore[untyped-decorator]
+    def _on_reload(hass: HomeAssistant) -> None:
+        for s in list(instances_getter(hass).values()):
+            cancel = getattr(s, cancel_field, None)
+            if cancel is not None:
+                cancel()
+                setattr(s, cancel_field, None)
+                if reset_armed_interval_on_reload:
+                    s.armed_interval_minutes = 0
+
+    @callback  # type: ignore[untyped-decorator]
+    def _on_entity_remove(hass: HomeAssistant, entity_id: str) -> None:
+        s = instances_getter(hass).pop(entity_id, None)
+        if s is None:
+            return
+        cancel = getattr(s, cancel_field, None)
+        if cancel is not None:
+            cancel()
+            logger.info(
+                "[%s] dropped %s (automation removed)",
+                service_tag,
+                entity_id,
+            )
+
+    @callback  # type: ignore[untyped-decorator]
+    def _on_entity_rename(
+        hass: HomeAssistant,
+        old_id: str,
+        new_id: str,
+    ) -> None:
+        s = instances_getter(hass).pop(old_id, None)
+        if s is not None:
+            s.instance_id = new_id
+            instances_getter(hass)[new_id] = s
+
+    @callback  # type: ignore[untyped-decorator]
+    def _on_teardown(hass: HomeAssistant) -> None:
+        for s in list(instances_getter(hass).values()):
+            cancel = getattr(s, cancel_field, None)
+            if cancel is not None:
+                cancel()
+        instances_getter(hass).clear()
+
+    return LifecycleMutators(
+        on_reload=_on_reload,
+        on_entity_remove=_on_entity_remove,
+        on_entity_rename=_on_entity_rename,
+        on_teardown=_on_teardown,
+    )
+
+
+# --------------------------------------------------------
 # Entity-registry event parsing
 # --------------------------------------------------------
 
@@ -1353,18 +1587,24 @@ class BlueprintHandlerSpec:
     watchdog) gets just the service registration.
 
     Lifecycle hooks:
-        kick: When set, restart-recovery is enabled --
-            at HA-started time, every automation using
-            ``blueprint_path`` is discovered and ``kick``
-            is invoked with its entity_id. The
-            automation_reload listener also re-runs
-            recovery. Most handlers want this.
+        kick_variables: When set, restart-recovery is
+            enabled. At HA-started time + after every
+            ``EVENT_AUTOMATION_RELOADED``, the dispatcher
+            walks every automation using ``blueprint_path``
+            and fires ``automation.trigger`` against each
+            with this flat top-level ``variables`` payload.
+            Per-handler ``_async_kick_for_recovery``
+            wrappers used to live in each port; the spec
+            now carries just the payload and the
+            ``register_blueprint_handler`` dispatcher
+            builds the call via
+            ``kick_via_automation_trigger``.
         on_reload: When set, ``EVENT_AUTOMATION_RELOADED``
             invokes this synchronously (typical use:
             cancel pending per-instance work whose
             AutomationEntity objects have been
             replaced). Recovery still runs afterwards
-            if ``kick`` is also set.
+            if ``kick_variables`` is also set.
         on_entity_remove: When set, an automation's
             entity-registry remove event invokes this
             with its entity_id (typical use: drop
@@ -1384,7 +1624,7 @@ class BlueprintHandlerSpec:
     service_name: str
     blueprint_path: str
     service_handler: Callable[[HomeAssistant, ServiceCall], Awaitable[None]]
-    kick: Callable[[HomeAssistant, str], Awaitable[None]] | None = None
+    kick_variables: dict[str, Any] | None = None
     on_reload: Callable[[HomeAssistant], None] | None = None
     on_entity_remove: Callable[[HomeAssistant, str], None] | None = None
     on_entity_rename: Callable[[HomeAssistant, str, str], None] | None = None
@@ -1465,7 +1705,22 @@ async def register_blueprint_handler(
     on_reload = spec.on_reload
     on_entity_remove = spec.on_entity_remove
     on_entity_rename = spec.on_entity_rename
-    kick = spec.kick
+    # The ``kick`` action is derived from ``spec.kick_variables``
+    # if set: every per-port kick is just an
+    # ``automation.trigger`` with a flat-variables payload, so
+    # the spec carries the payload and the dispatcher builds
+    # the action. Per-handler ``_async_kick_for_recovery``
+    # wrappers have all been deleted.
+    kick: Callable[[HomeAssistant, str], Awaitable[None]] | None
+    if spec.kick_variables is not None:
+        kick_variables = spec.kick_variables
+
+        async def _kick(hass: HomeAssistant, entity_id: str) -> None:
+            await kick_via_automation_trigger(hass, entity_id, kick_variables)
+
+        kick = _kick
+    else:
+        kick = None
 
     # --- Reload listener (if any per-reload behaviour
     # is configured) ---

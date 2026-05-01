@@ -48,7 +48,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
@@ -59,6 +59,8 @@ from ..helpers import (
     entry_for_domain,
     instance_state_entity_id,
     make_emit_config_error,
+    make_lifecycle_mutators,
+    make_periodic_trigger_callback,
     parse_notification_service,
     process_persistent_notifications_with_sweep,
     register_blueprint_handler,
@@ -552,78 +554,14 @@ def _ensure_timer(
         entry,
         interval=_PERIODIC_INTERVAL,
         instance_id=state.instance_id,
-        action=_make_periodic_callback(hass, state.instance_id),
-    )
-
-
-def _make_periodic_callback(
-    hass: HomeAssistant,
-    instance_id: str,
-) -> Callable[[datetime], Any]:
-    async def _on_tick(_now: datetime) -> None:
-        # Drop the tick silently if the instance has been
-        # removed between scheduling and firing.
-        if instance_id not in _instances(hass):
-            return
-        # Override variables are flat (NOT under ``trigger.*``)
-        # because HA's automation.trigger service
-        # unconditionally clobbers the ``trigger`` key with
-        # ``{"platform": None}``. The blueprint reads
-        # ``trigger_id`` + ``trigger_entity`` directly.
-        try:
-            await hass.services.async_call(
-                "automation",
-                "trigger",
-                {
-                    "entity_id": instance_id,
-                    "skip_condition": True,
-                    "variables": {
-                        "trigger_id": "periodic",
-                        "trigger_entity": _TIMER_TRIGGER_ENTITY,
-                    },
-                },
-            )
-        except Exception:  # noqa: BLE001
-            # Swallow + log: a single failed tick is a
-            # self-healing transient (the next tick fires
-            # anyway), and surfacing it would knock the
-            # timer task down.
-            _LOGGER.warning(
-                "[%s] periodic automation.trigger failed for %s;"
-                " next tick will retry",
-                _SERVICE_TAG,
-                instance_id,
-                exc_info=True,
-            )
-
-    return _on_tick
-
-
-async def _async_kick_for_recovery(
-    hass: HomeAssistant,
-    entity_id: str,
-) -> None:
-    """Fire a manual scan so the instance bootstraps its timer.
-
-    Override variables are flat (NOT under ``trigger.*``);
-    see ``_make_periodic_callback`` for the full reasoning.
-    The blueprint's reactive triggers don't carry
-    ``trigger_id`` / ``trigger_entity`` defaults from the
-    integration; the kick supplies sensible fallbacks so
-    the controller's event-type determination has the
-    "timer" sentinel.
-    """
-    await hass.services.async_call(
-        "automation",
-        "trigger",
-        {
-            "entity_id": entity_id,
-            "skip_condition": True,
-            "variables": {
-                "trigger_id": "manual",
-                "trigger_entity": _TIMER_TRIGGER_ENTITY,
-            },
-        },
+        action=make_periodic_trigger_callback(
+            hass,
+            state.instance_id,
+            instances_getter=_instances,
+            service_tag=_SERVICE_TAG,
+            logger=_LOGGER,
+            extra_variables={"trigger_entity": _TIMER_TRIGGER_ENTITY},
+        ),
     )
 
 
@@ -632,45 +570,16 @@ async def _async_kick_for_recovery(
 # --------------------------------------------------------
 
 
-@callback  # type: ignore[untyped-decorator]
-def _on_reload(hass: HomeAssistant) -> None:
-    """Cancel timers; per-instance state survives reload."""
-    for s in list(_instances(hass).values()):
-        if s.cancel_timer is not None:
-            s.cancel_timer()
-            s.cancel_timer = None
-
-
-@callback  # type: ignore[untyped-decorator]
-def _on_entity_remove(hass: HomeAssistant, entity_id: str) -> None:
-    s = _instances(hass).pop(entity_id, None)
-    if s is not None and s.cancel_timer is not None:
-        s.cancel_timer()
-        _LOGGER.info(
-            "[%s] dropped %s (automation removed)",
-            _SERVICE_TAG,
-            entity_id,
-        )
-
-
-@callback  # type: ignore[untyped-decorator]
-def _on_entity_rename(
-    hass: HomeAssistant,
-    old_id: str,
-    new_id: str,
-) -> None:
-    s = _instances(hass).pop(old_id, None)
-    if s is not None:
-        s.instance_id = new_id
-        _instances(hass)[new_id] = s
-
-
-@callback  # type: ignore[untyped-decorator]
-def _on_teardown(hass: HomeAssistant) -> None:
-    for s in list(_instances(hass).values()):
-        if s.cancel_timer is not None:
-            s.cancel_timer()
-    _instances(hass).clear()
+_MUTATORS = make_lifecycle_mutators(
+    instances_getter=_instances,
+    cancel_field="cancel_timer",
+    service_tag=_SERVICE_TAG,
+    logger=_LOGGER,
+)
+_on_reload = _MUTATORS.on_reload
+_on_entity_remove = _MUTATORS.on_entity_remove
+_on_entity_rename = _MUTATORS.on_entity_rename
+_on_teardown = _MUTATORS.on_teardown
 
 
 # --------------------------------------------------------
@@ -684,7 +593,15 @@ _SPEC = BlueprintHandlerSpec(
     service_name=_SERVICE_NAME,
     blueprint_path=BLUEPRINT_PATH,
     service_handler=_async_entrypoint,
-    kick=_async_kick_for_recovery,
+    # The blueprint's reactive triggers don't carry
+    # ``trigger_id`` / ``trigger_entity`` defaults; the
+    # synthetic kick supplies sensible fallbacks so the
+    # controller's event-type determination has the
+    # "timer" sentinel.
+    kick_variables={
+        "trigger_id": "manual",
+        "trigger_entity": _TIMER_TRIGGER_ENTITY,
+    },
     on_reload=_on_reload,
     on_entity_remove=_on_entity_remove,
     on_entity_rename=_on_entity_rename,

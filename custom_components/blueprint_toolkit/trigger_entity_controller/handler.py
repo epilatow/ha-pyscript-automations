@@ -56,7 +56,6 @@ from homeassistant.core import (
     Context,
     HomeAssistant,
     ServiceCall,
-    callback,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_call_later
@@ -68,6 +67,7 @@ from ..helpers import (
     automation_friendly_name,
     format_notification,
     make_emit_config_error,
+    make_lifecycle_mutators,
     parse_notification_service,
     register_blueprint_handler,
     spec_bucket,
@@ -621,83 +621,16 @@ def _make_wakeup(
 # and the HA-started recovery scheduler.
 
 
-async def _async_kick_for_recovery(
-    hass: HomeAssistant,
-    entity_id: str,
-) -> None:
-    """Fire one TIMER event so the catch-up branch arms its timer.
-
-    The variables payload is TEC-specific: synthetic
-    ``trigger_entity_id == "timer"`` reaches the
-    catch-up / expiration branch in
-    ``logic._handle_timer``. Variables are flat (NOT
-    under ``trigger.*``); see ``_make_wakeup`` for the
-    full reasoning.
-    """
-    await hass.services.async_call(
-        "automation",
-        "trigger",
-        {
-            "entity_id": entity_id,
-            "skip_condition": True,
-            "variables": {
-                "trigger_entity_id": _TIMER_TRIGGER_ENTITY_ID,
-                "trigger_to_state": "",
-            },
-        },
-    )
-
-
-@callback  # type: ignore[untyped-decorator]
-def _on_reload(hass: HomeAssistant) -> None:
-    """Cancel pending wakeups whose AutomationEntity was replaced.
-
-    Called on EVENT_AUTOMATION_RELOADED. Don't drop
-    instance state -- entity_ids survive reload and we
-    want to preserve diagnostic last_action / last_reason
-    between events. The auto_off_at field gets
-    re-derived by the catch-up kick the shared listener
-    runs after this returns.
-    """
-    for s in list(_instances(hass).values()):
-        if s.cancel_wakeup is not None:
-            s.cancel_wakeup()
-            s.cancel_wakeup = None
-
-
-@callback  # type: ignore[untyped-decorator]
-def _on_entity_remove(hass: HomeAssistant, entity_id: str) -> None:
-    """Drop tracked state when our automation is removed."""
-    s = _instances(hass).pop(entity_id, None)
-    if s is not None and s.cancel_wakeup is not None:
-        s.cancel_wakeup()
-        _LOGGER.info(
-            "[%s] dropped %s (automation removed)",
-            _SERVICE_TAG,
-            entity_id,
-        )
-
-
-@callback  # type: ignore[untyped-decorator]
-def _on_entity_rename(
-    hass: HomeAssistant,
-    old_id: str,
-    new_id: str,
-) -> None:
-    """Move tracked state to the new entity_id on rename."""
-    s = _instances(hass).pop(old_id, None)
-    if s is not None:
-        s.instance_id = new_id
-        _instances(hass)[new_id] = s
-
-
-@callback  # type: ignore[untyped-decorator]
-def _on_teardown(hass: HomeAssistant) -> None:
-    """Cancel all pending wakeups and drop the instance map."""
-    for s in list(_instances(hass).values()):
-        if s.cancel_wakeup is not None:
-            s.cancel_wakeup()
-    _instances(hass).clear()
+_MUTATORS = make_lifecycle_mutators(
+    instances_getter=_instances,
+    cancel_field="cancel_wakeup",
+    service_tag=_SERVICE_TAG,
+    logger=_LOGGER,
+)
+_on_reload = _MUTATORS.on_reload
+_on_entity_remove = _MUTATORS.on_entity_remove
+_on_entity_rename = _MUTATORS.on_entity_rename
+_on_teardown = _MUTATORS.on_teardown
 
 
 # --------------------------------------------------------
@@ -711,7 +644,16 @@ _SPEC = BlueprintHandlerSpec(
     service_name=_SERVICE_NAME,
     blueprint_path=BLUEPRINT_PATH,
     service_handler=_async_entrypoint,
-    kick=_async_kick_for_recovery,
+    # TEC-specific synthetic-TIMER payload: the dispatcher
+    # fires ``automation.trigger`` with these flat
+    # variables, and ``logic._handle_timer``'s catch-up
+    # branch picks them up via the blueprint's
+    # ``trigger_entity_id`` / ``trigger_to_state``
+    # ``is defined`` chain.
+    kick_variables={
+        "trigger_entity_id": _TIMER_TRIGGER_ENTITY_ID,
+        "trigger_to_state": "",
+    },
     on_reload=_on_reload,
     on_entity_remove=_on_entity_remove,
     on_entity_rename=_on_entity_rename,

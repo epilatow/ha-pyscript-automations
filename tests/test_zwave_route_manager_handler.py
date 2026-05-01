@@ -33,8 +33,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +42,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
 from _handler_stubs import install_homeassistant_stubs  # noqa: E402
+from _handler_test_base import (  # noqa: E402
+    FrozenNow,
+    MockEntry,
+    MockHass,
+)
 from conftest import (  # noqa: E402
     BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
@@ -50,12 +54,7 @@ from conftest import (  # noqa: E402
     HandlerArgparseGuardsBase,
 )
 
-
-class _FrozenNow:
-    value = datetime(2026, 4, 27, 12, 0, 0)
-
-
-_stubs = install_homeassistant_stubs(frozen_now=_FrozenNow.value)
+_stubs = install_homeassistant_stubs(frozen_now=FrozenNow.value)
 
 # Capture every async_track_time_interval invocation; tests
 # inspect.
@@ -100,51 +99,6 @@ handler.async_track_time_interval = _async_track_time_interval  # type: ignore[a
 # --------------------------------------------------------
 
 
-@dataclass
-class _MockServices:
-    # ``calls`` records ``(domain, name, data)``; ``kwargs``
-    # records the keyword args (``context=``, ``blocking=``)
-    # for the matching index.
-    calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
-    kwargs: list[dict[str, Any]] = field(default_factory=list)
-
-    async def async_call(
-        self,
-        domain: str,
-        name: str,
-        data: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        self.calls.append((domain, name, dict(data or {})))
-        self.kwargs.append(dict(kwargs))
-
-
-@dataclass
-class _MockRuntimeData:
-    handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-@dataclass
-class _MockEntry:
-    runtime_data: _MockRuntimeData = field(default_factory=_MockRuntimeData)
-
-
-@dataclass
-class _MockConfigEntries:
-    entries: list[_MockEntry] = field(default_factory=list)
-
-    def async_entries(self, _domain: str) -> list[_MockEntry]:
-        return list(self.entries)
-
-
-@dataclass
-class _MockHass:
-    services: _MockServices = field(default_factory=_MockServices)
-    config_entries: _MockConfigEntries = field(
-        default_factory=_MockConfigEntries
-    )
-
-
 def _reset_capture_state() -> None:
     _ATI_CALLS.clear()
     _ATI_CANCEL_CALLS.clear()
@@ -165,9 +119,9 @@ def _make_state(
 
 def _hass_with_instances(
     instances: dict[str, handler.ZrmInstanceState],
-) -> _MockHass:
-    h = _MockHass()
-    entry = _MockEntry()
+) -> MockHass:
+    h = MockHass()
+    entry = MockEntry()
     entry.runtime_data.handlers["zwave_route_manager"] = {
         "instances": instances,
         "unsubs": [],
@@ -326,104 +280,9 @@ class TestEnsureTimer:
 # --------------------------------------------------------
 
 
-class TestKickForRecovery:
-    def test_emits_manual_trigger(self) -> None:
-        h = _MockHass()
-
-        import asyncio
-
-        asyncio.run(
-            handler._async_kick_for_recovery(h, "automation.zrm")  # type: ignore[arg-type]
-        )
-
-        assert len(h.services.calls) == 1
-        domain, name, data = h.services.calls[0]
-        assert (domain, name) == ("automation", "trigger")
-        assert data["entity_id"] == "automation.zrm"
-        assert data["skip_condition"] is True
-        # Flat top-level variable, NOT under ``trigger.*`` --
-        # HA's automation.trigger service strips the
-        # ``trigger`` key. See _make_periodic_callback for
-        # the full reasoning.
-        assert data["variables"] == {"trigger_id": "manual"}
-        assert "trigger" not in data["variables"]
-
-    def test_does_not_propagate_caller_context(self) -> None:
-        # Regression guard: ``automation.trigger`` must NOT
-        # carry a ``context=`` kwarg. If it did, HA's
-        # automation runner would inherit the caller's
-        # context (the integration setup context) instead
-        # of generating a fresh per-run context, which
-        # would break logbook attribution of the
-        # downstream service calls inside the blueprint's
-        # action.
-        import asyncio
-
-        h = _MockHass()
-        asyncio.run(
-            handler._async_kick_for_recovery(h, "automation.zrm")  # type: ignore[arg-type]
-        )
-        assert len(h.services.kwargs) == 1
-        assert "context" not in h.services.kwargs[0]
-
-
-class TestPeriodicCallback:
-    def test_does_not_propagate_caller_context(self) -> None:
-        # Same regression guard for the integration-owned
-        # periodic timer's ``automation.trigger`` call.
-        import asyncio
-
-        s = _make_state("automation.zrm")
-        h = _hass_with_instances({"automation.zrm": s})
-
-        cb = handler._make_periodic_callback(h, "automation.zrm")  # type: ignore[arg-type]
-        asyncio.run(cb(_FrozenNow.value))
-
-        assert len(h.services.kwargs) == 1
-        assert "context" not in h.services.kwargs[0]
-        # And ``trigger_id`` must be "periodic" so the
-        # service handler can distinguish integration-fired
-        # ticks from manual invocations (dev tools, the
-        # restart-recovery and reload-recovery kicks). The
-        # variable is flat (NOT nested under ``trigger.*``);
-        # HA's automation.trigger service strips that key.
-        _domain, _name, data = h.services.calls[0]
-        assert data["variables"] == {"trigger_id": "periodic"}
-        assert "trigger" not in data["variables"]
-
-    def test_no_op_when_instance_state_gone(self) -> None:
-        # If the automation has been removed between
-        # scheduling and firing, the timer must drop the
-        # tick silently rather than fire automation.trigger
-        # against an entity HA no longer knows about.
-        import asyncio
-
-        h = _hass_with_instances({})
-        cb = handler._make_periodic_callback(h, "automation.never_seen")  # type: ignore[arg-type]
-        asyncio.run(cb(_FrozenNow.value))
-        assert h.services.calls == []
-
-    def test_callback_swallows_automation_trigger_failure(self) -> None:
-        """A failing ``automation.trigger`` (e.g. the
-        automation entity was deleted between scheduling
-        and firing) must not propagate out of the timer
-        callback. Defence-in-depth: a single failed tick is
-        a self-healing transient -- the next tick fires
-        anyway.
-        """
-        import asyncio
-
-        s = _make_state("automation.zrm")
-        h = _hass_with_instances({"automation.zrm": s})
-
-        async def _raise(*_args: Any, **_kwargs: Any) -> None:
-            raise RuntimeError("automation gone")
-
-        h.services.async_call = _raise  # type: ignore[assignment]
-        cb = handler._make_periodic_callback(h, "automation.zrm")  # type: ignore[arg-type]
-
-        # Should not raise.
-        asyncio.run(cb(_FrozenNow.value))
+class TestKickWiring:
+    def test_spec_kick_variables_match(self) -> None:
+        assert handler._SPEC.kick_variables == {"trigger_id": "manual"}
 
 
 # --------------------------------------------------------

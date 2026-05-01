@@ -30,8 +30,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +39,13 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # noqa: E402
 from _handler_stubs import install_homeassistant_stubs  # noqa: E402
+from _handler_test_base import (  # noqa: E402
+    ArgparseCapture,
+    FakeServiceCall,
+    FrozenNow,
+    MockEntry,
+    MockHass,
+)
 from conftest import (  # noqa: E402
     BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
@@ -47,62 +53,11 @@ from conftest import (  # noqa: E402
     HandlerArgparseGuardsBase,
 )
 
-
-class _FrozenNow:
-    value = datetime(2026, 4, 28, 23, 0, 0)
-
-
-_stubs = install_homeassistant_stubs(frozen_now=_FrozenNow.value)
+_stubs = install_homeassistant_stubs(frozen_now=FrozenNow.value)
 
 from custom_components.blueprint_toolkit.device_watchdog import (  # noqa: E402, E501
     handler,
 )
-
-# --------------------------------------------------------
-# Mock hass surface
-# --------------------------------------------------------
-
-
-@dataclass
-class _MockServices:
-    calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
-    kwargs: list[dict[str, Any]] = field(default_factory=list)
-
-    async def async_call(
-        self,
-        domain: str,
-        name: str,
-        data: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        self.calls.append((domain, name, dict(data or {})))
-        self.kwargs.append(dict(kwargs))
-
-
-@dataclass
-class _MockRuntimeData:
-    handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-@dataclass
-class _MockEntry:
-    runtime_data: _MockRuntimeData = field(default_factory=_MockRuntimeData)
-
-
-@dataclass
-class _MockConfigEntries:
-    entries: list[_MockEntry] = field(default_factory=list)
-
-    def async_entries(self, _domain: str) -> list[_MockEntry]:
-        return list(self.entries)
-
-
-@dataclass
-class _MockHass:
-    services: _MockServices = field(default_factory=_MockServices)
-    config_entries: _MockConfigEntries = field(
-        default_factory=_MockConfigEntries
-    )
 
 
 def _make_state(
@@ -120,9 +75,9 @@ def _make_state(
 
 def _hass_with_instances(
     instances: dict[str, handler.DwInstanceState],
-) -> _MockHass:
-    h = _MockHass()
-    entry = _MockEntry()
+) -> MockHass:
+    h = MockHass()
+    entry = MockEntry()
     entry.runtime_data.handlers["device_watchdog"] = {
         "instances": instances,
         "unsubs": [],
@@ -305,24 +260,6 @@ class TestEnsureTimer:
 # --------------------------------------------------------
 
 
-@dataclass
-class _ArgparseCapture:
-    """Records the kwargs passed into ``_async_service_layer``."""
-
-    calls: list[dict[str, Any]] = field(default_factory=list)
-
-    async def __call__(self, _hass: Any, _call: Any, **kwargs: Any) -> None:
-        self.calls.append(kwargs)
-
-
-class _FakeServiceCall:
-    """Bare-minimum ServiceCall shape ``_async_argparse`` reads."""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        self.data = data
-        self.context = None
-
-
 def _valid_argparse_payload(**overrides: Any) -> dict[str, Any]:
     """Return a schema-valid raw payload with optional overrides."""
     payload = {
@@ -347,12 +284,12 @@ class _ArgparseHarness:
     """Shared setup/teardown for argparse-only tests.
 
     Subclasses inherit ``setup_method`` / ``teardown_method``
-    so each test gets a fresh ``_ArgparseCapture`` and a
+    so each test gets a fresh ``ArgparseCapture`` and a
     fresh ``config_errors`` capture list.
     """
 
     def setup_method(self) -> None:
-        self.capture = _ArgparseCapture()
+        self.capture = ArgparseCapture()
         self._real_service_layer = handler._async_service_layer
         handler._async_service_layer = self.capture  # type: ignore[assignment]
         self.config_errors: list[list[str]] = []
@@ -381,9 +318,9 @@ class TestArgparseEnabledChecks(_ArgparseHarness):
     def test_empty_defaults_to_all_checks(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(_valid_argparse_payload(enabled_checks_raw=[]))
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        h = MockHass()
+        call = FakeServiceCall(_valid_argparse_payload(enabled_checks_raw=[]))
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
@@ -399,13 +336,13 @@ class TestArgparseEnabledChecks(_ArgparseHarness):
     def test_unknown_value_emits_error(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 enabled_checks_raw=["unavailable-entities", "bogus-check"],
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == [], (
             "service layer must NOT run when enabled_checks has unknowns"
@@ -418,13 +355,13 @@ class TestArgparseEnabledChecks(_ArgparseHarness):
     def test_valid_subset_passes_through(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 enabled_checks_raw=["unavailable-entities"],
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.config_errors == [[]]
         assert self.capture.calls[0]["enabled_checks"] == frozenset(
@@ -453,14 +390,14 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
     def test_both_regex_fields_join_with_pipe(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 device_exclude_regex_raw="^Stale-Hub\nold-hub$",
                 entity_id_exclude_regex_raw="sensor\\.foo\nsensor\\.bar",
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
@@ -471,13 +408,13 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
     def test_helper_errors_emit_config_error_notification(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 entity_id_exclude_regex_raw="foo\n[invalid",
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == [], (
             "service layer must NOT run when argparse has errors"
@@ -488,9 +425,9 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
     def test_all_empty_fields_pass_through_clean(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(_valid_argparse_payload())
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        h = MockHass()
+        call = FakeServiceCall(_valid_argparse_payload())
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
@@ -525,14 +462,14 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
 
         handler.validate_and_join_regex_patterns = _spy  # type: ignore[assignment]
         try:
-            h = _MockHass()
-            call = _FakeServiceCall(
+            h = MockHass()
+            call = FakeServiceCall(
                 _valid_argparse_payload(
                     device_exclude_regex_raw="foo\nbar",
                     entity_id_exclude_regex_raw="baz",
                 ),
             )
-            asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+            asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
         finally:
             handler.validate_and_join_regex_patterns = real  # type: ignore[assignment]
 
@@ -560,13 +497,13 @@ class TestArgparseSlugListValidation(_ArgparseHarness):
         # `zwave_js` not `zwave-js`).
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 include_integrations_raw=["zwave-js"],
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == []
         assert len(self.config_errors) == 1
@@ -576,13 +513,13 @@ class TestArgparseSlugListValidation(_ArgparseHarness):
     def test_uppercase_domain_rejected(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 monitored_entity_domains_raw=["BadDomain"],
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == []
         assert len(self.config_errors) == 1
@@ -594,13 +531,13 @@ class TestArgparseSlugListValidation(_ArgparseHarness):
         # starts with a digit; the validator must accept it.
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 include_integrations_raw=["3_day_blinds"],
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         # Schema accepts; argparse may still reject for
         # other reasons (missing in HA), but the schema
@@ -613,13 +550,13 @@ class TestArgparseIntValidation(_ArgparseHarness):
     def test_non_numeric_check_interval_minutes_rejected(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 check_interval_minutes_raw="not-a-number",
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == []
         assert len(self.config_errors) == 1
@@ -630,13 +567,13 @@ class TestArgparseIntValidation(_ArgparseHarness):
     def test_out_of_range_max_device_notifications_rejected(self) -> None:
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 max_device_notifications_raw=9999,
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.capture.calls == []
         assert len(self.config_errors) == 1
@@ -658,13 +595,13 @@ class TestArgparseDeadThresholdConversion(_ArgparseHarness):
         # bugs there -- assert it explicitly here.
         import asyncio
 
-        h = _MockHass()
-        call = _FakeServiceCall(
+        h = MockHass()
+        call = FakeServiceCall(
             _valid_argparse_payload(
                 dead_device_threshold_minutes_raw=30,
             ),
         )
-        asyncio.run(handler._async_argparse(h, call, now=_FrozenNow.value))  # type: ignore[arg-type]
+        asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
 
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
@@ -677,98 +614,14 @@ class TestArgparseDeadThresholdConversion(_ArgparseHarness):
 # --------------------------------------------------------
 
 
-class TestKickForRecovery:
-    def test_emits_manual_trigger(self) -> None:
-        import asyncio
-
-        h = _MockHass()
-        asyncio.run(
-            handler._async_kick_for_recovery(h, "automation.dw")  # type: ignore[arg-type]
-        )
-
-        assert len(h.services.calls) == 1
-        domain, name, data = h.services.calls[0]
-        assert (domain, name) == ("automation", "trigger")
-        assert data["entity_id"] == "automation.dw"
-        assert data["skip_condition"] is True
-        # Flat top-level variable, NOT under ``trigger.*``
-        # -- HA's automation.trigger service strips the
-        # ``trigger`` key.
-        assert data["variables"] == {"trigger_id": "manual"}
-        assert "trigger" not in data["variables"]
-
-    def test_does_not_propagate_caller_context(self) -> None:
-        # Regression guard: ``automation.trigger`` MUST NOT
-        # carry a ``context=`` kwarg. If it did, HA's
-        # automation runner would inherit the caller's
-        # context (the integration setup context) instead
-        # of generating a fresh per-run context, which
-        # would break logbook attribution.
-        import asyncio
-
-        h = _MockHass()
-        asyncio.run(
-            handler._async_kick_for_recovery(h, "automation.dw")  # type: ignore[arg-type]
-        )
-        assert len(h.services.kwargs) == 1
-        assert "context" not in h.services.kwargs[0]
-
-
-class TestPeriodicCallback:
-    def test_does_not_propagate_caller_context(self) -> None:
-        # Same regression guard for the integration-owned
-        # periodic timer's ``automation.trigger`` call.
-        import asyncio
-
-        s = _make_state("automation.dw")
-        h = _hass_with_instances({"automation.dw": s})
-
-        cb = handler._make_periodic_callback(h, "automation.dw")  # type: ignore[arg-type]
-        asyncio.run(cb(_FrozenNow.value))
-
-        assert len(h.services.kwargs) == 1
-        assert "context" not in h.services.kwargs[0]
-        # ``trigger_id`` must be "periodic" so the service
-        # handler can distinguish integration-fired ticks
-        # from manual invocations. Flat (NOT under
-        # ``trigger.*``); HA strips that key.
-        _domain, _name, data = h.services.calls[0]
-        assert data["variables"] == {"trigger_id": "periodic"}
-        assert "trigger" not in data["variables"]
-
-    def test_no_op_when_instance_state_gone(self) -> None:
-        # If the automation has been removed between
-        # scheduling and firing, the timer must drop the
-        # tick silently rather than fire automation.trigger
-        # against an entity HA no longer knows about.
-        import asyncio
-
-        h = _hass_with_instances({})
-        cb = handler._make_periodic_callback(h, "automation.never_seen")  # type: ignore[arg-type]
-        asyncio.run(cb(_FrozenNow.value))
-        assert h.services.calls == []
-
-    def test_callback_swallows_automation_trigger_failure(self) -> None:
-        """A failing ``automation.trigger`` (e.g. the
-        automation entity was deleted between scheduling
-        and firing) must not propagate out of the timer
-        callback. Defence-in-depth: a single failed tick is
-        a self-healing transient -- the next tick fires
-        anyway.
-        """
-        import asyncio
-
-        s = _make_state("automation.dw")
-        h = _hass_with_instances({"automation.dw": s})
-
-        async def _raise(*_args: Any, **_kwargs: Any) -> None:
-            raise RuntimeError("automation gone")
-
-        h.services.async_call = _raise  # type: ignore[assignment]
-        cb = handler._make_periodic_callback(h, "automation.dw")  # type: ignore[arg-type]
-
-        # Should not raise.
-        asyncio.run(cb(_FrozenNow.value))
+class TestKickWiring:
+    def test_spec_kick_variables_match(self) -> None:
+        # Per-port kick payload. The dispatcher invokes
+        # ``automation.trigger`` with ``variables`` set to
+        # this dict; the universal-kick contract is tested
+        # in ``test_helpers_lifecycle`` against
+        # ``kick_via_automation_trigger``.
+        assert handler._SPEC.kick_variables == {"trigger_id": "manual"}
 
 
 # --------------------------------------------------------
