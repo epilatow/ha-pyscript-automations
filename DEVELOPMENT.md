@@ -125,7 +125,7 @@ could touch and verify it still matches reality. The pre-commit checklist:
   flags on `dev-deploy.py` / `dev-install.py` / `release.py`**, new required
   steps in the develop / test / commit cycle.
 - `DEVELOPMENT_AGENT.md` -- update when agent-specific workflow changes
-  (review protocol, file markers, etc.).
+  (review protocol, file markers, dev-deploy verification checklist, etc.).
 - `README.md` -- update when an automation is added, removed, or its one-line
   blurb changes.
 
