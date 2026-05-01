@@ -66,6 +66,42 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------
+# Schema validators
+# --------------------------------------------------------
+
+
+def cv_ha_domain_list(value: object) -> list[str]:
+    """Validate a list of HA integration / domain slugs.
+
+    Coerces the input to a list (per ``cv.ensure_list``),
+    then rejects any item that doesn't match HA's actual
+    domain charset (``homeassistant.core.valid_domain``):
+    lowercase letters / digits / underscores, no leading
+    or trailing underscore, no double-underscores. Leading
+    digits are allowed (real HA core integrations like
+    ``3_day_blinds`` rely on this).
+
+    Designed for use as a ``vol.Schema`` value.
+    """
+    import voluptuous as vol
+    from homeassistant.core import valid_domain
+    from homeassistant.helpers import config_validation as cv
+
+    items = [str(i) for i in cv.ensure_list(value)]
+    invalid = [i for i in items if not valid_domain(i)]
+    if invalid:
+        msg = (
+            f"Invalid HA integration / domain id(s): "
+            f"{', '.join(repr(i) for i in invalid)}. "
+            "Each value must be lowercase letters, digits, "
+            "and underscores, with no leading or trailing "
+            "underscore and no double-underscore."
+        )
+        raise vol.Invalid(msg)
+    return items
+
+
+# --------------------------------------------------------
 # Timestamp + notification text formatting
 # --------------------------------------------------------
 

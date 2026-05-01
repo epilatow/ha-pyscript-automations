@@ -552,6 +552,61 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
 # name (the ``schema:`` prefix the helper prepends).
 
 
+class TestArgparseSlugListValidation(_ArgparseHarness):
+    def test_hyphenated_integration_rejected(self) -> None:
+        # Hyphens aren't part of HA's domain charset (e.g.
+        # `zwave_js` not `zwave-js`).
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                include_integrations_raw=["zwave-js"],
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == []
+        assert len(self.config_errors) == 1
+        joined = "\n".join(self.config_errors[0])
+        assert "include_integrations_raw" in joined
+
+    def test_uppercase_domain_rejected(self) -> None:
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                monitored_entity_domains_raw=["BadDomain"],
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == []
+        assert len(self.config_errors) == 1
+        joined = "\n".join(self.config_errors[0])
+        assert "monitored_entity_domains_raw" in joined
+
+    def test_leading_digit_integration_accepted(self) -> None:
+        # Real HA core integration name (`3_day_blinds`)
+        # starts with a digit; the validator must accept it.
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                include_integrations_raw=["3_day_blinds"],
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        # Schema accepts; argparse may still reject for
+        # other reasons (missing in HA), but the schema
+        # layer must not have produced a config error.
+        joined = "\n".join(self.config_errors[0]) if self.config_errors else ""
+        assert "include_integrations_raw" not in joined
+
+
 class TestArgparseIntValidation(_ArgparseHarness):
     def test_non_numeric_check_interval_minutes_rejected(self) -> None:
         import asyncio

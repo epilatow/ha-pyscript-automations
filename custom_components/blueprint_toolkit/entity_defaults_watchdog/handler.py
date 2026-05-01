@@ -51,6 +51,7 @@ from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
     automation_friendly_name,
+    cv_ha_domain_list,
     make_emit_config_error,
     process_persistent_notifications_with_sweep,
     register_blueprint_handler,
@@ -103,16 +104,10 @@ _SCHEMA = vol.Schema(
         vol.Required("drift_checks_raw"): vol.All(
             cv.ensure_list, [vol.Coerce(str)]
         ),
-        vol.Required("include_integrations_raw"): vol.All(
-            cv.ensure_list, [vol.Coerce(str)]
-        ),
-        vol.Required("exclude_integrations_raw"): vol.All(
-            cv.ensure_list, [vol.Coerce(str)]
-        ),
+        vol.Required("include_integrations_raw"): cv_ha_domain_list,
+        vol.Required("exclude_integrations_raw"): cv_ha_domain_list,
         vol.Required("device_exclude_regex_raw"): vol.Coerce(str),
-        vol.Required("exclude_entities_raw"): vol.All(
-            cv.ensure_list, [vol.Coerce(str)]
-        ),
+        vol.Required("exclude_entities_raw"): cv.entity_ids,
         vol.Required("entity_id_exclude_regex_raw"): vol.Coerce(str),
         vol.Required("entity_name_exclude_regex_raw"): vol.Coerce(str),
         vol.Required("check_interval_minutes_raw"): vol.All(

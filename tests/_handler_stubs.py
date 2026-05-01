@@ -126,12 +126,26 @@ def install_homeassistant_stubs(
     core.ServiceCall = type("ServiceCall", (), {})  # type: ignore[attr-defined]
     core.Context = type("Context", (), {})  # type: ignore[attr-defined]
     core.Event = type("Event", (), {})  # type: ignore[attr-defined]
+    # ``helpers.cv_ha_domain_list`` calls ``valid_domain``;
+    # mirror HA's regex (no leading/trailing underscore,
+    # no double-underscore, leading digit allowed).
+    import re as _re  # noqa: PLC0415
+
+    _valid_domain_re = _re.compile(
+        r"^(?!_)(?!.+__)[\da-z_]+(?<!_)$",
+    )
+    core.valid_domain = (  # type: ignore[attr-defined]
+        lambda d: bool(_valid_domain_re.match(str(d)))
+    )
 
     helpers = types.ModuleType("homeassistant.helpers")
     helpers_cv = types.ModuleType(
         "homeassistant.helpers.config_validation",
     )
     helpers_cv.entity_id = lambda v: str(v)  # type: ignore[attr-defined]
+    helpers_cv.entity_ids = (  # type: ignore[attr-defined]
+        lambda v: [str(x) for x in (v if isinstance(v, list) else [v])]
+    )
     helpers_cv.boolean = lambda v: bool(v)  # type: ignore[attr-defined]
     helpers_cv.ensure_list = lambda v: (  # type: ignore[attr-defined]
         list(v) if v else []

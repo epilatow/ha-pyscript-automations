@@ -506,6 +506,47 @@ class TestArgparseMultilineRegex:
 # out-of-range integer inputs.
 
 
+class TestArgparseSlugListValidation:
+    def setup_method(self) -> None:
+        self.capture = _ArgparseCapture()
+        self._real_service_layer = handler._async_service_layer
+        handler._async_service_layer = self.capture  # type: ignore[assignment]
+        self.config_errors: list[list[str]] = []
+
+        async def _capture_errors(
+            _hass: Any,
+            _instance_id: str,
+            errors: list[str],
+        ) -> None:
+            self.config_errors.append(errors)
+
+        self._real_emit = handler._emit_config_error
+        handler._emit_config_error = _capture_errors  # type: ignore[assignment]
+
+    def teardown_method(self) -> None:
+        handler._async_service_layer = self._real_service_layer  # type: ignore[assignment]
+        handler._emit_config_error = self._real_emit  # type: ignore[assignment]
+
+    def test_bad_shape_integration_rejected(self) -> None:
+        # Defense-in-depth: slug-shape validation rejects
+        # mis-cased / hyphenated values that HA's
+        # integration-id charset would never produce.
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                exclude_integrations_raw=["zwave-js"],
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == []
+        assert len(self.config_errors) == 1
+        joined = "\n".join(self.config_errors[0])
+        assert "exclude_integrations_raw" in joined
+
+
 class TestArgparseIntValidation:
     def setup_method(self) -> None:
         # Re-use the same capture pattern

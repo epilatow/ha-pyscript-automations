@@ -578,6 +578,27 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
 # name (the ``schema:`` prefix the helper prepends).
 
 
+class TestArgparseSlugListValidation(_ArgparseHarness):
+    def test_bad_shape_integration_rejected(self) -> None:
+        # Defense-in-depth: slug-shape validation rejects
+        # mis-cased / hyphenated values that HA's
+        # integration-id charset would never produce.
+        import asyncio
+
+        h = _MockHass()
+        call = _FakeServiceCall(
+            _valid_argparse_payload(
+                include_integrations_raw=["zwave-js"],
+            ),
+        )
+        asyncio.run(handler._async_argparse(h, call))  # type: ignore[arg-type]
+
+        assert self.capture.calls == []
+        assert len(self.config_errors) == 1
+        joined = "\n".join(self.config_errors[0])
+        assert "include_integrations_raw" in joined
+
+
 class TestArgparseIntValidation(_ArgparseHarness):
     def test_non_numeric_check_interval_minutes_rejected(self) -> None:
         import asyncio

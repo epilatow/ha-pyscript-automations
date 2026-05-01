@@ -113,6 +113,16 @@ must survive entry unload.
 All handlers consume these. Don't reimplement; if a new pattern
 keeps recurring, hoist it here.
 
+Schema validators:
+
+- `cv_ha_domain_list(value)` -- voluptuous validator for a
+  list-of-string blueprint input where each item must match
+  HA's actual domain charset (`homeassistant.core.valid_domain`).
+  Rejects hyphens, uppercase, leading/trailing underscores,
+  and double-underscores; accepts leading-digit names like
+  `3_day_blinds`. Produces a config-error message that names
+  the offending value(s) and explains the charset.
+
 Notification + formatting:
 
 - `format_timestamp(template, dt)` -- `YYYY/MM/DD/HH/mm/ss`

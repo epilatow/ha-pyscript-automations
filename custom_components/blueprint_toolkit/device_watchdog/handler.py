@@ -52,6 +52,7 @@ from ..const import DOMAIN
 from ..helpers import (
     BlueprintHandlerSpec,
     automation_friendly_name,
+    cv_ha_domain_list,
     make_emit_config_error,
     process_persistent_notifications_with_sweep,
     register_blueprint_handler,
@@ -101,17 +102,11 @@ _SCHEMA = vol.Schema(
     {
         vol.Required("instance_id"): cv.entity_id,
         vol.Required("trigger_id"): vol.Coerce(str),
-        vol.Required("include_integrations_raw"): vol.All(
-            cv.ensure_list, [vol.Coerce(str)]
-        ),
-        vol.Required("exclude_integrations_raw"): vol.All(
-            cv.ensure_list, [vol.Coerce(str)]
-        ),
+        vol.Required("include_integrations_raw"): cv_ha_domain_list,
+        vol.Required("exclude_integrations_raw"): cv_ha_domain_list,
         vol.Required("device_exclude_regex_raw"): vol.Coerce(str),
         vol.Required("entity_id_exclude_regex_raw"): vol.Coerce(str),
-        vol.Required("monitored_entity_domains_raw"): vol.All(
-            cv.ensure_list, [vol.Coerce(str)]
-        ),
+        vol.Required("monitored_entity_domains_raw"): cv_ha_domain_list,
         vol.Required("check_interval_minutes_raw"): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=10080)
         ),
