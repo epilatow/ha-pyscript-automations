@@ -169,6 +169,28 @@ def _round_up_to_minute(dt: datetime) -> datetime:
     )
 
 
+def _maybe_arm_auto_off(
+    state: "State",
+    auto_off_minutes: int,
+    current_time: datetime,
+    switch_state: str,
+) -> None:
+    """Arm ``state.auto_off_started_at`` if conditions warrant.
+
+    Idempotent. Used by every "first time this run we
+    notice the switch is on without sensor management"
+    path: bootstrap-arm, ``_handle_switch`` startup-
+    recovery, and ``_handle_timer`` arm-recovery. The
+    "manual on" branch in ``_handle_switch`` does NOT use
+    this -- it deliberately resets the clock on each
+    manual transition.
+    """
+    if state.auto_off_started_at is not None:
+        return
+    if switch_state == "on" and state.baseline is None and auto_off_minutes > 0:
+        state.auto_off_started_at = _round_up_to_minute(current_time)
+
+
 # -- Notification messages --
 # Edit these templates to change user-facing text.
 # {name} = switch friendly name.  Other placeholders
@@ -345,14 +367,12 @@ class Controller:
         # Startup recovery
         if not state.initialized:
             state.initialized = True
-            if (
-                switch_state == "on"
-                and state.baseline is None
-                and self.config.auto_off_minutes > 0
-            ):
-                state.auto_off_started_at = _round_up_to_minute(
-                    inputs.current_time,
-                )
+            _maybe_arm_auto_off(
+                state,
+                self.config.auto_off_minutes,
+                inputs.current_time,
+                switch_state,
+            )
             return Result()
 
         if switch_state == "on":
@@ -434,15 +454,12 @@ class Controller:
         # SWITCH event was missed because the user toggled
         # the switch via a different integration that
         # didn't fire a state-change trigger.
-        if (
-            state.auto_off_started_at is None
-            and state.baseline is None
-            and inputs.switch_state == "on"
-            and self.config.auto_off_minutes > 0
-        ):
-            state.auto_off_started_at = _round_up_to_minute(
-                inputs.current_time,
-            )
+        _maybe_arm_auto_off(
+            state,
+            self.config.auto_off_minutes,
+            inputs.current_time,
+            inputs.switch_state,
+        )
 
         if (
             state.auto_off_started_at is not None
@@ -625,8 +642,16 @@ def handle_service_call(
     if bootstrapped:
         switch_state_in: str = str(kwargs.get("switch_state", "off"))
         auto_off_min: int = int(kwargs.get("auto_off_minutes", 0))
-        if switch_state_in == "on" and auto_off_min > 0:
-            s.auto_off_started_at = _round_up_to_minute(current_time)
+        # Bootstrap state: ``s.baseline`` is None and
+        # ``s.auto_off_started_at`` is None by default, so
+        # the helper's guards reduce to "switch on +
+        # minutes > 0", same as the original arm.
+        _maybe_arm_auto_off(
+            s,
+            auto_off_min,
+            current_time,
+            switch_state_in,
+        )
         # Mark initialized so a subsequent SWITCH event
         # doesn't re-run ``_handle_switch``'s startup-
         # recovery branch (which would idempotently re-arm
