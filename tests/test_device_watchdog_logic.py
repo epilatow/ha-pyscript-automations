@@ -598,6 +598,51 @@ class TestBuildNotificationMessage:
         assert "[Sensor \\[foo\\]]" in msg
         assert "[Sensor [foo]]" not in msg
 
+    def test_integration_names_are_escaped(self) -> None:
+        # Defense-in-depth: integration IDs are slug-style
+        # under HA's current charset, but the notification
+        # body interpolates them as bare prose -- escape so
+        # a future HA release loosening the charset (or a
+        # third-party integration smuggling in markdown
+        # specials) can't corrupt the rendered body.
+        device = _device()
+        device.de.integration_entities["foo[bar]"] = {"sensor.x"}
+        msg = _build_notification_message(
+            device,
+            [_entity(state="unavailable")],
+            False,
+            None,
+            None,
+            _config(),
+        )
+        assert "Integrations: foo\\[bar\\]" in msg
+
+    def test_unavailable_entity_id_is_escaped(self) -> None:
+        device = _device()
+        unavailable = [_entity("sensor.[foo]", state="unavailable")]
+        msg = _build_notification_message(
+            device,
+            unavailable,
+            False,
+            None,
+            None,
+            _config(),
+        )
+        assert "Unavailable entity: sensor.\\[foo\\]" in msg
+
+    def test_newest_entity_is_escaped_in_stale_message(self) -> None:
+        device = _device()
+        ts = T0 - timedelta(hours=25)
+        msg = _build_notification_message(
+            device,
+            [],
+            True,
+            "sensor.[old]",
+            ts,
+            _config(),
+        )
+        assert "via sensor.\\[old\\]." in msg
+
 
 class TestEvaluateDevices:
     def test_multiple_devices(self) -> None:

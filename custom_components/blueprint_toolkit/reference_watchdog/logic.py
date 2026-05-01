@@ -1486,9 +1486,12 @@ def _build_notification_body(
         )
 
     if owner.integration:
+        # URL target doesn't render markdown, so the
+        # raw integration name is fine there; escape
+        # only the link-text portion.
         lines.append(
             "Integration: "
-            f"[{owner.integration}]"
+            f"[{md_escape(owner.integration)}]"
             f"(/config/integrations/integration/{owner.integration})"
         )
 

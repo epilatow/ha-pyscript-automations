@@ -229,7 +229,9 @@ def evaluate_diagnostics(
             )
         notification_id = f"{config.notification_prefix}diag_{device.de.id}"
         if disabled:
-            entity_list = "\n- ".join(disabled)
+            entity_list = "\n- ".join(
+                helpers.md_escape(eid) for eid in disabled
+            )
             message = (
                 "Recommended diagnostic entities"
                 f" are disabled:\n\n- {entity_list}\n\nEnable in"
@@ -344,13 +346,14 @@ def _build_notification_message(
         device.de.integration_entities.keys(),
     )
     if integrations:
+        escaped = ", ".join(helpers.md_escape(i) for i in integrations)
         lines.append(
-            f"Integrations: {', '.join(integrations)}",
+            f"Integrations: {escaped}",
         )
 
     for entity in sorted(unavailable, key=lambda e: e.entity_id):
         lines.append(
-            f"Unavailable entity: {entity.entity_id}",
+            f"Unavailable entity: {helpers.md_escape(entity.entity_id)}",
         )
 
     if is_stale:
@@ -360,7 +363,7 @@ def _build_notification_message(
             lines.append(
                 f"No entity state report within {threshold_minutes}"
                 f" minutes. Most recent update {last_seen}"
-                f" via {newest_entity}.",
+                f" via {helpers.md_escape(newest_entity)}.",
             )
         else:
             lines.append(

@@ -495,8 +495,9 @@ def _build_notification_message(
         device.de.integration_entities.keys(),
     )
     if integrations:
+        escaped = ", ".join(helpers.md_escape(i) for i in integrations)
         lines.append(
-            f"Integrations: {', '.join(integrations)}",
+            f"Integrations: {escaped}",
         )
 
     # Group entities by notification section
@@ -550,8 +551,9 @@ def _build_notification_message(
         lines.append("")
         lines.append("**Name overrides to clear:**")
         for d in name_clear:
+            current = helpers.md_escape(d.current_name)
             lines.append(
-                f'- `{d.entity_id}`: "{d.current_name}"',
+                f'- `{d.entity_id}`: "{current}"',
             )
         lines.append("")
         lines.append(
@@ -565,22 +567,24 @@ def _build_notification_message(
             "**Name overrides with redundant device name:**",
         )
         for d in name_redundant:
-            expected = d.expected_name or ""
+            current = helpers.md_escape(d.current_name)
+            expected = helpers.md_escape(d.expected_name or "")
             lines.append(
-                f'- `{d.entity_id}`: "{d.current_name}" -> "{expected}"',
+                f'- `{d.entity_id}`: "{current}" -> "{expected}"',
             )
+        device_name = helpers.md_escape(device.de.name)
         lines.append(
             "  The override includes the device name,"
             " which Home Assistant already adds."
             " Edit the override to remove"
-            f' "{device.de.name} " or clear it entirely.',
+            f' "{device_name} " or clear it entirely.',
         )
 
     if name_set:
         lines.append("")
         lines.append("**Name overrides to set:**")
         for d in name_set:
-            override = d.recommended_override or ""
+            override = helpers.md_escape(d.recommended_override or "")
             lines.append(
                 f'- `{d.entity_id}`: set to "{override}"',
             )
@@ -743,10 +747,11 @@ def _deviceless_line_suffix(
     if dom == "script":
         return f"[{name}](/config/script/edit/{obj_id})"
     if from_registry and platform:
+        plat_label = helpers.md_escape(platform)
         if config_entry_id:
             url = f"/config/integrations/integration/{platform}"
-            return f"{name}  -  integration [{platform}]({url})"
-        return f"{name}  -  integration {platform}  -  YAML-configuration"
+            return f"{name}  -  integration [{plat_label}]({url})"
+        return f"{name}  -  integration {plat_label}  -  YAML-configuration"
     return f"{name}  -  add `unique_id:` to make this entity manageable"
 
 

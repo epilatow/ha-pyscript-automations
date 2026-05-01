@@ -1182,6 +1182,25 @@ class TestNotificationBody:
         assert "Owner: [Lights \\[zone 1\\]](" in body
         assert "Owner: [Lights [zone 1]](" not in body
 
+    def test_integration_name_escaped_in_link_text(self) -> None:
+        # Integration IDs are slug-style under HA's current
+        # charset, but the notification body interpolates
+        # them as link text -- escape so a future HA release
+        # loosening the charset can't corrupt the rendered
+        # link. URL target keeps the raw value (URL targets
+        # don't render markdown).
+        owner = Owner(
+            source_file="automations.yaml",
+            integration="bad[plat]",
+            friendly_name="X",
+            url_path="/config/automation/edit/abc",
+        )
+        body = _build_notification_body(owner, [])
+        assert (
+            "Integration: [bad\\[plat\\]]"
+            "(/config/integrations/integration/bad[plat])" in body
+        )
+
     def test_no_url_path_renders_plain_text(self) -> None:
         owner = Owner(
             source_file="plants.yaml",

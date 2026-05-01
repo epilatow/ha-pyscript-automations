@@ -566,6 +566,70 @@ class TestBuildNotificationMessage:
         assert "[Sensor \\[foo\\]]" in msg
         assert "[Sensor [foo]]" not in msg
 
+    def test_integration_names_are_escaped(self) -> None:
+        device = _device()
+        device.de.integration_entities["foo[bar]"] = {"sensor.x"}
+        drifted = [
+            DriftDetail(
+                entity_id="sensor.x",
+                id_drifted=True,
+                name_drifted=False,
+                current_name="x",
+                expected_name=None,
+            ),
+        ]
+        msg = _build_notification_message(device, drifted)
+        assert "Integrations: foo\\[bar\\]" in msg
+
+    def test_current_name_is_escaped_in_name_clear(self) -> None:
+        device = _device()
+        drifted = [
+            DriftDetail(
+                entity_id="sensor.x",
+                id_drifted=False,
+                name_drifted=True,
+                current_name="bad [name]",
+                expected_name="ok",
+            ),
+        ]
+        msg = _build_notification_message(device, drifted)
+        assert '"bad \\[name\\]"' in msg
+
+    def test_redundant_section_escapes_names(self) -> None:
+        device = _device(device_name="Dev [x]")
+        drifted = [
+            DriftDetail(
+                entity_id="sensor.x",
+                id_drifted=False,
+                name_drifted=True,
+                current_name="bad [a]",
+                expected_name="exp [b]",
+                has_redundant_prefix=True,
+            ),
+        ]
+        msg = _build_notification_message(device, drifted)
+        assert '"bad \\[a\\]"' in msg
+        assert '"exp \\[b\\]"' in msg
+        # Device name appears twice -- once in the header
+        # `Device:` link text (already escaped) and once in
+        # the redundant-prefix prose.
+        assert msg.count("Dev \\[x\\]") >= 2
+
+    def test_recommended_override_is_escaped(self) -> None:
+        device = _device()
+        drifted = [
+            DriftDetail(
+                entity_id="sensor.x",
+                id_drifted=False,
+                name_drifted=True,
+                current_name="cur",
+                expected_name="exp",
+                recommended_override="rec [override]",
+            ),
+        ]
+        msg = _build_notification_message(device, drifted)
+        assert '"rec \\[override\\]"' in msg
+
 
 class TestEvaluateDevice:
     def test_no_drift(self) -> None:
@@ -1069,6 +1133,30 @@ class TestEvaluateDeviceless:
         assert (
             "Grid \\[Import\\] Power  -  integration"
             " [template](/config/integrations/integration/template)"
+            in result.notification_message
+        )
+
+    def test_integration_name_escaped_in_link_text(self) -> None:
+        # Defense-in-depth: integration IDs are slug-style
+        # under HA's current charset, but escape so a future
+        # HA release loosening the charset can't corrupt the
+        # rendered link.
+        cfg = _config()
+        entities = [
+            _deviceless(
+                "sensor.x",
+                effective_name="Plain",
+                platform="bad[plat]",
+                unique_id="x",
+            ),
+        ]
+        peers = {"sensor": {"x"}}
+        result = _evaluate_deviceless(cfg, entities, peers)
+        # Link text portion is escaped; URL target keeps the
+        # raw platform string (URL targets don't render
+        # markdown).
+        assert (
+            "[bad\\[plat\\]](/config/integrations/integration/bad[plat])"
             in result.notification_message
         )
 
