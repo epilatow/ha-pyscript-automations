@@ -722,6 +722,28 @@ class TestPeriodicCallback:
         asyncio.run(cb(_FrozenNow.value))
         assert h.services.calls == []
 
+    def test_callback_swallows_automation_trigger_failure(self) -> None:
+        """A failing ``automation.trigger`` (e.g. the
+        automation entity was deleted between scheduling
+        and firing) must not propagate out of the timer
+        callback. Defence-in-depth: a single failed tick is
+        a self-healing transient -- the next tick fires
+        anyway.
+        """
+        import asyncio
+
+        s = _make_state("automation.edw")
+        h = _hass_with_instances({"automation.edw": s})
+
+        async def _raise(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("automation gone")
+
+        h.services.async_call = _raise  # type: ignore[assignment]
+        cb = handler._make_periodic_callback(h, "automation.edw")  # type: ignore[arg-type]
+
+        # Should not raise.
+        asyncio.run(cb(_FrozenNow.value))
+
 
 # --------------------------------------------------------
 # Schema vs blueprint drift

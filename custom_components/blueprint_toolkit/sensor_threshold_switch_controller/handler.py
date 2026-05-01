@@ -570,18 +570,31 @@ def _make_periodic_callback(
         # unconditionally clobbers the ``trigger`` key with
         # ``{"platform": None}``. The blueprint reads
         # ``trigger_id`` + ``trigger_entity`` directly.
-        await hass.services.async_call(
-            "automation",
-            "trigger",
-            {
-                "entity_id": instance_id,
-                "skip_condition": True,
-                "variables": {
-                    "trigger_id": "periodic",
-                    "trigger_entity": _TIMER_TRIGGER_ENTITY,
+        try:
+            await hass.services.async_call(
+                "automation",
+                "trigger",
+                {
+                    "entity_id": instance_id,
+                    "skip_condition": True,
+                    "variables": {
+                        "trigger_id": "periodic",
+                        "trigger_entity": _TIMER_TRIGGER_ENTITY,
+                    },
                 },
-            },
-        )
+            )
+        except Exception:  # noqa: BLE001
+            # Swallow + log: a single failed tick is a
+            # self-healing transient (the next tick fires
+            # anyway), and surfacing it would knock the
+            # timer task down.
+            _LOGGER.warning(
+                "[%s] periodic automation.trigger failed for %s;"
+                " next tick will retry",
+                _SERVICE_TAG,
+                instance_id,
+                exc_info=True,
+            )
 
     return _on_tick
 
