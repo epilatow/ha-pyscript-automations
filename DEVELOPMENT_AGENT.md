@@ -34,6 +34,98 @@ lifecycle wiring, test layout, notification formats, architectural patterns,
 anything -- and update every doc that mentions it. If a doc references stale
 state, it is part of the bug, not separate from it.
 
+## Finish the work everywhere it applies
+
+When a change addresses a problem that exists at more than one site -- a
+duplicated pattern, a shared invariant, a contract that holds across parallel
+modules -- the change addresses **every** site, not the surfacing instance.
+The duplication is a symptom; the fix targets the underlying cause.
+
+Three concrete shapes:
+
+- **Same bug in N places: fix all N, or lift to shared code.** If a defensive
+  guard belongs around one call site, it belongs around every parallel call
+  site -- or, better, the guard belongs baked into the shared helper they all
+  reach. "Module X was the surfacing port; the rest stays open as remaining
+  scope" is a half-job, not a complete commit.
+- **Same test in N places: extract a generic base.** If you find yourself
+  adding the same regression test to one module's test file, the test belongs
+  in shared test infrastructure -- a base class, a fixture -- consumed by
+  every parallel module rather than copy-pasted across them.
+- **Documented invariant violated in code: fix the code, not just the doc.**
+  Adding docs that describe the canonical pattern while leaving the code
+  divergent -- with a note that "the mechanical refactor stays open as
+  remaining scope" -- does not deliver the invariant. Update the code in the
+  same commit, or don't add the doc.
+
+Re-tagging deferred work as "remaining P\<n> scope" / "stays open as followup"
+/ "tracked separately" is paperwork, not progress. It's the same half-job,
+dressed up. If you genuinely cannot finish a piece in this commit (a real
+dependency, an in-flight refactor elsewhere, a deliberate incremental
+rollout), call out the specific blocker -- not just a hand-wave -- and confirm
+it's separable before deferring.
+
+Before declaring a change complete, enumerate every site / instance / module
+the change should affect and verify all are touched. Anything left as "stays
+open" is a flag the change isn't actually done; check whether the deferral is
+real or a rationalization.
+
+This is the upstream form of the rejection-rationale rule under "Code review"
+below: the two address the same failure (underscoping) at different stages.
+Get it right before commit; the review is a backstop, not a license to
+half-finish.
+
+## Commit-message hygiene
+
+`DEVELOPMENT.md`'s "Commit messages" section is the canonical rule list. Two
+patterns recur in agent-authored messages despite being on the do-NOT list, so
+flagging them again here:
+
+- **No "Touched:" / "Files changed:" / "Affected:" lists.** The diff
+  enumerates every file; restating that as a labelled list duplicates it and
+  rots whenever an amend changes the file set.
+- **No references to symbols the same diff removes.** A subject like "Replaces
+  the per-module `_FooHandler.bar` with a generic `BarHandlerBase`" is a trap:
+  future readers grep for the named symbol and find nothing because the same
+  commit deleted it. State the new artifact on its own terms.
+- **No commit-history references.** "The followup notes ...", "the
+  tmp/<slug>-... scope", "as discussed in the earlier review" all point at
+  ephemeral agent-facing scratch (followups files, tmp/ scopes, code-review
+  threads). None of that survives in `git log`. If a constraint matters,
+  restate it inline.
+
+Numbered step comments in code (`# 1. Parse input`, `# 2. Validate`, ...) are
+forbidden by `DEVELOPMENT.md`'s "Comments" subsection. Adding or removing a
+step forces renumbering, and the function name + code structure already convey
+ordering. This applies even when describing a canonical pipeline of steps --
+the named operation is its own label.
+
+## Comment-message hygiene
+
+A code comment is read by someone looking at the *current* version of the
+file. It must describe what is there now -- not what was there before, what
+was deleted, what got renamed, or what got lifted into a helper. The canonical
+rule lives in `DEVELOPMENT.md`'s "Comments" subsection; the agent-specific
+failure mode is repeating the commit-message rationale inside the source.
+
+Concretely, never write comments like:
+
+- `# The legacy _FooBar shim is gone -- now uses helpers.foo.`
+- `# Wrappers have all been deleted; the dispatcher derives this directly.`
+- `# This used to live in module_x.py; lifted to shared.py in the cleanup.`
+- `# Replaced the per-call-site try/except with the shared guard.`
+
+The diff and commit message capture migrations. The comment captures the
+*current* code only -- describe what the function does now and the constraint
+it enforces. If the comment cannot be written without referencing something
+that no longer exists, the comment isn't earning its keep; delete it.
+
+The same applies to docstrings ("formerly known as `_FooBar`", "ported from
+the legacy framework"), CHANGELOG-style banners at the top of files, and "//
+TODO: remove once X" markers that name something already removed. If a
+comment's content reads like a footnote on the diff, it belongs in the commit
+message, not the file.
+
 ## File markers
 
 All agent-generated Python files begin with the literal comment
@@ -169,6 +261,47 @@ Authored intent: the commit message itself is the only
   and may rationalize choices that don't match the
   underlying problem.
 ```
+
+### Valid vs. invalid rejection rationales
+
+A code-review finding can be appended to `tmp/<slug>-code-review-rejected.md`
+only when the reasoning holds up on its own merits. Examples of *valid*
+rejections:
+
+- The finding is genuinely out of the diff's blast radius (a different file
+  the diff didn't touch, behavior the change doesn't affect).
+- The finding contradicts an explicit authored constraint in the review-input
+  file.
+- The finding's "fix" would re-introduce a regression that an earlier commit
+  already resolved.
+- The finding is genuinely cosmetic and the fix would meaningfully enlarge the
+  diff for negligible value (e.g. reflowing untouched surrounding lines just
+  to follow a style guideline the existing code already violates).
+
+The following rationales are NEVER valid for rejecting a finding -- they are
+rationalizations for shipping a half-job:
+
+- "The existing X is already incomplete / stale / broken, so fixing only the
+  new piece would be inconsistent and a thorough sweep is out of scope." Past
+  staleness is never a license for new staleness. If the change touched the
+  stale surface (added entries to a list, modified a classification, edited a
+  section), do the full work to leave it correct, including the pre-existing
+  gaps the diff exposed.
+- "It's only nice-to-have / P3, so it's optional." The P-tag indicates
+  ship-blocking severity, not whether to do the work. P3 findings local to the
+  diff still get fixed.
+- "Adding it would be defensive against an unrelated future regression." If
+  the surface is in the diff's blast radius, the agent owns making it correct
+  now, not punting it to a hypothetical future agent.
+- "Doing it thoroughly is out of scope." If the work is in the diff's blast
+  radius, scope expanded the moment the diff touched the surface. Either do
+  the full work or be specific about *which sub-task* is genuinely separable
+  and offer a follow-up.
+
+If a finding genuinely belongs in a separate follow-up commit (not just a
+rejection), surface that as an explicit suggestion to the user with the
+proposed scope, rather than self-rejecting. The user decides whether to fold
+it in or defer.
 
 ## Push and review hygiene
 

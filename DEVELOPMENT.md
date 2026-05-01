@@ -83,6 +83,13 @@ can't enforce.
 - Don't reference user-reported bugs ("Regression guard for the user-reported
   bug where ..."). Describe what the code does and the constraint it enforces;
   bug history belongs in the commit message.
+- Don't talk about deleted, replaced, or formerly-existing code. Comments
+  document the *current* code -- the version a future reader is looking at.
+  Phrases like "the per-handler `_FooBar` shim is gone", "wrappers have all
+  been deleted", "this used to live in helpers.py" make sense to whoever wrote
+  the diff but are noise (or actively misleading) to anyone reading the file
+  later. If a comment names a symbol or behavior, that thing must exist now.
+  Migration history belongs in the commit message that did the migration.
 
 ### ASCII only
 
@@ -458,9 +465,22 @@ you're almost certainly over-explaining.
 Specifically, do NOT include:
 
 - Lists of every file or call site touched. The diff enumerates them; if the
-  scope is "every site of pattern X" just say so once.
+  scope is "every site of pattern X" just say so once. This applies to any
+  prefix variant -- `Touched:`, `Files changed:`, `Affected:`, `Sites:`, etc.
+  -- which is just the same list with a label.
 - Test inputs, fixture values, or the specific bad-shape cases a regression
   test exercises -- the test code is the source of truth.
 - Sub-decisions that are obvious from the code (which field type was used,
   which helper the code now calls, how a loop is structured).
 - Restatements of points already in an earlier paragraph of the same message.
+- References to symbols / tests / functions / files that the same diff
+  *removes* or replaces. A subject like "Replaces the per-handler
+  `_FooHandler.bar` with a generic base" is a trap: future readers grep for
+  the named symbol and find nothing because the same commit deleted it. State
+  the new artifact on its own terms; the diff already shows the deletion.
+- Pointers to ephemeral agent-facing scratch -- "The followup notes ...", "the
+  tmp/<slug>-... scope", "as discussed in the earlier review", "the P\<n>
+  tracker entry says ...". Followups files, `tmp/` scopes, code-review
+  threads, and review-input files are working state that does not survive in
+  `git log`. If a constraint matters, restate it inline; if it's just a paper
+  trail, drop it.
