@@ -471,3 +471,26 @@ verify notification content.
   AI-assisted commits.
 - Don't restate the manifest version bump in the commit
   message; the bump is automatic and restating is noise.
+
+**Explain the why, not the what.** The diff already shows
+what changed. The commit message should give a future
+reader the context they can't derive from the diff:
+the motivating problem, the constraint or invariant the
+change satisfies, and any non-obvious tradeoffs or
+alternatives considered. Aim for a one-line subject plus
+one to three short paragraphs. Past three paragraphs and
+you're almost certainly over-explaining.
+
+Specifically, do NOT include:
+
+- Lists of every file or call site touched. The diff
+  enumerates them; if the scope is "every site of pattern
+  X" just say so once.
+- Test inputs, fixture values, or the specific bad-shape
+  cases a regression test exercises -- the test code is
+  the source of truth.
+- Sub-decisions that are obvious from the code (which
+  field type was used, which helper the code now calls,
+  how a loop is structured).
+- Restatements of points already in an earlier paragraph
+  of the same message.

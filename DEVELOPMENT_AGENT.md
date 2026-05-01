@@ -103,10 +103,10 @@ review agent's job is to evaluate independently.
    would be welcome.
 3. **Save the review** to `tmp/<slug>-code-review.md` (or
    `-code-review-N.md` for amend cycles).
-4. **Address findings.** For each P1 / P2 finding,
-   either fix in the commit (amend) or append to
-   `tmp/<slug>-code-review-followups.md` with reasoning.
-   P3 findings can be deferred without a writeup.
+4. **Address findings.** For findings, either fix them in
+   the commit (amend) or append rejected findings to
+   `tmp/<slug>-code-review-rejected.md` with reasoning
+   on why they were rejected.
 
 ### The review prompt (verbatim)
 
