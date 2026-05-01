@@ -1691,21 +1691,18 @@ _HA_YAML_TAGS = (
 )
 
 
-def _register_yaml_tag_constructors() -> None:
-    """Register placeholder constructors for HA YAML tags.
+def _build_rw_yaml_loader() -> type:
+    """Construct a private SafeLoader subclass scoped to RW reads.
 
-    Idempotent. Replaces HA-specific tags (``!include``,
-    ``!secret``, etc.) with inert placeholder strings so
-    ``yaml.safe_load`` succeeds without HA's tag handlers.
+    Constructor registrations live on this subclass rather than
+    on the public ``yaml.SafeLoader`` so no other code in the HA
+    process inherits them. ``yaml`` is imported lazily here so
+    the module's top-level imports stay minimal.
     """
     import yaml
 
-    if getattr(
-        yaml.SafeLoader,
-        "_rw_tag_ctors_installed",
-        False,
-    ):
-        return
+    class _RwYamlLoader(yaml.SafeLoader):  # type: ignore[misc]
+        pass
 
     for tag in _HA_YAML_TAGS:
         tag_name = tag
@@ -1720,9 +1717,20 @@ def _register_yaml_tag_constructors() -> None:
                 return f"<{_tag}:{node.value}>"
             return f"<{_tag}>"
 
-        yaml.SafeLoader.add_constructor(tag, _ctor)
+        _RwYamlLoader.add_constructor(tag, _ctor)
 
-    yaml.SafeLoader._rw_tag_ctors_installed = True  # noqa: SLF001
+    return _RwYamlLoader
+
+
+_RW_YAML_LOADER: type | None = None
+
+
+def _rw_yaml_loader() -> type:
+    """Return the private SafeLoader subclass, building once."""
+    global _RW_YAML_LOADER
+    if _RW_YAML_LOADER is None:
+        _RW_YAML_LOADER = _build_rw_yaml_loader()
+    return _RW_YAML_LOADER
 
 
 def _read_yaml_file(path: str) -> object:
@@ -1731,14 +1739,14 @@ def _read_yaml_file(path: str) -> object:
 
     import yaml
 
-    _register_yaml_tag_constructors()
+    loader = _rw_yaml_loader()
     try:
         with io.open(path, encoding="utf-8") as f:  # noqa: UP020
             content = f.read()
     except OSError:
         return None
     try:
-        return yaml.safe_load(content)
+        return yaml.load(content, Loader=loader)  # noqa: S506
     except yaml.YAMLError:
         return None
 

@@ -1622,6 +1622,34 @@ class TestReadYamlFile:
         assert isinstance(result, dict)
         assert result["password"] == "<!secret:my_pass>"
 
+    def test_public_safeloader_not_mutated(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # RW's tag constructors must live on a private subclass,
+        # not on yaml.SafeLoader -- otherwise every yaml.safe_load
+        # call anywhere in the HA process inherits them.
+        import yaml
+
+        f = tmp_path / "test.yaml"
+        f.write_text("password: !secret my_pass\n")
+        _read_yaml_file(str(f))
+
+        public_ctors = yaml.SafeLoader.yaml_constructors
+        for tag in (
+            "!include",
+            "!include_dir_list",
+            "!include_dir_named",
+            "!include_dir_merge_list",
+            "!include_dir_merge_named",
+            "!secret",
+            "!env_var",
+        ):
+            assert tag not in public_ctors, (
+                f"yaml.SafeLoader.yaml_constructors carries {tag} -- "
+                "RW leaked tag constructors onto the public loader."
+            )
+
 
 class TestReadJsonFile:
     def test_reads_valid_json(self, tmp_path: Path) -> None:
