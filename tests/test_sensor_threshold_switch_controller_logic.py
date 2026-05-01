@@ -1269,6 +1269,62 @@ class TestHandleServiceCall:
         )
         assert r2.action == Action.TURN_OFF
 
+    def test_bootstrap_arm_uses_rounded_up_minute(self) -> None:
+        """The bootstrap-arm formula rounds the call time
+        UP to the next minute boundary so the actual auto-
+        off delay is never SHORTER than the configured
+        timeout. ``T0`` is already on a boundary, so this
+        test feeds a non-boundary time to exercise the
+        rounding-up half of the formula explicitly.
+        """
+        non_boundary = T0 + timedelta(seconds=37)
+        result = handle_service_call(
+            **self._call_kwargs(
+                state_data=None,
+                switch_state="on",
+                auto_off_minutes=30,
+                trigger_entity="sensor.humidity",
+                sensor_value="55.0",
+                current_time=non_boundary,
+            ),
+        )
+        expected = (T0 + timedelta(minutes=1)).isoformat()
+        assert result.state_dict["auto_off_started_at"] == expected
+
+    def test_handle_timer_arm_fallback_uses_tick_time(self) -> None:
+        """If the bootstrap-arm path were removed, the
+        ``Controller._handle_timer`` arm-on-first-tick
+        fallback would still arm the auto-off timer. This
+        test pre-seeds a fresh ``state_data`` with
+        ``auto_off_started_at=None`` and a TIMER tick at a
+        non-boundary moment, verifying the persisted arm
+        timestamp matches the TIMER tick's
+        ``_round_up_to_minute(current_time)`` -- distinct
+        from the bootstrap-arm's "service-call entry time"
+        moment.
+        """
+        seed_state = {
+            "samples": [],
+            "baseline": None,
+            "overrides": [],
+            "auto_off_started_at": None,
+            "initialized": True,
+        }
+        # Tick at 10:00:42 -- rounded up should be 10:01:00.
+        tick = T0 + timedelta(seconds=42)
+        result = handle_service_call(
+            **self._call_kwargs(
+                state_data=seed_state,
+                switch_state="on",
+                auto_off_minutes=30,
+                trigger_entity="timer",
+                sensor_value="",
+                current_time=tick,
+            ),
+        )
+        expected = (T0 + timedelta(minutes=1)).isoformat()
+        assert result.state_dict["auto_off_started_at"] == expected
+
     def test_malformed_blob_triggers_bootstrap_arm(self) -> None:
         """A blob that fails ``State.from_dict`` (e.g.
         partial-write upgrade leaves a stale shape) is
