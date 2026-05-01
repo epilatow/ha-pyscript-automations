@@ -278,11 +278,21 @@ async def _async_argparse(
     trig_dis = set(data["trigger_disabling_entities_raw"])
     all_dis = auto_dis | trig_dis
     for eid in sorted(ctrl & trig):
-        errors.append(f"{eid} is in both controlled and trigger entities")
+        errors.append(
+            f"{eid} is in both controlled and trigger entities"
+            " (an entity can be one or the other, not both --"
+            " remove from one of the lists)",
+        )
     for eid in sorted(ctrl & all_dis):
-        errors.append(f"{eid} is in both controlled and disabling entities")
+        errors.append(
+            f"{eid} is in both controlled and disabling entities"
+            " (remove from one of the lists)",
+        )
     for eid in sorted(trig & all_dis):
-        errors.append(f"{eid} is in both trigger and disabling entities")
+        errors.append(
+            f"{eid} is in both trigger and disabling entities"
+            " (remove from one of the lists)",
+        )
 
     # --- HA state: entities exist ---
     for eid in sorted(ctrl | trig | all_dis):

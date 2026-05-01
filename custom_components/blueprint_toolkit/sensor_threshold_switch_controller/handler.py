@@ -248,7 +248,8 @@ async def _async_argparse(
         if domain not in _CONTROLLABLE_DOMAINS:
             errors.append(
                 f"target_switch_entity: {target_switch_entity!r}"
-                " does not support on/off",
+                " does not support on/off (pick an entity in one of:"
+                f" {', '.join(sorted(_CONTROLLABLE_DOMAINS))})",
             )
 
     # Cross-field: notification_service must be registered.
