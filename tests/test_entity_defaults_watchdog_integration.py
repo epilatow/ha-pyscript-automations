@@ -437,6 +437,87 @@ class TestServiceLayerScan:
         ), f"missing automation-link prefix; body was: {body[:200]!r}"
 
 
+class TestDeviceAttachedDisabledEntityFilter:
+    async def test_disabled_entity_excluded_from_device_scan(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        """Disabled entities on the device-attached scan
+        path must not contribute to drift findings. Parity
+        regression: the deviceless path already filters
+        ``disabled_by`` but the device-attached path used to
+        scan disabled entities, producing noisy drift on
+        entities the user had explicitly disabled.
+
+        Plant a device with one enabled entity and one
+        disabled entity under the same fake integration;
+        verify the diagnostic state's ``entities`` count is
+        1 (post-fix), not 2 (pre-fix).
+        """
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        await _setup_integration(hass)
+
+        # template.integration_entities() matches by config-
+        # entry title. Mock a config entry titled
+        # "fake_integration" so the watchdog scan can find
+        # our planted entities.
+        fake_entry = _mock_config_entry(
+            domain="fake_integration",
+            title="fake_integration",
+        )
+        fake_entry.add_to_hass(hass)
+
+        dev_reg = dr.async_get(hass)
+        ent_reg = er.async_get(hass)
+
+        device = dev_reg.async_get_or_create(
+            config_entry_id=fake_entry.entry_id,
+            identifiers={("fake_integration", "device-1")},
+            name="Test Device",
+        )
+
+        ent_reg.async_get_or_create(
+            domain="light",
+            platform="fake_integration",
+            unique_id="enabled-1",
+            device_id=device.id,
+            config_entry=fake_entry,
+            original_name="enabled",
+        )
+        ent_reg.async_get_or_create(
+            domain="light",
+            platform="fake_integration",
+            unique_id="disabled-1",
+            device_id=device.id,
+            config_entry=fake_entry,
+            disabled_by=er.RegistryEntryDisabler.USER,
+            original_name="disabled",
+        )
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE,
+            _valid_payload(
+                instance_id="automation.edw_disabled_test",
+                include_integrations=["fake_integration"],
+            ),
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+        state = hass.states.get(
+            "blueprint_toolkit.entity_defaults_watchdog"
+            "_edw_disabled_test_state",
+        )
+        assert state is not None
+        assert state.attributes["entities"] == 1, (
+            f"expected 1 enabled entity scanned; got "
+            f"{state.attributes['entities']}"
+        )
+
+
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "tests/test_entity_defaults_watchdog_integration.py",

@@ -470,6 +470,8 @@ def _build_device_inputs(
             entry = ent_reg.async_get(entity_id)
             if entry is None or entry.device_id is None:
                 continue
+            if entry.disabled_by is not None:
+                continue
             device = dev_reg.async_get(entry.device_id)
             if device is None:
                 continue
