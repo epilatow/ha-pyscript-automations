@@ -774,6 +774,57 @@ class TestLoadStateBlobMalformed:
         # decision tree at the integration level.
         assert loaded.get("auto_off_started_at") is None
 
+    async def test_non_string_data_does_not_crash_reconcile(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        """``_load_state_blob`` treats a non-string ``data``
+        attribute as missing. Defensive: the prior run's
+        save path always writes a JSON string, but a stray
+        upgrade or hand-edit could plant something else and
+        the bootstrap path must absorb it cleanly.
+        """
+        from pytest_homeassistant_custom_component.common import (
+            async_mock_service,
+        )
+
+        await _setup_integration(hass)
+        _seed_target_switch(hass)
+        async_mock_service(hass, "homeassistant", "turn_on")
+
+        # Plant a non-string ``data`` value (HA states API
+        # serializes through JSON so anything that JSON can
+        # represent is allowed in attributes).
+        hass.states.async_set(
+            "blueprint_toolkit.sensor_threshold_switch_controller"
+            "_stsc_nonstring_state",
+            "NONE",
+            {"data": {"not": "a string"}},
+        )
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE,
+            _valid_payload(
+                instance_id="automation.stsc_nonstring",
+                sensor_value="55.0",
+                trigger_entity="sensor.humidity",
+            ),
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+        state = hass.states.get(
+            "blueprint_toolkit.sensor_threshold_switch_controller"
+            "_stsc_nonstring_state",
+        )
+        assert state is not None
+        # Bootstrap rewrote the blob with a valid JSON
+        # string.
+        import json
+
+        json.loads(state.attributes["data"])
+
 
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [

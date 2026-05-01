@@ -482,9 +482,16 @@ def _load_state_blob(
     raw = st.attributes.get("data", "")
     if not raw:
         return None
+    if not isinstance(raw, str):
+        # Contract: ``data`` is the JSON blob the prior run
+        # wrote via ``_save_state``, which stores a string.
+        # If something else (an int, dict, etc.) is sitting
+        # there, treat the slot as missing and let the
+        # bootstrap path rebuild fresh state.
+        return None
     try:
         loaded: dict[str, Any] = json.loads(raw)
-    except (TypeError, ValueError):
+    except ValueError:
         # Malformed blob -- treat as missing. Next save
         # will rewrite it cleanly.
         return None
