@@ -192,8 +192,13 @@ class TestArgparseEmitsConfigErrorNotification:
         self,
         hass,  # noqa: ANN001
     ) -> None:
+        from pytest_homeassistant_custom_component.common import (
+            async_mock_service,
+        )
+
         await _setup_integration(hass)
         _seed_target_switch(hass)
+        turn_on_calls = async_mock_service(hass, "homeassistant", "turn_on")
 
         payload = _valid_payload(
             instance_id="automation.stsc_bad_notify",
@@ -214,6 +219,10 @@ class TestArgparseEmitsConfigErrorNotification:
         msg: str = notifs[notif_id]["message"]
         assert "notification_service" in msg
         assert "notify.does_not_exist" in msg
+        # Argparse rejection must short-circuit before any
+        # action dispatch -- a bad notify service should
+        # never cause the target switch to flip.
+        assert turn_on_calls == []
 
     async def test_non_controllable_target_switch_creates_notification(
         self,
