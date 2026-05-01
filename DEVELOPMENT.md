@@ -430,11 +430,11 @@ Flags: `--ha-config <path>` (default `/config`), `--cli-symlink-dir <path>`
 
 Each blueprint-backed automation writes a diagnostic state entity on every
 successful run with `last_run`, `runtime`, and per-automation attributes. The
-entity ID lives under `blueprint_toolkit.<service>_<slug>_state`:
+entity ID lives under `blueprint_toolkit.<service_tag>_<slug>_state`:
 
 ```bash
 curl -s -H "Authorization: Bearer $API_KEY" \
-  http://$HA_HOST:8123/api/states/blueprint_toolkit.<service>_<slug>_state
+  http://$HA_HOST:8123/api/states/blueprint_toolkit.<service_tag>_<slug>_state
 ```
 
 Persistent notifications aren't exposed as `/api/states` entities in HA

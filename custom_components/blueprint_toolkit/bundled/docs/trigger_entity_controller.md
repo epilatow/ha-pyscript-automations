@@ -110,7 +110,7 @@ all return to "off".
 ### Diagnostic state entity
 
 After each evaluation, a diagnostic state entry is written at
-`blueprint_toolkit.trigger_entity_controller_<slug>_state`, where `<slug>` is
+`blueprint_toolkit.tec_<slug>_state`, where `<slug>` is
 the automation's entity_id stripped of its `automation.` prefix. The state
 value is the decision name (NONE, TURN_ON, or TURN_OFF); attributes:
 

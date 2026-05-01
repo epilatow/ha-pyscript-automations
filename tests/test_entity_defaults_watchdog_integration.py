@@ -323,7 +323,7 @@ class TestServiceLayerScan:
     ) -> None:
         """A successful scan populates the diagnostic state
         entity at
-        ``blueprint_toolkit.entity_defaults_watchdog_<slug>_state``
+        ``blueprint_toolkit.edw_<slug>_state``
         with the common attrs (``instance_id``, ``last_run``,
         ``runtime``) plus the per-port stat extras.
         """
@@ -337,7 +337,7 @@ class TestServiceLayerScan:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.entity_defaults_watchdog_edw_scan_state",
+            "blueprint_toolkit.edw_edw_scan_state",
         )
         assert state is not None, "diagnostic state entity not created"
         assert state.state == "ok"
@@ -508,8 +508,7 @@ class TestDeviceAttachedDisabledEntityFilter:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.entity_defaults_watchdog"
-            "_edw_disabled_test_state",
+            "blueprint_toolkit.edw_edw_disabled_test_state",
         )
         assert state is not None
         assert state.attributes["entities"] == 1, (

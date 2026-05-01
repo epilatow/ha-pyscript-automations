@@ -88,7 +88,7 @@ without requiring ad-hoc instrumentation.
 ### Entity attributes (always on)
 
 After every invocation, the automation writes decision metadata to a
-`blueprint_toolkit.sensor_threshold_switch_controller_<slug>_state` entity as
+`blueprint_toolkit.stsc_<slug>_state` entity as
 attributes (where `<slug>` derives from the automation entity_id). These are
 visible in **Developer Tools > States** with no configuration.
 
@@ -111,7 +111,7 @@ the state value mirror the action.
 To view:
 
 1. Go to **Developer Tools > States**.
-2. Search for `blueprint_toolkit.sensor_threshold_switch_controller_*_state`
+2. Search for `blueprint_toolkit.stsc_*_state`
    and find your instance's entity.
 3. Expand the attributes to see the latest decision context.
 

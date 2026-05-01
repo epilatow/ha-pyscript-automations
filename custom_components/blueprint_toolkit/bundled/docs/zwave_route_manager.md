@@ -213,7 +213,7 @@ types fall into this category.)
 
 ### Entity attributes
 
-Attributes written to `blueprint_toolkit.zwave_route_manager_<slug>_state`,
+Attributes written to `blueprint_toolkit.zrm_<slug>_state`,
 where `<slug>` is the automation's entity_id stripped of its `automation.`
 prefix:
 

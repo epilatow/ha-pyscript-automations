@@ -335,7 +335,7 @@ async def _async_service_layer(
     # Persist diagnostic state.
     update_instance_state(
         hass,
-        service=_SERVICE,
+        service_tag=_SERVICE_TAG,
         instance_id=instance_id,
         last_run=now,
         runtime=time.monotonic() - started,

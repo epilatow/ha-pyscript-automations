@@ -274,11 +274,9 @@ skip all battery entities).</li>
 <h2>Developer notes</h2>
 <h3>Entity attributes</h3>
 <p>After each evaluation, attributes are written to
-<code>blueprint_toolkit.entity_defaults_watchdog_&lt;slug&gt;_state</code> where <code>&lt;slug&gt;</code>
-derives from the automation entity_id (e.g.
-<code>blueprint_toolkit.entity_defaults_watchdog_my_drift_check_state</code>). Search for
-<code>blueprint_toolkit.entity_defaults_watchdog_*_state</code> in Developer Tools &gt;
-States to find it.</p>
+<code>blueprint_toolkit.edw_&lt;slug&gt;_state</code> where <code>&lt;slug&gt;</code> derives from the
+automation entity_id. Search for <code>blueprint_toolkit.edw_*_state</code> in Developer
+Tools &gt; States to find it.</p>
 <ul>
 <li><code>last_run</code>: ISO timestamp of last evaluation</li>
 <li><code>runtime</code>: Evaluation time in seconds</li>

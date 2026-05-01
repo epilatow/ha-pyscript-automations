@@ -171,7 +171,7 @@ humidity spike), it turns off automatically after 30 minutes.</p>
 without requiring ad-hoc instrumentation.</p>
 <h3>Entity attributes (always on)</h3>
 <p>After every invocation, the automation writes decision metadata to a
-<code>blueprint_toolkit.sensor_threshold_switch_controller_&lt;slug&gt;_state</code> entity as
+<code>blueprint_toolkit.stsc_&lt;slug&gt;_state</code> entity as
 attributes (where <code>&lt;slug&gt;</code> derives from the automation entity_id). These are
 visible in <strong>Developer Tools &gt; States</strong> with no configuration.</p>
 <p>The diagnostic entity's state value is the same as <code>last_action</code> (<code>TURN_ON</code>,
@@ -226,7 +226,7 @@ the state value mirror the action.</p>
 <p>To view:</p>
 <ol>
 <li>Go to <strong>Developer Tools &gt; States</strong>.</li>
-<li>Search for <code>blueprint_toolkit.sensor_threshold_switch_controller_*_state</code>
+<li>Search for <code>blueprint_toolkit.stsc_*_state</code>
 and find your instance's entity.</li>
 <li>Expand the attributes to see the latest decision context.</li>
 </ol>

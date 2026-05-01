@@ -1008,23 +1008,32 @@ def automation_friendly_name(
 # --------------------------------------------------------
 
 
-def instance_state_entity_id(service: str, instance_id: str) -> str:
-    """Build the ``blueprint_toolkit.<service>_<slug>_state`` entity_id.
+def instance_state_entity_id(service_tag: str, instance_id: str) -> str:
+    """Build the ``blueprint_toolkit.<service_tag>_<slug>_state`` entity_id.
 
-    ``instance_id`` is the automation entity_id (e.g.
-    ``automation.foo_bar``); we strip the
-    ``automation.`` prefix so the resulting diagnostic
-    entity_id reads cleanly in Developer Tools /
+    ``service_tag`` is the per-handler short tag (``STSC`` /
+    ``TEC`` / ``EDW`` / ``DW`` / ``RW`` / ``ZRM``); HA entity
+    IDs require lowercase, so the helper lowercases it
+    internally -- callers can pass the uppercase
+    ``_SERVICE_TAG`` constant directly. ``instance_id`` is
+    the automation entity_id (e.g. ``automation.foo_bar``);
+    we strip the ``automation.`` prefix so the resulting
+    diagnostic entity_id reads cleanly in Developer Tools /
     templates / dashboards.
+
+    HA's `VALID_ENTITY_ID` regex rejects double-underscores
+    anywhere in the entity_id, so a `__` visual separator
+    between tag and slug isn't usable -- single `_`
+    everywhere.
     """
     slug = instance_id.removeprefix("automation.")
-    return f"{DOMAIN}.{service}_{slug}_state"
+    return f"{DOMAIN}.{service_tag.lower()}_{slug}_state"
 
 
 def update_instance_state(
     hass: HomeAssistant,
     *,
-    service: str,
+    service_tag: str,
     instance_id: str,
     last_run: datetime,
     runtime: float,
@@ -1034,7 +1043,7 @@ def update_instance_state(
     """Surface per-instance runtime state for debugging.
 
     Sets a state entry at
-    ``blueprint_toolkit.<service>_<slug>_state`` with
+    ``blueprint_toolkit.<service_tag>_<slug>_state`` with
     ``state`` as the state value (defaults to ``"ok"``;
     handlers that have a more meaningful value, e.g. TEC
     using its ``result.action.name``, override). Common
@@ -1055,7 +1064,7 @@ def update_instance_state(
     if extra_attributes:
         attributes.update(extra_attributes)
     hass.states.async_set(
-        instance_state_entity_id(service, instance_id),
+        instance_state_entity_id(service_tag, instance_id),
         state,
         attributes,
     )

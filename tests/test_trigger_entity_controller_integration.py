@@ -395,7 +395,7 @@ class TestServiceLayerAppliesActions:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.trigger_entity_controller_tec_diag_state",
+            "blueprint_toolkit.tec_tec_diag_state",
         )
         assert state is not None, "diagnostic state entity was not created"
         # State value is the TEC-specific override.
@@ -460,7 +460,7 @@ class TestAutoOffSchedulesAndFires:
         assert turn_off_calls == []
         # The diagnostic entity records the pending auto-off.
         state = hass.states.get(
-            "blueprint_toolkit.trigger_entity_controller_tec_autooff_state",
+            "blueprint_toolkit.tec_tec_autooff_state",
         )
         assert state is not None
         assert state.attributes["auto_off_at"] is not None

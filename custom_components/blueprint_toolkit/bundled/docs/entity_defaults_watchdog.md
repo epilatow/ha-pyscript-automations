@@ -227,11 +227,9 @@ intentionally customized names or IDs:
 ### Entity attributes
 
 After each evaluation, attributes are written to
-`blueprint_toolkit.entity_defaults_watchdog_<slug>_state` where `<slug>`
-derives from the automation entity_id (e.g.
-`blueprint_toolkit.entity_defaults_watchdog_my_drift_check_state`). Search for
-`blueprint_toolkit.entity_defaults_watchdog_*_state` in Developer Tools >
-States to find it.
+`blueprint_toolkit.edw_<slug>_state` where `<slug>` derives from the
+automation entity_id. Search for `blueprint_toolkit.edw_*_state` in Developer
+Tools > States to find it.
 
 - `last_run`: ISO timestamp of last evaluation
 - `runtime`: Evaluation time in seconds

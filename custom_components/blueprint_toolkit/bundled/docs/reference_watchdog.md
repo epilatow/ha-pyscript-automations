@@ -240,10 +240,8 @@ surface as a broken-entity false positive.
 ### Entity attributes
 
 After each evaluation, attributes are written to
-`blueprint_toolkit.reference_watchdog_<slug>_state` (e.g.,
-`blueprint_toolkit.reference_watchdog_reference_watchdog_state`). Search for
-`blueprint_toolkit.reference_watchdog_*` in **Developer Tools > States** to
-find it.
+`blueprint_toolkit.rw_<slug>_state`. Search for `blueprint_toolkit.rw_*` in
+**Developer Tools > States** to find it.
 
 | Attribute                  | Meaning                                                                                                                                                        |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -352,7 +352,7 @@ class TestServiceLayerScan:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.sensor_threshold_switch_controller_stsc_scan_state",
+            "blueprint_toolkit.stsc_stsc_scan_state",
         )
         assert state is not None, "diagnostic state entity not created"
         attrs = state.attributes
@@ -410,7 +410,7 @@ class TestServiceLayerScan:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.sensor_threshold_switch_controller_stsc_persist_state",
+            "blueprint_toolkit.stsc_stsc_persist_state",
         )
         assert state is not None
         import json
@@ -692,8 +692,7 @@ class TestStateSavedWhenNotifyFails:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.sensor_threshold_switch_controller"
-            "_stsc_notify_raises_state",
+            "blueprint_toolkit.stsc_stsc_notify_raises_state",
         )
         assert state is not None, (
             "diagnostic state entity not created -- state save"
@@ -738,8 +737,7 @@ class TestLoadStateBlobMalformed:
         # diagnostic state entity that the handler will
         # try to load.
         hass.states.async_set(
-            "blueprint_toolkit.sensor_threshold_switch_controller"
-            "_stsc_malformed_state",
+            "blueprint_toolkit.stsc_stsc_malformed_state",
             "NONE",
             {"data": "{not valid json"},
         )
@@ -759,8 +757,7 @@ class TestLoadStateBlobMalformed:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.sensor_threshold_switch_controller"
-            "_stsc_malformed_state",
+            "blueprint_toolkit.stsc_stsc_malformed_state",
         )
         assert state is not None
         # Blob was rewritten cleanly -- valid JSON now.
@@ -796,8 +793,7 @@ class TestLoadStateBlobMalformed:
         # serializes through JSON so anything that JSON can
         # represent is allowed in attributes).
         hass.states.async_set(
-            "blueprint_toolkit.sensor_threshold_switch_controller"
-            "_stsc_nonstring_state",
+            "blueprint_toolkit.stsc_stsc_nonstring_state",
             "NONE",
             {"data": {"not": "a string"}},
         )
@@ -815,8 +811,7 @@ class TestLoadStateBlobMalformed:
         await hass.async_block_till_done()
 
         state = hass.states.get(
-            "blueprint_toolkit.sensor_threshold_switch_controller"
-            "_stsc_nonstring_state",
+            "blueprint_toolkit.stsc_stsc_nonstring_state",
         )
         assert state is not None
         # Bootstrap rewrote the blob with a valid JSON

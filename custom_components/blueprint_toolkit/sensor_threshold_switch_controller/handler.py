@@ -398,7 +398,7 @@ async def _async_service_layer(
     # must never lose state.
     update_instance_state(
         hass,
-        service=_SERVICE,
+        service_tag=_SERVICE_TAG,
         instance_id=instance_id,
         last_run=now,
         runtime=time.monotonic() - started,
@@ -472,7 +472,7 @@ def _load_state_blob(
     "no prior state" -- the logic module bootstraps
     fresh.
     """
-    state_eid = instance_state_entity_id(_SERVICE, instance_id)
+    state_eid = instance_state_entity_id(_SERVICE_TAG, instance_id)
     st = hass.states.get(state_eid)
     if st is None:
         return None

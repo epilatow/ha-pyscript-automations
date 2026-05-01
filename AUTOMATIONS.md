@@ -186,8 +186,8 @@ Notifications:
 
 Diagnostic state:
 
-- `instance_state_entity_id(service, instance_id)` -- derive
-  `blueprint_toolkit.<service>_<slug>_state`.
+- `instance_state_entity_id(service_tag, instance_id)` -- derive
+  `blueprint_toolkit.<service_tag>_<slug>_state`.
 - `update_instance_state(hass, ...)` -- write diagnostic state. Common attrs:
   `instance_id`, `last_run`, `runtime`. Per-handler adds via
   `extra_attributes`.
@@ -296,7 +296,7 @@ The service layer's call flow is uniform across handlers:
    ```python
    update_instance_state(
        hass,
-       service=_SERVICE,
+       service_tag=_SERVICE_TAG,
        instance_id=instance_id,
        last_run=now,
        runtime=time.monotonic() - started,
@@ -326,7 +326,7 @@ After every evaluation, call:
 ```python
 update_instance_state(
     hass,
-    service=_SERVICE,
+    service_tag=_SERVICE_TAG,
     instance_id=...,
     last_run=now,
     runtime=time.monotonic() - started,
@@ -603,8 +603,11 @@ minimum:
   `tests/test_trigger_entity_controller_*.py`.
 - Notification ID: `blueprint_toolkit_{service}__{instance_id}__{kind}`, e.g.
   `blueprint_toolkit_dw__automation.bath_fan__config_error`.
-- State entity ID: `blueprint_toolkit.{service}_{slug}_state`, e.g.
-  `blueprint_toolkit.tec_kitchen_lights_state`.
+- State entity ID: `blueprint_toolkit.{service_tag}_{slug}_state`, e.g.
+  `blueprint_toolkit.tec_kitchen_lights_state`. The helper lowercases
+  `service_tag` internally so callers pass the uppercase `_SERVICE_TAG`
+  constant directly. HA's entity-id regex bans `__`, so single `_` is the only
+  viable separator.
 - `_raw` suffix applied to schema-validated input fields whose parsed form is
   rebound without the suffix in argparse, e.g. `default_route_speed_raw` ->
   `default_route_speed`.

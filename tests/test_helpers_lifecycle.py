@@ -492,10 +492,10 @@ class TestInstanceStateEntityId:
     def test_strips_automation_prefix(self) -> None:
         assert (
             helpers.instance_state_entity_id(
-                "trigger_entity_controller",
+                "tec",
                 "automation.foo_bar",
             )
-            == "blueprint_toolkit.trigger_entity_controller_foo_bar_state"
+            == "blueprint_toolkit.tec_foo_bar_state"
         )
 
     def test_passes_through_non_automation_id(self) -> None:
@@ -504,10 +504,24 @@ class TestInstanceStateEntityId:
         # well-formed entity_id.
         assert (
             helpers.instance_state_entity_id(
-                "trigger_entity_controller",
+                "tec",
                 "foo_bar",
             )
-            == "blueprint_toolkit.trigger_entity_controller_foo_bar_state"
+            == "blueprint_toolkit.tec_foo_bar_state"
+        )
+
+    def test_lowercases_service_tag(self) -> None:
+        # Callers pass the uppercase ``_SERVICE_TAG``
+        # constant; the helper lowercases internally so HA's
+        # entity-id regex (which requires lowercase) is
+        # satisfied without each caller having to do the
+        # conversion.
+        assert (
+            helpers.instance_state_entity_id(
+                "TEC",
+                "automation.foo_bar",
+            )
+            == "blueprint_toolkit.tec_foo_bar_state"
         )
 
 
@@ -517,14 +531,14 @@ class TestUpdateInstanceState:
         run_at = datetime(2024, 1, 15, 12, 0, 0)
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
-            service="device_watchdog",
+            service_tag="dw",
             instance_id="automation.dw",
             last_run=run_at,
             runtime=1.234,
         )
         assert hass.states.set_calls == [
             (
-                "blueprint_toolkit.device_watchdog_dw_state",
+                "blueprint_toolkit.dw_dw_state",
                 "ok",
                 {
                     "instance_id": "automation.dw",
@@ -538,7 +552,7 @@ class TestUpdateInstanceState:
         hass = _MockHass()
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
-            service="trigger_entity_controller",
+            service_tag="tec",
             instance_id="automation.tec",
             last_run=datetime(2024, 1, 15, 12, 0, 0),
             runtime=0.05,
@@ -550,7 +564,7 @@ class TestUpdateInstanceState:
         hass = _MockHass()
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
-            service="trigger_entity_controller",
+            service_tag="tec",
             instance_id="automation.tec",
             last_run=datetime(2024, 1, 15, 12, 0, 0),
             runtime=0.1,
@@ -570,7 +584,7 @@ class TestUpdateInstanceState:
         hass = _MockHass()
         helpers.update_instance_state(
             hass,  # type: ignore[arg-type]
-            service="zwave_route_manager",
+            service_tag="zrm",
             instance_id="automation.zrm",
             last_run=datetime(2024, 1, 15, 12, 0, 0),
             runtime=2.4567,

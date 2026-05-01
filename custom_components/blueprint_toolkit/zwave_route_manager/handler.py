@@ -927,7 +927,7 @@ def _persist_diagnostic(
     attrs.update(logic.circuit_breaker_attrs(state.circuit))
     update_instance_state(
         hass,
-        service=_SERVICE,
+        service_tag=_SERVICE_TAG,
         instance_id=state.instance_id,
         last_run=now,
         runtime=time.monotonic() - started,
