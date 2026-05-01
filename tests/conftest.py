@@ -487,3 +487,210 @@ class RecoveryEventsIntegrationBase:
             " EVENT_AUTOMATION_RELOADED; "
             f"saw: {[r.getMessage() for r in caplog.records]}"
         )
+
+
+class HandlerArgparseGuardsBase:
+    """Generic argparse guard tests for every handler.
+
+    Subclass per handler test file::
+
+        class TestArgparseGuards(HandlerArgparseGuardsBase):
+            handler = my_handler_module
+
+    The inherited tests assert that the handler's argparse
+    layer short-circuits before reaching ``_async_service_layer``
+    in two scenarios:
+
+    1. **Schema rejection** -- an empty (or
+       ``schema_invalid_payload``-overridden) call fails
+       ``_SCHEMA`` and ``validate_payload_or_emit_config_error``
+       fires the config-error notification. Service-layer
+       must not run.
+    2. **Unregistered notify service** -- for handlers that
+       have a ``notification_service`` schema field, a
+       payload referencing a service that doesn't exist
+       hits the cross-field guard. Service-layer must not
+       run.
+
+    Subclasses provide:
+        ``handler``: the handler module under test.
+        ``valid_payload``: a fully-populated, schema-valid
+            service-call payload (used as the basis for the
+            unregistered-notify test). Subclasses with no
+            ``notification_service`` field may leave this
+            unset; the unregistered-notify test is then
+            skipped.
+        ``schema_invalid_payload``: an explicitly-invalid
+            payload. Defaults to ``{}`` (every handler has
+            ``vol.Required`` keys, so empty fails).
+    """
+
+    handler: Any = None  # subclass override
+    valid_payload: dict[str, Any] | None = None
+    schema_invalid_payload: dict[str, Any] | None = None  # default: {}
+
+    @staticmethod
+    def _make_hass() -> Any:
+        """Build a mock hass with the surface argparse touches.
+
+        Argparse reads ``hass.states.get`` (cross-field
+        existence checks), ``hass.services.has_service``
+        (notify-service existence), and the
+        ``config_entries.async_entries(DOMAIN)`` accessor
+        (for ``entry_for_domain``). All return empty /
+        missing values; argparse paths exercised here
+        bottom-out at the schema rejection or the cross-
+        field error before any of those matter.
+        """
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class _Services:
+            calls: list[tuple[str, str, dict[str, Any]]] = field(
+                default_factory=list,
+            )
+
+            async def async_call(  # noqa: D401
+                self,
+                domain: str,
+                name: str,
+                data: dict[str, Any] | None = None,
+                **_kwargs: Any,
+            ) -> None:
+                self.calls.append((domain, name, dict(data or {})))
+
+            def has_service(self, _domain: str, _name: str) -> bool:
+                return False
+
+        @dataclass
+        class _States:
+            def get(self, _eid: str) -> Any:
+                return None
+
+        @dataclass
+        class _RuntimeData:
+            handlers: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+        @dataclass
+        class _Entry:
+            runtime_data: _RuntimeData = field(default_factory=_RuntimeData)
+
+            def async_create_background_task(
+                self,
+                _hass: Any,
+                _coro: Any,
+                _name: str,
+            ) -> Any:
+                return None
+
+        @dataclass
+        class _ConfigEntries:
+            entries: list[_Entry] = field(default_factory=lambda: [_Entry()])
+
+            def async_entries(self, _domain: str) -> list[_Entry]:
+                return list(self.entries)
+
+        @dataclass
+        class _Hass:
+            services: _Services = field(default_factory=_Services)
+            states: _States = field(default_factory=_States)
+            config_entries: _ConfigEntries = field(
+                default_factory=_ConfigEntries,
+            )
+            data: dict[str, Any] = field(default_factory=dict)
+
+        return _Hass()
+
+    @staticmethod
+    def _make_call(data: dict[str, Any]) -> Any:
+        class _Call:
+            def __init__(self, data: dict[str, Any]) -> None:
+                self.data = data
+                self.context = None
+
+        return _Call(data)
+
+    def _run_argparse_with_capture(
+        self,
+        payload: dict[str, Any],
+    ) -> list[tuple[Any, ...]]:
+        import asyncio  # noqa: PLC0415
+        from datetime import datetime  # noqa: PLC0415
+
+        captured: list[tuple[Any, ...]] = []
+
+        async def _capture_service_layer(
+            *args: Any,
+            **kwargs: Any,
+        ) -> None:
+            captured.append((args, kwargs))
+
+        async def _swallow_emit(
+            _hass: Any,
+            _instance_id: str,
+            _errors: list[str],
+        ) -> None:
+            return None
+
+        original_layer = self.handler._async_service_layer
+        original_emit = self.handler._emit_config_error
+        self.handler._async_service_layer = _capture_service_layer
+        self.handler._emit_config_error = _swallow_emit
+        try:
+            asyncio.run(
+                self.handler._async_argparse(
+                    self._make_hass(),
+                    self._make_call(payload),
+                    now=datetime(2026, 4, 28, 12, 0, 0),
+                ),
+            )
+        finally:
+            self.handler._async_service_layer = original_layer
+            self.handler._emit_config_error = original_emit
+        return captured
+
+    def test_schema_rejection_blocks_service_layer(self) -> None:
+        """A schema-invalid payload must short-circuit before
+        ``_async_service_layer`` runs -- the layer is what
+        actually dispatches actions / writes state, so any
+        regression that skips the schema gate would silently
+        operate on garbage input. ``validate_payload_or_emit_config_error``
+        emits the config-error notification and argparse
+        early-returns; the layer must not be reached.
+        """
+        invalid = (
+            {} if self.schema_invalid_payload is None
+            else self.schema_invalid_payload
+        )
+        captured = self._run_argparse_with_capture(invalid)
+        assert captured == [], (
+            "schema rejection should short-circuit before "
+            "_async_service_layer; saw service-layer "
+            f"calls: {captured}"
+        )
+
+    def test_unregistered_notify_service_blocks_service_layer(self) -> None:
+        """A payload with a ``notification_service`` referencing
+        an unregistered service must hit the cross-field
+        guard and short-circuit before
+        ``_async_service_layer``. The mock hass's
+        ``has_service`` returns ``False`` for everything, so
+        any non-empty ``notification_service`` triggers the
+        guard.
+        """
+        if self.valid_payload is None:
+            import pytest  # noqa: PLC0415
+
+            pytest.skip("subclass did not supply ``valid_payload``")
+        if "notification_service" not in self.valid_payload:
+            import pytest  # noqa: PLC0415
+
+            pytest.skip("handler schema has no ``notification_service`` field")
+        payload = dict(self.valid_payload)
+        payload["notification_service"] = "notify.does_not_exist"
+        captured = self._run_argparse_with_capture(payload)
+        assert captured == [], (
+            "unregistered notify-service should short-circuit "
+            "before _async_service_layer; saw service-layer "
+            f"calls: {captured}"
+        )

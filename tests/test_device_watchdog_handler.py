@@ -44,6 +44,7 @@ from conftest import (  # noqa: E402
     BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
     CodeQualityBase,
+    HandlerArgparseGuardsBase,
 )
 
 
@@ -769,6 +770,13 @@ class TestBlueprintDefaultsRoundTrip(BlueprintDefaultsRoundTripBase):
         "instance_id": "automation.dw_default_check",
         "trigger_id": "manual",
     }
+
+
+class TestArgparseGuards(HandlerArgparseGuardsBase):
+    """Schema rejection / unregistered notify must short-circuit argparse."""
+
+    handler = handler
+    valid_payload = _valid_argparse_payload()
 
 
 class TestCodeQuality(CodeQualityBase):

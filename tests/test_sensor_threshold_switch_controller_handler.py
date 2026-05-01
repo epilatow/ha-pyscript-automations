@@ -47,6 +47,7 @@ from conftest import (  # noqa: E402
     BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
     CodeQualityBase,
+    HandlerArgparseGuardsBase,
 )
 
 
@@ -518,6 +519,18 @@ class TestBlueprintDefaultsRoundTrip(BlueprintDefaultsRoundTripBase):
         "switch_state": "off",
         "trigger_entity": "sensor.humidity",
     }
+
+
+class TestArgparseGuards(HandlerArgparseGuardsBase):
+    """Schema rejection / unregistered notify must short-circuit argparse."""
+
+    handler = handler
+    # ``notification_service`` is empty in the default payload;
+    # override to a name that the mock hass will report as
+    # unregistered so the cross-field guard kicks in.
+    valid_payload = _valid_argparse_payload(
+        notification_service="notify.does_not_exist",
+    )
 
 
 class TestCodeQuality(CodeQualityBase):

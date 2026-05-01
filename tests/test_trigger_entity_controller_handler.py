@@ -47,6 +47,7 @@ from conftest import (  # noqa: E402
     BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
     CodeQualityBase,
+    HandlerArgparseGuardsBase,
 )
 
 
@@ -536,6 +537,18 @@ class TestBlueprintDefaultsRoundTrip(BlueprintDefaultsRoundTripBase):
         # entity at creation); test-time we feed a placeholder.
         "controlled_entities_raw": ["light.test"],
     }
+
+
+class TestArgparseGuards(HandlerArgparseGuardsBase):
+    """Schema rejection / unregistered notify must short-circuit argparse."""
+
+    handler = handler
+    # Schema-rejection-blocks-service-layer is the universal
+    # check; the unregistered-notify case is exercised via
+    # ``test_trigger_entity_controller_integration.py`` end-to-end
+    # since the unit test would need full
+    # cross-field-validation setup (controlled / trigger /
+    # disabling entity sets all populated, etc.).
 
 
 # --------------------------------------------------------

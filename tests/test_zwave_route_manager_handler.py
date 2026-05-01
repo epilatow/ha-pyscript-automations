@@ -47,6 +47,7 @@ from conftest import (  # noqa: E402
     BlueprintDefaultsRoundTripBase,
     BlueprintSchemaDriftBase,
     CodeQualityBase,
+    HandlerArgparseGuardsBase,
 )
 
 
@@ -644,6 +645,16 @@ class TestBlueprintDefaultsRoundTrip(BlueprintDefaultsRoundTripBase):
         "instance_id": "automation.zrm_default_check",
         "trigger_id": "manual",
     }
+
+
+class TestArgparseGuards(HandlerArgparseGuardsBase):
+    """Schema rejection must short-circuit argparse.
+
+    ZRM has no ``notification_service`` field, so the
+    unregistered-notify guard test from the base skips.
+    """
+
+    handler = handler
 
 
 class TestCodeQuality(CodeQualityBase):
