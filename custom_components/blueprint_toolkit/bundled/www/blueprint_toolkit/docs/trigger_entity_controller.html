@@ -50,28 +50,26 @@ a { color: #0366d6; }
 <body>
 <h1>Trigger Entity Controller</h1>
 <h2>Summary</h2>
-<p>Controls entities (lights, switches, fans, etc.) with optional
-trigger-based activation and auto-off timer. Supports
-time-of-day restrictions, disabling entities, force-on behavior,
-and configurable notifications.</p>
+<p>Controls entities (lights, switches, fans, etc.) with optional trigger-based
+activation and auto-off timer. Supports time-of-day restrictions, disabling
+entities, force-on behavior, and configurable notifications.</p>
 <h2>Features</h2>
 <ul>
 <li>Control any entity type (lights, switches, input_booleans, etc.)</li>
-<li>Optional trigger activation from any binary sensor (motion,
-door, occupancy, etc.)</li>
-<li>Auto-off timer that starts when triggers clear (or immediately
-for manual turn-on)</li>
+<li>Optional trigger activation from any binary sensor (motion, door, occupancy,
+etc.)</li>
+<li>Auto-off timer that starts when triggers clear (or immediately for manual
+turn-on)</li>
 <li>Time-of-day gating: restrict triggers to day or night only</li>
-<li>Trigger disabling: suppress triggers when a boolean entity is
-on (e.g., &quot;bedroom occupied&quot;)</li>
-<li>Auto-off disabling: suppress auto-off for full manual control
-(e.g., when a room is occupied)</li>
-<li>Force-on: re-enable controlled entities if turned off while
-triggers are active</li>
-<li>Configurable notifications for turn-on, force-on, and auto-off
-events</li>
-<li>Entity validation: alerts via persistent notification if
-configured entities are missing or renamed</li>
+<li>Trigger disabling: suppress triggers when a boolean entity is on (e.g.,
+&quot;bedroom occupied&quot;)</li>
+<li>Auto-off disabling: suppress auto-off for full manual control (e.g., when a
+room is occupied)</li>
+<li>Force-on: re-enable controlled entities if turned off while triggers are
+active</li>
+<li>Configurable notifications for turn-on, force-on, and auto-off events</li>
+<li>Entity validation: alerts via persistent notification if configured entities
+are missing or renamed</li>
 <li>Optional debug logging</li>
 </ul>
 <h2>Usage</h2>
@@ -160,8 +158,8 @@ configured entities are missing or renamed</li>
 <p>See the blueprint UI for default values.</p>
 <h2>Usage notes</h2>
 <h3>Example: Hallway Motion Light</h3>
-<p>A hallway light that always turns on with motion, except at
-night when the bedroom is occupied:</p>
+<p>A hallway light that always turns on with motion, except at night when the
+bedroom is occupied:</p>
 <ul>
 <li><strong>Controlled entities</strong>: <code>light.hallway</code></li>
 <li><strong>Auto-off delay</strong>: 2 minutes</li>
@@ -177,11 +175,10 @@ night when the bedroom is occupied:</p>
 <li>Night + bedroom occupied: motion is suppressed</li>
 </ul>
 <h3>Example: Motion Keep-Alive (no auto turn-on)</h3>
-<p>A device you turn on manually, but you want auto-off to
-pause while a room is occupied and resume its countdown
-after motion clears. Configure the motion sensor as an
-auto-off disabling entity (not a trigger entity), so it
-resets the timer without also turning the device on:</p>
+<p>A device you turn on manually, but you want auto-off to pause while a room is
+occupied and resume its countdown after motion clears. Configure the motion
+sensor as an auto-off disabling entity (not a trigger entity), so it resets
+the timer without also turning the device on:</p>
 <ul>
 <li><strong>Controlled entities</strong>: <code>switch.office_fan</code></li>
 <li><strong>Auto-off delay</strong>: 10 minutes</li>
@@ -191,24 +188,21 @@ resets the timer without also turning the device on:</p>
 <p>Result:</p>
 <ul>
 <li>Manual on while motion is active: timer stays paused</li>
-<li>Manual on while motion is inactive: timer starts
-immediately</li>
+<li>Manual on while motion is inactive: timer starts immediately</li>
 <li>Motion becomes active mid-countdown: timer is cleared</li>
 <li>Motion clears: fresh 10-minute countdown starts</li>
-<li>Motion returns mid-countdown: timer is cleared again,
-then restarts when motion next clears</li>
+<li>Motion returns mid-countdown: timer is cleared again, then restarts when
+motion next clears</li>
 </ul>
-<p>This pattern uses <code>auto_off_disabling_entities</code> as a
-keep-alive: while any listed entity is &quot;on&quot;, auto-off is
-held off; the timer (re)starts when they all return to
-&quot;off&quot;.</p>
+<p>This pattern uses <code>auto_off_disabling_entities</code> as a keep-alive: while any
+listed entity is &quot;on&quot;, auto-off is held off; the timer (re)starts when they
+all return to &quot;off&quot;.</p>
 <h2>Developer notes</h2>
 <h3>Diagnostic state entity</h3>
 <p>After each evaluation, a diagnostic state entry is written at
-<code>blueprint_toolkit.trigger_entity_controller_&lt;slug&gt;_state</code>,
-where <code>&lt;slug&gt;</code> is the automation's entity_id stripped of its
-<code>automation.</code> prefix. The state value is the decision name
-(NONE, TURN_ON, or TURN_OFF); attributes:</p>
+<code>blueprint_toolkit.trigger_entity_controller_&lt;slug&gt;_state</code>, where <code>&lt;slug&gt;</code> is
+the automation's entity_id stripped of its <code>automation.</code> prefix. The state
+value is the decision name (NONE, TURN_ON, or TURN_OFF); attributes:</p>
 <p>Common attributes:</p>
 <ul>
 <li><code>instance_id</code>: the automation entity_id</li>
@@ -217,18 +211,17 @@ where <code>&lt;slug&gt;</code> is the automation's entity_id stripped of its
 </ul>
 <p>TEC-specific attributes:</p>
 <ul>
-<li><code>last_event</code>: TRIGGER_ON, TRIGGER_OFF, CONTROLLED_ON,
-CONTROLLED_OFF, DISABLING_CHANGED, or TIMER</li>
+<li><code>last_event</code>: TRIGGER_ON, TRIGGER_OFF, CONTROLLED_ON, CONTROLLED_OFF,
+DISABLING_CHANGED, or TIMER</li>
 <li><code>last_reason</code>: human-readable reason for the decision</li>
 <li><code>auto_off_at</code>: ISO timestamp of pending auto-off, or null</li>
 </ul>
-<p>View in <strong>Developer Tools &gt; States</strong> (filter on
-<code>blueprint_toolkit.</code>), query from templates, or surface on a
-dashboard via the entity card.</p>
+<p>View in <strong>Developer Tools &gt; States</strong> (filter on <code>blueprint_toolkit.</code>), query
+from templates, or surface on a dashboard via the entity card.</p>
 <h3>Debug logging</h3>
-<p>Enable the <strong>Debug Logging</strong> toggle in the blueprint. Debug
-output appears in <strong>Settings &gt; System &gt; Logs</strong>. Uses
-<code>log.warning</code> level (HA's default for custom components).</p>
+<p>Enable the <strong>Debug Logging</strong> toggle in the blueprint. Debug output appears in
+<strong>Settings &gt; System &gt; Logs</strong>. Uses <code>log.warning</code> level (HA's default for
+custom components).</p>
 <p>Example output for an automation named &quot;Hallway Motion Light&quot;:</p>
 <pre><code class="language-text">[TEC: Hallway Motion Light] event=TRIGGER_ON action=TURN_ON
   reason='trigger activated' auto_off_at=none

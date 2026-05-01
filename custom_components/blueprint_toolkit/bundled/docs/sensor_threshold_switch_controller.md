@@ -7,19 +7,17 @@ override protection, auto-off functionality, and notification support.
 
 ## Features
 
-- **Threshold-based Control**: Turns a switch ON when sensor values
-  spike above a trigger threshold, OFF when they drop below a release
-  threshold.
-- **Manual Override Protection**: Re-activates the switch if it is
-  manually turned off while sensor thresholds are still exceeded.
-  Turning the switch off twice within a configurable window disables
-  this behavior.
-- **Auto-Off Timer**: Automatically turns the switch off after a
-  configurable duration when manually activated.
-- **Startup Recovery**: If Home Assistant restarts with the switch
-  already ON, starts the auto-off timer.
-- **Notifications**: Optionally sends notifications for all actions via
-  a configurable notification service.
+- **Threshold-based Control**: Turns a switch ON when sensor values spike
+  above a trigger threshold, OFF when they drop below a release threshold.
+- **Manual Override Protection**: Re-activates the switch if it is manually
+  turned off while sensor thresholds are still exceeded. Turning the switch
+  off twice within a configurable window disables this behavior.
+- **Auto-Off Timer**: Automatically turns the switch off after a configurable
+  duration when manually activated.
+- **Startup Recovery**: If Home Assistant restarts with the switch already ON,
+  starts the auto-off timer.
+- **Notifications**: Optionally sends notifications for all actions via a
+  configurable notification service.
 
 ## Usage
 
@@ -29,8 +27,8 @@ override protection, auto-off functionality, and notification support.
 3. Configure the required and optional parameters.
 4. Save.
 
-The automation will appear in the **Used By** list for all sensor
-and switch entities.
+The automation will appear in the **Used By** list for all sensor and switch
+entities.
 
 ## Configuration
 
@@ -41,7 +39,7 @@ and switch entities.
 | **Target Switch Entity** | The switch, fan, light, or input_boolean entity to control (e.g., `switch.bathroom_fan`).                                                                                            |
 | **Sensor Entities**      | One or more sensors to monitor (e.g., `sensor.bathroom_humidity`). All sensors feed into a shared sampling window. Any sensor spike triggers the switch; all must settle to release. |
 | **Trigger Threshold**    | Spike amount (max - min in sampling window) to turn the switch ON. Must be positive.                                                                                                 |
-| **Release Threshold**    | Amount above baseline to keep the switch ON. Must be <= trigger threshold.                                                                                                           |
+| **Release Threshold**    | Amount above baseline to keep the switch ON. Must be \<= trigger threshold.                                                                                                          |
 
 ### Optional
 
@@ -56,8 +54,8 @@ and switch entities.
 
 ### Timestamp Tokens
 
-The notification prefix and suffix support these tokens, which are
-replaced with the current time when the notification is sent:
+The notification prefix and suffix support these tokens, which are replaced
+with the current time when the notification is sent:
 
 `YYYY`, `YY`, `MM`, `DD`, `HH`, `mm`, `ss`
 
@@ -75,30 +73,28 @@ Sampling Window:       300 seconds (5 minutes)
 Auto-Off Timeout:      30 minutes
 ```
 
-When someone showers, humidity spikes on one or both sensors and the
-fan turns ON. When humidity returns to normal across all sensors, the
-fan turns OFF. If someone manually turns off the fan while humidity is
-still high, it turns back on. If they manually turn off the fan twice
-in a row (within 10 seconds), the sensor override is disabled. If
-they turn the fan on manually (with no humidity spike), it turns off
-automatically after 30 minutes.
+When someone showers, humidity spikes on one or both sensors and the fan turns
+ON. When humidity returns to normal across all sensors, the fan turns OFF. If
+someone manually turns off the fan while humidity is still high, it turns back
+on. If they manually turn off the fan twice in a row (within 10 seconds), the
+sensor override is disabled. If they turn the fan on manually (with no
+humidity spike), it turns off automatically after 30 minutes.
 
 ## Developer notes
 
-Three complementary layers provide visibility into the automation's
-decisions without requiring ad-hoc instrumentation.
+Three complementary layers provide visibility into the automation's decisions
+without requiring ad-hoc instrumentation.
 
 ### Entity attributes (always on)
 
 After every invocation, the automation writes decision metadata to a
-`blueprint_toolkit.sensor_threshold_switch_controller_<slug>_state`
-entity as attributes (where `<slug>` derives from the automation
-entity_id). These are visible in **Developer Tools > States** with no
-configuration.
+`blueprint_toolkit.sensor_threshold_switch_controller_<slug>_state` entity as
+attributes (where `<slug>` derives from the automation entity_id). These are
+visible in **Developer Tools > States** with no configuration.
 
-The diagnostic entity's state value is the same as `last_action`
-(`TURN_ON`, `TURN_OFF`, or `NONE`) -- the most recent decision -- so
-dashboards keying off the state value mirror the action.
+The diagnostic entity's state value is the same as `last_action` (`TURN_ON`,
+`TURN_OFF`, or `NONE`) -- the most recent decision -- so dashboards keying off
+the state value mirror the action.
 
 | Attribute      | Description                                                                                                                                                                                                       |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -115,16 +111,15 @@ dashboards keying off the state value mirror the action.
 To view:
 
 1. Go to **Developer Tools > States**.
-2. Search for
-   `blueprint_toolkit.sensor_threshold_switch_controller_*_state`
+2. Search for `blueprint_toolkit.sensor_threshold_switch_controller_*_state`
    and find your instance's entity.
 3. Expand the attributes to see the latest decision context.
 
 ### Debug logging (opt-in)
 
 The blueprint includes a **Debug Logging** toggle (default: off). When
-enabled, the service emits a `log.warning` message with full decision
-context on every invocation.
+enabled, the service emits a `log.warning` message with full decision context
+on every invocation.
 
 To enable:
 
@@ -147,14 +142,14 @@ Example output for an automation named "Main Bath Fan Controller":
   "Auto-off after 1 minute(s)"
 ```
 
-Uses `log.warning` (not `log.info`) because HA's default log level
-for custom components is WARNING. Toggling the flag produces immediate
-output without editing `configuration.yaml`.
+Uses `log.warning` (not `log.info`) because HA's default log level for custom
+components is WARNING. Toggling the flag produces immediate output without
+editing `configuration.yaml`.
 
 ### Logger configuration (optional)
 
-For more verbose handler output without the debug flag, add the
-following to `configuration.yaml`:
+For more verbose handler output without the debug flag, add the following to
+`configuration.yaml`:
 
 ```yaml
 logger:

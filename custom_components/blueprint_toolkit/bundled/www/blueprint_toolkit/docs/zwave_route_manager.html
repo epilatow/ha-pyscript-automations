@@ -50,50 +50,46 @@ a { color: #0366d6; }
 <body>
 <h1>Z-Wave Route Manager</h1>
 <h2>Summary</h2>
-<p>Reconciles Z-Wave priority routes (controller&lt;-&gt;node) against a
-declarative YAML config file. Reconciles on HA startup, on
-manual trigger, when the YAML config is edited, and periodically
-(default every 5 minutes) to catch out-of-band route changes.
-Failed reconciles retry automatically on the next
-minute-granularity tick. See &quot;Reconcile trigger semantics&quot; under
-Developer notes for the full gate. Surfaces broken config,
-unreachable API, and apply failures as persistent notifications.</p>
+<p>Reconciles Z-Wave priority routes (controller&lt;-&gt;node) against a declarative
+YAML config file. Reconciles on HA startup, on manual trigger, when the YAML
+config is edited, and periodically (default every 5 minutes) to catch
+out-of-band route changes. Failed reconciles retry automatically on the next
+minute-granularity tick. See &quot;Reconcile trigger semantics&quot; under Developer
+notes for the full gate. Surfaces broken config, unreachable API, and apply
+failures as persistent notifications.</p>
 <h2>Features</h2>
 <ul>
-<li>Declarative YAML config: one source of truth for every
-route you want managed</li>
-<li>Two Z-Wave route directions managed per configured device:
-controller-&gt;node (application route) AND node-&gt;controller
-(priority SUC return route)</li>
-<li>Automatic route-speed resolution (picks the slowest max rate
-across all hops in the route)</li>
+<li>Declarative YAML config: one source of truth for every route you want
+managed</li>
+<li>Two Z-Wave route directions managed per configured device: controller-&gt;node
+(application route) AND node-&gt;controller (priority SUC return route)</li>
+<li>Automatic route-speed resolution (picks the slowest max rate across all hops
+in the route)</li>
 <li>Per-entry and group overrides for speed</li>
-<li>Unmanaged-route cleanup: removes routes not in the config so
-editing the file is authoritative</li>
-<li>Pending-state tracking for sleeping nodes whose route
-commands queue until wake</li>
-<li>Generates configuration errors for devices that don't
-support routing (Z-Wave Long Range devices)</li>
-<li>Distinct notification categories: config errors, API
-unavailable, apply failures, pending timeouts</li>
+<li>Unmanaged-route cleanup: removes routes not in the config so editing the
+file is authoritative</li>
+<li>Pending-state tracking for sleeping nodes whose route commands queue until
+wake</li>
+<li>Generates configuration errors for devices that don't support routing
+(Z-Wave Long Range devices)</li>
+<li>Distinct notification categories: config errors, API unavailable, apply
+failures, pending timeouts</li>
 </ul>
 <h2>Requirements</h2>
-<p>Home Assistant <strong>Z-Wave JS</strong> addon (<code>core_zwave_js</code>),
-which bundles <code>zwave-js-ui</code>. The socket.io backend on
-port 8091 is the automation's target -- tested against
-addon v1.2.0 (bundling zwave-js-ui v11.16.0).</p>
+<p>Home Assistant <strong>Z-Wave JS</strong> addon (<code>core_zwave_js</code>), which bundles
+<code>zwave-js-ui</code>. The socket.io backend on port 8091 is the automation's target
+-- tested against addon v1.2.0 (bundling zwave-js-ui v11.16.0).</p>
 <h2>Usage</h2>
 <ol>
 <li>Install the integration (see main README).</li>
-<li>Create <code>/config/zwave_route_manager.yaml</code> with your route
-definitions (see Configuration below).</li>
-<li>Go to <strong>Settings -&gt; Automations &amp; Scenes -&gt; Create Automation
--&gt; From blueprint -&gt; Z-Wave Route Manager</strong>.</li>
+<li>Create <code>/config/zwave_route_manager.yaml</code> with your route definitions (see
+Configuration below).</li>
+<li>Go to <strong>Settings -&gt; Automations &amp; Scenes -&gt; Create Automation -&gt; From
+blueprint -&gt; Z-Wave Route Manager</strong>.</li>
 <li>Fill in the inputs. Most installations only need to set
-<code>clear_unmanaged_routes</code> if you want manually-set routes to
-persist.</li>
-<li>Save the automation. The next reconcile tick picks up your
-config and applies routes.</li>
+<code>clear_unmanaged_routes</code> if you want manually-set routes to persist.</li>
+<li>Save the automation. The next reconcile tick picks up your config and
+applies routes.</li>
 </ol>
 <h2>Configuration</h2>
 <table>
@@ -171,24 +167,21 @@ routes:
     clients:
       - binary_sensor.kitchen_motion
 </code></pre>
-<p><strong>Supported value forms for <code>route_speed</code>:</strong>
-<code>&quot;auto&quot;</code> | <code>&quot;9600&quot;</code> | <code>&quot;40k&quot;</code> | <code>&quot;100k&quot;</code> | bare integers
-<code>9600</code>, <code>40000</code>, <code>100000</code>.</p>
+<p><strong>Supported value forms for <code>route_speed</code>:</strong> <code>&quot;auto&quot;</code> | <code>&quot;9600&quot;</code> | <code>&quot;40k&quot;</code> |
+<code>&quot;100k&quot;</code> | bare integers <code>9600</code>, <code>40000</code>, <code>100000</code>.</p>
 <h3>Entity conventions</h3>
-<p>Any entity on the target Z-Wave device works -- the automation
-resolves entity -&gt; device -&gt; node ID internally. Suggested
-conventions for stability:</p>
+<p>Any entity on the target Z-Wave device works -- the automation resolves entity
+-&gt; device -&gt; node ID internally. Suggested conventions for stability:</p>
 <ul>
-<li><strong>Repeaters:</strong> use <code>sensor.&lt;name&gt;_node_status</code> -- always
-present for zwave_js devices, diagnostic category so rarely
-disabled by users, and its name is predictable.</li>
-<li><strong>Client devices:</strong> use the &quot;primary&quot; entity: <code>lock.X</code> for
-locks, <code>binary_sensor.X_contact</code> for door/window sensors,
-<code>binary_sensor.X_motion</code> for motion sensors.</li>
+<li><strong>Repeaters:</strong> use <code>sensor.&lt;name&gt;_node_status</code> -- always present for
+zwave_js devices, diagnostic category so rarely disabled by users, and its
+name is predictable.</li>
+<li><strong>Client devices:</strong> use the &quot;primary&quot; entity: <code>lock.X</code> for locks,
+<code>binary_sensor.X_contact</code> for door/window sensors, <code>binary_sensor.X_motion</code>
+for motion sensors.</li>
 </ul>
-<p>Disabling an entity used in the config breaks that config line
-(surfaces as a config-error notification). Pick another entity
-on the same device to fix it.</p>
+<p>Disabling an entity used in the config breaks that config line (surfaces as a
+config-error notification). Pick another entity on the same device to fix it.</p>
 <h3>Route-speed precedence</h3>
 <p>Most specific wins:</p>
 <pre><code class="language-text">per-client override
@@ -197,107 +190,91 @@ on the same device to fix it.</p>
       &gt; blueprint `Default route speed`
         &gt; auto: min(maxDataRate across source, repeater(s), controller)
 </code></pre>
-<p><code>auto</code> fails with a config error if any hop has an unknown
-maxDataRate. Explicit speed values skip that check -- use them
-if you have an older device that reports an unusual rate but
-you know what works.</p>
+<p><code>auto</code> fails with a config error if any hop has an unknown maxDataRate.
+Explicit speed values skip that check -- use them if you have an older device
+that reports an unusual rate but you know what works.</p>
 <h3>Line-powered nodes vs. sleepy nodes</h3>
-<p>Only line-powered nodes (extenders, plug-in sensors, wall
-switches) can act as repeaters. Battery devices and FLiRS
-(&quot;frequently listening routing slave&quot; -- most locks) can't
-repeat for others. The automation validates this upfront.</p>
-<p>Route commands to sleeping battery nodes queue in zwave-js
-until the node wakes. During that window the automation
-tracks the command as <strong>pending</strong> and suppresses retries. If
-the node doesn't wake within the configured pending timeout
-(default 24h) a persistent notification surfaces. FLiRS nodes
-like locks wake every second, so commands typically apply
-within seconds.</p>
-<p>A UI edit to a sleeping node's SUC return route takes up
-to two wake cycles to revert: we can't see the queued UI
-command, so only after the device wakes and accepts the
-new route do we notice the drift and issue another update.
-That update then has to wait for the next wake.</p>
+<p>Only line-powered nodes (extenders, plug-in sensors, wall switches) can act as
+repeaters. Battery devices and FLiRS (&quot;frequently listening routing slave&quot; --
+most locks) can't repeat for others. The automation validates this upfront.</p>
+<p>Route commands to sleeping battery nodes queue in zwave-js until the node
+wakes. During that window the automation tracks the command as <strong>pending</strong> and
+suppresses retries. If the node doesn't wake within the configured pending
+timeout (default 24h) a persistent notification surfaces. FLiRS nodes like
+locks wake every second, so commands typically apply within seconds.</p>
+<p>A UI edit to a sleeping node's SUC return route takes up to two wake cycles to
+revert: we can't see the queued UI command, so only after the device wakes and
+accepts the new route do we notice the drift and issue another update. That
+update then has to wait for the next wake.</p>
 <h3><code>clear_unmanaged_routes</code> caveat</h3>
-<p>When <code>clear_unmanaged_routes</code> is enabled, the reconcile
-iterates <strong>every</strong> Z-Wave node and removes any application
-route and any SUC return route that isn't covered by your
-config.</p>
-<p><strong>Important:</strong> The zwave-js-ui API for clearing SUC return
-routes (<code>deleteSUCReturnRoutes</code>) is blunt -- it clears <strong>all</strong>
-SUC return routes on the node, including custom routes you
-set manually via the Z-Wave JS UI's <em>Return routes -&gt; ADD</em>
-button. Once you commit to <code>clear_unmanaged_routes=true</code>,
-treat the config file as the single source of truth and
-stop using the UI panels to set routes.</p>
+<p>When <code>clear_unmanaged_routes</code> is enabled, the reconcile iterates <strong>every</strong>
+Z-Wave node and removes any application route and any SUC return route that
+isn't covered by your config.</p>
+<p><strong>Important:</strong> The zwave-js-ui API for clearing SUC return routes
+(<code>deleteSUCReturnRoutes</code>) is blunt -- it clears <strong>all</strong> SUC return routes on
+the node, including custom routes you set manually via the Z-Wave JS UI's
+<em>Return routes -&gt; ADD</em> button. Once you commit to
+<code>clear_unmanaged_routes=true</code>, treat the config file as the single source of
+truth and stop using the UI panels to set routes.</p>
 <p>If you need to temporarily edit routes via the UI, disable
-<code>clear_unmanaged_routes</code> first, edit, then re-enable once
-you've mirrored your changes in the config file.</p>
+<code>clear_unmanaged_routes</code> first, edit, then re-enable once you've mirrored your
+changes in the config file.</p>
 <h3>Notification categories</h3>
 <p>Four distinct categories of persistent notification:</p>
 <ul>
 <li>
-<p><strong>Config error.</strong> YAML parse problems and entity-
-resolution problems (missing devices, devices that don't
-support routing, etc.) bundled into one notification per
-reconcile. Clears automatically once the config and entity
+<p><strong>Config error.</strong> YAML parse problems and entity- resolution problems
+(missing devices, devices that don't support routing, etc.) bundled into one
+notification per reconcile. Clears automatically once the config and entity
 registry agree.</p>
 </li>
 <li>
-<p><strong>API unavailable.</strong> Surfaced when the Z-Wave JS UI
-socket.io API can't be reached or returns an incompatible
-response. Clears automatically once the addon is back.</p>
+<p><strong>API unavailable.</strong> Surfaced when the Z-Wave JS UI socket.io API can't be
+reached or returns an incompatible response. Clears automatically once the
+addon is back.</p>
 </li>
 <li>
-<p><strong>Apply failed.</strong> One per node that returned an error
-when sending a route command. Clears automatically once a
-later reconcile sends the same route successfully.</p>
+<p><strong>Apply failed.</strong> One per node that returned an error when sending a route
+command. Clears automatically once a later reconcile sends the same route
+successfully.</p>
 </li>
 <li>
-<p><strong>Pending timeout.</strong> Each time a route command sits
-pending longer than the configured timeout, the route is
-re-issued automatically and a <em>new</em> notification is
-emitted for that timeout event. These notifications stay
-until you dismiss them -- they're a stream of &quot;this route
-isn't landing&quot; events, not a single status.</p>
-<p>The <code>Pending timeout (hours)</code> blueprint input doubles as
-the retry interval: a route that's been pending that long
-is re-sent, and the timer starts over. If a device is
-permanently unable to accept the route (e.g. it's been
-removed from the network, or it's a device class that
-silently drops priority-route commands), each retry will
-fail again and another notification will appear. The way
-to stop the noise is to remove that device from the YAML
-config.</p>
+<p><strong>Pending timeout.</strong> Each time a route command sits pending longer than the
+configured timeout, the route is re-issued automatically and a <em>new</em>
+notification is emitted for that timeout event. These notifications stay
+until you dismiss them -- they're a stream of &quot;this route isn't landing&quot;
+events, not a single status.</p>
+<p>The <code>Pending timeout (hours)</code> blueprint input doubles as the retry interval:
+a route that's been pending that long is re-sent, and the timer starts over.
+If a device is permanently unable to accept the route (e.g. it's been
+removed from the network, or it's a device class that silently drops
+priority-route commands), each retry will fail again and another
+notification will appear. The way to stop the noise is to remove that device
+from the YAML config.</p>
 </li>
 </ul>
 <h2>Developer notes</h2>
 <h3>Two route requests per configured route</h3>
-<p>Most YAML route entries managed by the automation result in
-<em>two</em> underlying Z-Wave route requests -- one for each
-direction:</p>
+<p>Most YAML route entries managed by the automation result in <em>two</em> underlying
+Z-Wave route requests -- one for each direction:</p>
 <ul>
-<li><strong>Controller -&gt; node</strong> (priority application route): how
-the controller reaches the device when sending commands</li>
-<li><strong>Node -&gt; controller</strong> (priority SUC return route): how the
-device reaches the controller when reporting state</li>
+<li><strong>Controller -&gt; node</strong> (priority application route): how the controller
+reaches the device when sending commands</li>
+<li><strong>Node -&gt; controller</strong> (priority SUC return route): how the device reaches
+the controller when reporting state</li>
 </ul>
-<p>Both directions are managed, tracked, and counted
-independently. Hence a YAML config with 5 routes typically
-shows <code>routes_in_config: 10</code>, the <code>pending</code> and <code>applied</code>
-state attributes can each carry up to two entries per node
-(one per direction), and a device with one direction landed
-but the other still in flight (&quot;half-applied&quot;) appears in
-<em>both</em> the <code>applied</code> and <code>pending</code> dicts.</p>
-<p>(&quot;Most&quot; rather than &quot;always&quot; because future YAML knobs may
-opt a device into one-way-only management -- devices that
-won't accept one of the two route types fall into this
-category.)</p>
+<p>Both directions are managed, tracked, and counted independently. Hence a YAML
+config with 5 routes typically shows <code>routes_in_config: 10</code>, the <code>pending</code> and
+<code>applied</code> state attributes can each carry up to two entries per node (one per
+direction), and a device with one direction landed but the other still in
+flight (&quot;half-applied&quot;) appears in <em>both</em> the <code>applied</code> and <code>pending</code> dicts.</p>
+<p>(&quot;Most&quot; rather than &quot;always&quot; because future YAML knobs may opt a device into
+one-way-only management -- devices that won't accept one of the two route
+types fall into this category.)</p>
 <h3>Entity attributes</h3>
-<p>Attributes written to
-<code>blueprint_toolkit.zwave_route_manager_&lt;slug&gt;_state</code>,
-where <code>&lt;slug&gt;</code> is the automation's entity_id stripped of
-its <code>automation.</code> prefix:</p>
+<p>Attributes written to <code>blueprint_toolkit.zwave_route_manager_&lt;slug&gt;_state</code>,
+where <code>&lt;slug&gt;</code> is the automation's entity_id stripped of its <code>automation.</code>
+prefix:</p>
 <ul>
 <li>
 <p><code>instance_id</code>: the automation entity_id</p>
@@ -312,39 +289,35 @@ its <code>automation.</code> prefix:</p>
 <p><code>last_reconcile</code>: ISO timestamp of the last reconcile</p>
 </li>
 <li>
-<p><code>last_config_mtime</code>: the mtime seen last run (drives
-file-change detection)</p>
+<p><code>last_config_mtime</code>: the mtime seen last run (drives file-change detection)</p>
 </li>
 <li>
-<p><code>last_trigger</code>: trigger ID (<code>&quot;periodic&quot;</code> for integration-
-scheduled ticks, <code>&quot;manual&quot;</code> for everything else: dev-tools
-calls, the integration's startup + reload kicks)</p>
+<p><code>last_trigger</code>: trigger ID (<code>&quot;periodic&quot;</code> for integration- scheduled ticks,
+<code>&quot;manual&quot;</code> for everything else: dev-tools calls, the integration's startup +
+reload kicks)</p>
 </li>
 <li>
-<p><code>reconcile_pending</code>: true when a reconcile is deferred
-(config error, API unreachable, controller not ready, or
-the previous reconcile had apply failures)</p>
+<p><code>reconcile_pending</code>: true when a reconcile is deferred (config error, API
+unreachable, controller not ready, or the previous reconcile had apply
+failures)</p>
 </li>
 <li>
-<p><code>routes_in_config</code>: count of route directions after
-parsing + resolving (typically 2 x number of YAML route
-entries)</p>
+<p><code>routes_in_config</code>: count of route directions after parsing + resolving
+(typically 2 x number of YAML route entries)</p>
 </li>
 <li>
-<p><code>routes_applied</code>: count of route directions currently
-applied</p>
+<p><code>routes_applied</code>: count of route directions currently applied</p>
 </li>
 <li>
-<p><code>routes_pending</code>: count of route directions that have been
-requested but not yet confirmed</p>
+<p><code>routes_pending</code>: count of route directions that have been requested but not
+yet confirmed</p>
 </li>
 <li>
-<p><code>routes_errored</code>: count of route directions whose apply
-failed</p>
+<p><code>routes_errored</code>: count of route directions whose apply failed</p>
 </li>
 <li>
-<p><code>pending</code> / <code>applied</code>: nested dicts keyed by node ID,
-keeping the per-direction state alive across reconciles:</p>
+<p><code>pending</code> / <code>applied</code>: nested dicts keyed by node ID, keeping the
+per-direction state alive across reconciles:</p>
 <pre><code class="language-yaml">&quot;&lt;node_id&gt;&quot;:
   entity_id: lock.front_door
   paths:
@@ -357,90 +330,76 @@ keeping the per-direction state alive across reconciles:</p>
       confirmed_at: &quot;&quot;     # empty while pending
       timeout_count: 0     # bumped on each timeout retry
 </code></pre>
-<p>The same node can appear in both <code>pending</code> and <code>applied</code>
-when only one of the two directions has landed. Once a
-set lands, <code>timeout_count</code> carries forward into the
-applied entry so you can see how many retries it took.</p>
+<p>The same node can appear in both <code>pending</code> and <code>applied</code> when only one of
+the two directions has landed. Once a set lands, <code>timeout_count</code> carries
+forward into the applied entry so you can see how many retries it took.</p>
 <p><code>pending</code> also carries <em>clear</em> requests issued by the
-<code>clear_unmanaged_routes</code> path. A clear entry has an
-empty <code>repeaters</code> list and <code>speed: &quot;-&quot;</code>. Clears fall
-out of <code>pending</code> entirely once they land -- they do
-not enter <code>applied</code>, since <code>applied</code> tracks only routes
-currently at a specific non-default value.</p>
+<code>clear_unmanaged_routes</code> path. A clear entry has an empty <code>repeaters</code> list
+and <code>speed: &quot;-&quot;</code>. Clears fall out of <code>pending</code> entirely once they land --
+they do not enter <code>applied</code>, since <code>applied</code> tracks only routes currently at
+a specific non-default value.</p>
 </li>
 <li>
-<p>Error-state diagnostic fields (zeroed/empty on a
-successful reconcile): <code>config_errors</code>, <code>resolve_errors</code>,
-<code>api_error</code>, <code>bridge_error</code>. Useful for figuring out why
-<code>reconcile_pending</code> is true when no notification is up.</p>
+<p>Error-state diagnostic fields (zeroed/empty on a successful reconcile):
+<code>config_errors</code>, <code>resolve_errors</code>, <code>api_error</code>, <code>bridge_error</code>. Useful for
+figuring out why <code>reconcile_pending</code> is true when no notification is up.</p>
 </li>
 <li>
-<p>Circuit-breaker fields: <code>bridge_error_streak</code> (consecutive
-reconciles that ended with a bridge-timeout error) and
-<code>circuit_open_until</code> (ISO timestamp -- the circuit is open
-until this time; empty when closed). Both persist across
-reconciles so other error paths don't reset them.</p>
+<p>Circuit-breaker fields: <code>bridge_error_streak</code> (consecutive reconciles that
+ended with a bridge-timeout error) and <code>circuit_open_until</code> (ISO timestamp
+-- the circuit is open until this time; empty when closed). Both persist
+across reconciles so other error paths don't reset them.</p>
 </li>
 </ul>
 <h3>Bridge-timeout circuit breaker</h3>
-<p>The Z-Wave controller's serial interface has been observed
-(once so far, 2026-04-23) to wedge under a burst of
-<code>getPriorityRoute</code> / equivalent queries. Once wedged, every
-subsequent priority-route query times out and the zwave-js
-driver loops through unresponsive-controller recovery. Each
-reconcile's own burst of per-node route queries re-triggers
-the wedge on the next recovery attempt, so the automation
-itself is a contributor to the failure mode.</p>
-<p>The circuit breaker in the reconcile wrapper stops this
-amplification:</p>
+<p>The Z-Wave controller's serial interface has been observed (once so far,
+2026-04-23) to wedge under a burst of <code>getPriorityRoute</code> / equivalent queries.
+Once wedged, every subsequent priority-route query times out and the zwave-js
+driver loops through unresponsive-controller recovery. Each reconcile's own
+burst of per-node route queries re-triggers the wedge on the next recovery
+attempt, so the automation itself is a contributor to the failure mode.</p>
+<p>The circuit breaker in the reconcile wrapper stops this amplification:</p>
 <ul>
-<li>After <code>CIRCUIT_BREAKER_THRESHOLD</code> (3) consecutive
-reconciles end with a bridge-timeout error (matched by
-<code>TimeoutError</code> in the captured error string), the breaker
-opens for <code>CIRCUIT_BREAKER_COOLDOWN</code> (15 min).</li>
-<li>While the breaker is open, the reconcile returns early
-without calling the bridge. <code>bridge_error: &quot;circuit breaker open&quot;</code> is written to the state entity so the
-skip reason is visible.</li>
-<li>A manual trigger (service tool / dev tools) bypasses the
-breaker so the user can force a retry at any point.</li>
-<li>On the first successful bridge call after the cooldown,
-the breaker resets (streak = 0, <code>circuit_open_until = &quot;&quot;</code>) and the notification is cleared by the normal
-notification sweep.</li>
-<li>Non-timeout bridge errors (<code>ConnectionError</code>,
-<code>OSError</code>) don't count toward the streak, since those
-are usually transient addon-boot conditions.</li>
+<li>After <code>CIRCUIT_BREAKER_THRESHOLD</code> (3) consecutive reconciles end with a
+bridge-timeout error (matched by <code>TimeoutError</code> in the captured error
+string), the breaker opens for <code>CIRCUIT_BREAKER_COOLDOWN</code> (15 min).</li>
+<li>While the breaker is open, the reconcile returns early without calling the
+bridge. <code>bridge_error: &quot;circuit breaker open&quot;</code> is written to the state
+entity so the skip reason is visible.</li>
+<li>A manual trigger (service tool / dev tools) bypasses the breaker so the user
+can force a retry at any point.</li>
+<li>On the first successful bridge call after the cooldown, the breaker resets
+(streak = 0, <code>circuit_open_until = &quot;&quot;</code>) and the notification is cleared by
+the normal notification sweep.</li>
+<li>Non-timeout bridge errors (<code>ConnectionError</code>, <code>OSError</code>) don't count toward
+the streak, since those are usually transient addon-boot conditions.</li>
 </ul>
-<p>When the breaker opens, a persistent notification titled
-&quot;Z-Wave Route Manager: controller unresponsive&quot; is raised
-with the cooldown duration and absolute resume time. If
-the controller stays wedged and the cooldown slides
-forward, the notification is re-emitted in place with the
-new resume time -- the user never sees a stale &quot;resume at
-HH:MM&quot; that has already passed. Its ID
-(<code>&lt;prefix&gt;circuit_breaker</code>) is outside the notification
-sweep's <code>keep_pattern</code>, so it is auto-cleared by the first
-successful reconcile after the cooldown.</p>
+<p>When the breaker opens, a persistent notification titled &quot;Z-Wave Route
+Manager: controller unresponsive&quot; is raised with the cooldown duration and
+absolute resume time. If the controller stays wedged and the cooldown slides
+forward, the notification is re-emitted in place with the new resume time --
+the user never sees a stale &quot;resume at HH:MM&quot; that has already passed. Its ID
+(<code>&lt;prefix&gt;circuit_breaker</code>) is outside the notification sweep's
+<code>keep_pattern</code>, so it is auto-cleared by the first successful reconcile after
+the cooldown.</p>
 <h3>Debug logging</h3>
-<p>Set the blueprint's <em>Debug logging</em> to on. Output appears in
-Settings -&gt; System -&gt; Logs with the tag <code>[ZRM: &lt;automation alias&gt;]</code>.</p>
+<p>Set the blueprint's <em>Debug logging</em> to on. Output appears in Settings -&gt;
+System -&gt; Logs with the tag <code>[ZRM: &lt;automation alias&gt;]</code>.</p>
 <p>Example:</p>
 <pre><code class="language-text">[ZRM: Z-Wave Route Manager] configured=6 applied=4 pending=2
   errored=0 new_timeouts=0 actions_executed=2
 </code></pre>
 <h3>Reconcile trigger semantics</h3>
-<p>The blueprint has no triggers of its own -- the integration
-owns scheduling and recovery. Periodic reconciles are
-scheduled via <code>async_track_time_interval</code> keyed off the
-<code>reconcile_interval_minutes</code> input, and fire
-<code>automation.trigger</code> with the override variable
-<code>trigger_id == &quot;periodic&quot;</code>. Manual triggers from developer
-tools, the integration's restart-recovery kick
-(<code>EVENT_HOMEASSISTANT_STARTED</code>), and its reload-recovery
-kick (<code>EVENT_AUTOMATION_RELOADED</code>) all arrive as
-<code>trigger_id == &quot;manual&quot;</code> (the integration kicks pass it
-explicitly; dev-tools calls fall through to the blueprint
-action's <code>default('manual', true)</code>). The service handler's
-gate then decides whether each call warrants a full
+<p>The blueprint has no triggers of its own -- the integration owns scheduling
+and recovery. Periodic reconciles are scheduled via
+<code>async_track_time_interval</code> keyed off the <code>reconcile_interval_minutes</code> input,
+and fire <code>automation.trigger</code> with the override variable
+<code>trigger_id == &quot;periodic&quot;</code>. Manual triggers from developer tools, the
+integration's restart-recovery kick (<code>EVENT_HOMEASSISTANT_STARTED</code>), and its
+reload-recovery kick (<code>EVENT_AUTOMATION_RELOADED</code>) all arrive as
+<code>trigger_id == &quot;manual&quot;</code> (the integration kicks pass it explicitly; dev-tools
+calls fall through to the blueprint action's <code>default('manual', true)</code>). The
+service handler's gate then decides whether each call warrants a full
 reconcile:</p>
 <table>
 <thead>
@@ -473,209 +432,172 @@ reconcile:</p>
 </tbody>
 </table>
 <h3>Why zwave-js-ui and not zwave-js-server directly?</h3>
-<p>The priority-route command family was added to
-zwave-js-server schema 47 (PR #1513, merged 2026-03-10) but
-not yet released as of this writing. The HA Z-Wave JS addon
-bundles zwave-js-ui, which drives zwave-js core's route APIs
-directly via its own socket.io <code>ZWAVE_API</code> event -- no schema
-negotiation, and the APIs we need (<code>setPriorityRoute</code>,
-<code>assignPrioritySUCReturnRoute</code>, etc.) are all allow-listed in
-its ZwaveClient. Shipping through zwave-js-ui avoids waiting
-for the upstream release chain.</p>
-<p>When zwave-js-server schema 47 ships and HA core surfaces
-priority-route services natively, migration is one file:
-<code>custom_components/blueprint_toolkit/zwave_route_manager/bridge.py</code>.
-Its public API (ZwaveJsUiClient + typed methods) stays the
-same; the implementation swaps from socket.io to the HA
-client.</p>
+<p>The priority-route command family was added to zwave-js-server schema 47
+(zwave-js-server PR 1513, merged 2026-03-10) but not yet released as of this
+writing. The HA Z-Wave JS addon bundles zwave-js-ui, which drives zwave-js
+core's route APIs directly via its own socket.io <code>ZWAVE_API</code> event -- no
+schema negotiation, and the APIs we need (<code>setPriorityRoute</code>,
+<code>assignPrioritySUCReturnRoute</code>, etc.) are all allow-listed in its ZwaveClient.
+Shipping through zwave-js-ui avoids waiting for the upstream release chain.</p>
+<p>When zwave-js-server schema 47 ships and HA core surfaces priority-route
+services natively, migration is one file:
+<code>custom_components/blueprint_toolkit/zwave_route_manager/bridge.py</code>. Its
+public API (ZwaveJsUiClient + typed methods) stays the same; the
+implementation swaps from socket.io to the HA client.</p>
 <h3>Known failure mode: controller serial-interface wedge</h3>
-<p>Observed once so far, 2026-04-23, after inclusion of two
-Zooz ZSE11 Q Sensors as Z-Wave Long Range nodes (IDs 273
-and 274). ZRM and the <code>zwave_network_info.py</code> probe were
-both issuing <code>getPriorityRoute</code> for every node including
-LR ones; upstream zwave-js-ui already skips LR for its own
-startup interview, so our code was the last remaining
-LR-priority-route caller in this install. At some point
-during that window the controller (HA Z-Wave JS addon
-1.2.0) stopped ACKing the driver's serial commands
-entirely -- every call timed out, priority-route queries
-on mesh nodes and LR alike. zwave-js cycled
-unresponsive -&gt; soft-reset-failed -&gt; reopen-serial -&gt; next
-command hangs, and the reconcile's own burst of queries
-re-triggered the wedge on each recovery, so the automation
-itself became part of what kept the stick wedged.</p>
-<p>What exactly triggered the wedge isn't conclusively known.
-Plausible candidates: an LR-node <code>getPriorityRoute</code> call
-hitting a firmware bug, the volume of concurrent
-priority-route commands saturating the controller queue,
-or an interaction with the LR nodes' first post-inclusion
-check-ins. We never reproduced a clean trigger.</p>
+<p>Observed once so far, 2026-04-23, after inclusion of two Zooz ZSE11 Q Sensors
+as Z-Wave Long Range nodes (IDs 273 and 274). ZRM and the
+<code>zwave_network_info.py</code> probe were both issuing <code>getPriorityRoute</code> for every
+node including LR ones; upstream zwave-js-ui already skips LR for its own
+startup interview, so our code was the last remaining LR-priority-route caller
+in this install. At some point during that window the controller (HA Z-Wave JS
+addon 1.2.0) stopped ACKing the driver's serial commands entirely -- every
+call timed out, priority-route queries on mesh nodes and LR alike. zwave-js
+cycled unresponsive -&gt; soft-reset-failed -&gt; reopen-serial -&gt; next command
+hangs, and the reconcile's own burst of queries re-triggered the wedge on each
+recovery, so the automation itself became part of what kept the stick wedged.</p>
+<p>What exactly triggered the wedge isn't conclusively known. Plausible
+candidates: an LR-node <code>getPriorityRoute</code> call hitting a firmware bug, the
+volume of concurrent priority-route commands saturating the controller queue,
+or an interaction with the LR nodes' first post-inclusion check-ins. We never
+reproduced a clean trigger.</p>
 <p>The two-part fix (shipped):</p>
 <ol>
 <li><strong>Skip LR nodes in the per-node route refresh</strong>
-(<code>zwave_js_ui_bridge.get_nodes_with_fresh_routes</code> and the
-mirror in <code>scripts/zwave_network_info.py</code>). LR is a
-direct-star topology with no mesh, no priority routes,
-and no SUC return routes, so the queries are meaningless
-regardless of any firmware issue. If LR priority-route
-calls were part of the trigger, this removes our
-contribution; if not, the calls were still wasted
-round-trips worth eliminating.</li>
-<li><strong>Circuit breaker</strong> (see above) so a wedge from any
-future trigger doesn't get amplified by subsequent
-reconciles.</li>
+(<code>zwave_js_ui_bridge.get_nodes_with_fresh_routes</code> and the mirror in
+<code>scripts/zwave_network_info.py</code>). LR is a direct-star topology with no
+mesh, no priority routes, and no SUC return routes, so the queries are
+meaningless regardless of any firmware issue. If LR priority-route calls
+were part of the trigger, this removes our contribution; if not, the calls
+were still wasted round-trips worth eliminating.</li>
+<li><strong>Circuit breaker</strong> (see above) so a wedge from any future trigger doesn't
+get amplified by subsequent reconciles.</li>
 </ol>
 <h4>Recovery findings from the 2026-04-23 incident</h4>
 <p>Tried, in order:</p>
 <ol>
-<li><strong>Addon restart</strong> (<code>ha addons restart core_zwave_js</code>) --
-made things worse. Pre-restart the driver was initialised
-and only <code>getPriorityRoute</code> calls hung. Post-restart the
-driver couldn't complete its own capability-query
+<li><strong>Addon restart</strong> (<code>ha addons restart core_zwave_js</code>) -- made things worse.
+Pre-restart the driver was initialised and only <code>getPriorityRoute</code> calls
+hung. Post-restart the driver couldn't complete its own capability-query
 handshake; every attempt timed out on the ACK for
-<code>ZWaveController.queryCapabilities</code>. A driver-level
-reconnect is not enough to recover the stick.</li>
+<code>ZWaveController.queryCapabilities</code>. A driver-level reconnect is not enough
+to recover the stick.</li>
 <li><strong>USB port &quot;re-authorize&quot; via sysfs, 1-second off-window</strong>
-(<code>echo 0 &gt; /sys/bus/usb/devices/&lt;port&gt;/authorized</code> then
-<code>echo 1 &gt; ...</code>, ~1 s between) -- unreliable. Worked once
-early in the incident and gave ~10 s of healthy operation
-before the wedge re-triggered, but a second attempt ~8 h
-later with the same short window did nothing -- the driver
-couldn't even complete <code>queryCapabilities</code>.</li>
-<li><strong>USB port re-authorize with a 10-second off-window</strong> --
-this is the one that worked. After idling the stick (addon
-stopped, nothing touching <code>/dev/ttyACM0</code> for ~30 s),
-toggling authorize 0 -&gt; 1 with a 10 s gap let the driver
-come up cleanly and stay up. At the time of writing the
-controller has been healthy and processing traffic
-(including LR) for several minutes with no wedge
-recurrence.</li>
+(<code>echo 0 &gt; /sys/bus/usb/devices/&lt;port&gt;/authorized</code> then <code>echo 1 &gt; ...</code>, ~1
+s between) -- unreliable. Worked once early in the incident and gave ~10 s
+of healthy operation before the wedge re-triggered, but a second attempt ~8
+h later with the same short window did nothing -- the driver couldn't even
+complete <code>queryCapabilities</code>.</li>
+<li><strong>USB port re-authorize with a 10-second off-window</strong> -- this is the one
+that worked. After idling the stick (addon stopped, nothing touching
+<code>/dev/ttyACM0</code> for ~30 s), toggling authorize 0 -&gt; 1 with a 10 s gap let
+the driver come up cleanly and stay up. At the time of writing the
+controller has been healthy and processing traffic (including LR) for
+several minutes with no wedge recurrence.</li>
 </ol>
-<p>The off-window length is the most obvious difference
-between the unreliable and successful attempts, but with
-only three data points (two 1 s attempts, one 10 s
-attempt) we can't conclusively say it's the causal factor.
-One conjecture: the stick's MCU firmware has internal
-state that needs time to drain; an instant re-authorize
-preserves that state, a longer off-window lets it reset.
-Same sysfs path, same kernel API, different outcomes.</p>
+<p>The off-window length is the most obvious difference between the unreliable
+and successful attempts, but with only three data points (two 1 s attempts,
+one 10 s attempt) we can't conclusively say it's the causal factor. One
+conjecture: the stick's MCU firmware has internal state that needs time to
+drain; an instant re-authorize preserves that state, a longer off-window lets
+it reset. Same sysfs path, same kernel API, different outcomes.</p>
 <p>Unknowns that remain:</p>
 <ul>
-<li><strong>What actually triggered the self-sustaining wedge.</strong> Our
-best guess is the probe script's burst of <code>getPriorityRoute</code>
-calls against the LR nodes we'd just included, but the
-wedge persisted and re-triggered for hours after all our
-code stopped issuing any commands. Something ambient (a
-sleepy mesh node's periodic check-in, or an LR node's
-wake-up frame) kept re-triggering the firmware bug on its
-own, on a ~30 s cadence. We couldn't isolate which
-specific frame from the silly-level driver log because
-the controller was too hung to produce useful traffic
-records.</li>
-<li><strong>Whether the 10 s off-window is deterministic or just
-lucky.</strong> We have one data point where it worked. Needs
-more evidence across different wedge depths before we
-trust it as a reliable remediation.</li>
-<li><strong>Whether controller firmware version matters.</strong> This
-incident was on a Nabu Casa ZWA-2 (800-series Silicon
-Labs). Older 500/700-series sticks may behave differently.</li>
-<li><strong>Whether <code>ha host reboot</code></strong> (which cycles the USB
-subsystem at the OS level) would also clear the state
-when authorize-toggle doesn't. Not evaluated since the
-10 s authorize window worked first.</li>
+<li><strong>What actually triggered the self-sustaining wedge.</strong> Our best guess is the
+probe script's burst of <code>getPriorityRoute</code> calls against the LR nodes we'd
+just included, but the wedge persisted and re-triggered for hours after all
+our code stopped issuing any commands. Something ambient (a sleepy mesh
+node's periodic check-in, or an LR node's wake-up frame) kept re-triggering
+the firmware bug on its own, on a ~30 s cadence. We couldn't isolate which
+specific frame from the silly-level driver log because the controller was
+too hung to produce useful traffic records.</li>
+<li><strong>Whether the 10 s off-window is deterministic or just lucky.</strong> We have one
+data point where it worked. Needs more evidence across different wedge
+depths before we trust it as a reliable remediation.</li>
+<li><strong>Whether controller firmware version matters.</strong> This incident was on a Nabu
+Casa ZWA-2 (800-series Silicon Labs). Older 500/700-series sticks may behave
+differently.</li>
+<li><strong>Whether <code>ha host reboot</code></strong> (which cycles the USB subsystem at the OS
+level) would also clear the state when authorize-toggle doesn't. Not
+evaluated since the 10 s authorize window worked first.</li>
 </ul>
-<p>Until we have more data, treat recovery as an escalation
-ladder: (a) addon restart -- cheap but insufficient in the
-one instance we tried; (b) USB authorize toggle with a</p>
-<blockquote>
-<p>=10 s off-window -- this is new and promising; (c) <code>ha host reboot</code> -- untested for this failure mode; (d)
-physical unplug/replug -- untested in this incident but
-the canonical fallback for any USB device in an unknown
-state; requires hardware access.</p>
-</blockquote>
+<p>Until we have more data, treat recovery as an escalation ladder: (a) addon
+restart -- cheap but insufficient in the one instance we tried; (b) USB
+authorize toggle with a 10-second-or-greater off-window -- this is new and
+promising; (c) <code>ha host reboot</code> -- untested for this failure mode; (d)
+physical unplug/replug -- untested in this incident but the canonical fallback
+for any USB device in an unknown state; requires hardware access.</p>
 <h3>Future work</h3>
 <ul>
 <li>
-<p>N-hop repeater chains. The logic module's data structures
-already accept <code>repeater_node_ids: list[NodeID]</code>; v1 just
-enforces <code>len == 1</code>.</p>
+<p>N-hop repeater chains. The logic module's data structures already accept
+<code>repeater_node_ids: list[NodeID]</code>; v1 just enforces <code>len == 1</code>.</p>
 </li>
 <li>
-<p><code>direction:</code> override (controller-&gt;node only vs.
-node-&gt;controller only). v1 always sets both.</p>
+<p><code>direction:</code> override (controller-&gt;node only vs. node-&gt;controller only). v1
+always sets both.</p>
 </li>
 <li>
-<p><code>defaults:</code> top-level YAML block. Reserved by having
-<code>routes:</code> as the only recognised top-level key.</p>
+<p><code>defaults:</code> top-level YAML block. Reserved by having <code>routes:</code> as the only
+recognised top-level key.</p>
 </li>
 <li>
-<p>Migration from the socket.io bridge to zwave-js-server-
-python once PR #1417 merges and schema 47 ships.</p>
+<p>Migration from the socket.io bridge to zwave-js-server-python once
+zwave-js-server PR 1417 merges and schema 47 ships.</p>
 </li>
 <li>
-<p><strong>Auto-reset of a wedged controller</strong>. When the circuit
-breaker trips repeatedly (e.g. N opens within M hours),
-we would like a software-only self-heal action. We have
-one empirically-confirmed recovery recipe from the
+<p><strong>Auto-reset of a wedged controller</strong>. When the circuit breaker trips
+repeatedly (e.g. N opens within M hours), we would like a software-only
+self-heal action. We have one empirically-confirmed recovery recipe from the
 2026-04-23 incident (see &quot;Recovery findings&quot; above):</p>
 <ol>
 <li>Stop the addon (<code>hassio.addon_stop</code>).</li>
 <li>Idle for ~30 s with nothing touching <code>/dev/ttyACM0</code>.</li>
 <li>Toggle the stick's USB port authorize:
-<code>echo 0 &gt; /sys/bus/usb/devices/&lt;port&gt;/authorized</code>,
-wait <strong>at least 10 s</strong>, then
-<code>echo 1 &gt; .../authorized</code>. See &quot;Recovery findings&quot;
-above for why the off-window length appears to matter.</li>
+<code>echo 0 &gt; /sys/bus/usb/devices/&lt;port&gt;/authorized</code>, wait <strong>at least 10
+s</strong>, then <code>echo 1 &gt; .../authorized</code>. See &quot;Recovery findings&quot; above for
+why the off-window length appears to matter.</li>
 <li>Wait ~3 s for the bus to settle.</li>
 <li>Start the addon (<code>hassio.addon_start</code>).</li>
 <li>Poll the driver-ready signal; give up after ~60 s.</li>
 </ol>
-<p>All of this is automatable from the integration's handler
-(or a small companion automation). The HA core container
-has write access to
-<code>/sys/bus/usb/devices/&lt;port&gt;/authorized</code> (confirmed
-during debugging -- it's root-owned 0644 and the
-integration runs in-process), and <code>hassio.addon_stop</code> /
-<code>hassio.addon_start</code> are first-class services.
-<strong>Do not use <code>hassio.addon_restart</code></strong> -- that's what we
-tried first and it made things worse.</p>
+<p>All of this is automatable from the integration's handler (or a small
+companion automation). The HA core container has write access to
+<code>/sys/bus/usb/devices/&lt;port&gt;/authorized</code> (confirmed during debugging -- it's
+root-owned 0644 and the integration runs in-process), and
+<code>hassio.addon_stop</code> / <code>hassio.addon_start</code> are first-class services. <strong>Do
+not use <code>hassio.addon_restart</code></strong> -- that's what we tried first and it made
+things worse.</p>
 <p>Design sketch for the implementation:</p>
 <ul>
-<li>Blueprint input <code>reset_wedged_controllers</code> (default
-<code>false</code>) so this is opt-in and the user has explicitly
-acknowledged what the automation is allowed to do.</li>
-<li>Blueprint input for the stick's USB sysfs port path
-(e.g. <code>1-1.1</code>) -- the path is hardware/topology
-specific and can't be auto-detected reliably across
-systems. Default empty means &quot;disabled regardless of
-the reset_wedged_controllers toggle.&quot;</li>
-<li>State fields <code>last_auto_reset_at</code> (datetime) and
-<code>auto_reset_count_today</code> to cap attempts.</li>
-<li>Cooldown (e.g. 6 hours between resets, max 3 per 24
-hours) to prevent a reset loop if the action stops
-working.</li>
-<li>Separate persistent notification (distinct id outside
-the sweep's <code>keep_pattern</code>) that describes what was
-attempted and when, and is <strong>not</strong> auto-cleared -- the
-user should see the history.</li>
-<li>Detection signal is the breaker's <code>open</code> transition;
-auto-reset fires when the transition count within the
-last X minutes exceeds a threshold.</li>
-<li>Post-action validation: after the addon starts, poll
-for a successful <code>getNodes</code> response within ~60 s. If
-still wedged, <strong>do not</strong> escalate automatically --
-surface a notification describing the failed recovery
-and stop.</li>
-<li>Skipped from v1 for two reasons: (a) the shipped
-LR-filter fix removes our code's possible contribution
-to the trigger (we don't know for sure LR priority-route
-calls were the trigger, but if they were, our code no
-longer issues them); (b) the recovery recipe has
-exactly one successful data point so far, which isn't
-enough to trust it for unattended operation. Revisit
-once either the wedge recurs despite Fix B (so
-we know the recipe is worth automating) or we gather
-more data points confirming the recipe is reliable.</li>
+<li>Blueprint input <code>reset_wedged_controllers</code> (default <code>false</code>) so this is
+opt-in and the user has explicitly acknowledged what the automation is
+allowed to do.</li>
+<li>Blueprint input for the stick's USB sysfs port path (e.g. <code>1-1.1</code>) -- the
+path is hardware/topology specific and can't be auto-detected reliably
+across systems. Default empty means &quot;disabled regardless of the
+reset_wedged_controllers toggle.&quot;</li>
+<li>State fields <code>last_auto_reset_at</code> (datetime) and <code>auto_reset_count_today</code>
+to cap attempts.</li>
+<li>Cooldown (e.g. 6 hours between resets, max 3 per 24 hours) to prevent a
+reset loop if the action stops working.</li>
+<li>Separate persistent notification (distinct id outside the sweep's
+<code>keep_pattern</code>) that describes what was attempted and when, and is <strong>not</strong>
+auto-cleared -- the user should see the history.</li>
+<li>Detection signal is the breaker's <code>open</code> transition; auto-reset fires when
+the transition count within the last X minutes exceeds a threshold.</li>
+<li>Post-action validation: after the addon starts, poll for a successful
+<code>getNodes</code> response within ~60 s. If still wedged, <strong>do not</strong> escalate
+automatically -- surface a notification describing the failed recovery and
+stop.</li>
+<li>Skipped from v1 for two reasons: (a) the shipped LR-filter fix removes our
+code's possible contribution to the trigger (we don't know for sure LR
+priority-route calls were the trigger, but if they were, our code no
+longer issues them); (b) the recovery recipe has exactly one successful
+data point so far, which isn't enough to trust it for unattended
+operation. Revisit once either the wedge recurs despite Fix B (so we know
+the recipe is worth automating) or we gather more data points confirming
+the recipe is reliable.</li>
 </ul>
 </li>
 </ul>

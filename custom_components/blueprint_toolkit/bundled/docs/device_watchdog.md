@@ -2,31 +2,27 @@
 
 ## Summary
 
-Monitors device health across Home Assistant integrations. Raises
-a persistent notification whenever monitored devices have
-unavailable entities or stop reporting state within a
-configurable window. Clears notifications automatically when
-devices recover.
+Monitors device health across Home Assistant integrations. Raises a persistent
+notification whenever monitored devices have unavailable entities or stop
+reporting state within a configurable window. Clears notifications
+automatically when devices recover.
 
 ## Features
 
-- Monitor devices across multiple integrations (Z-Wave,
-  Matter, BLE, Shelly, etc.)
+- Monitor devices across multiple integrations (Z-Wave, Matter, BLE, Shelly,
+  etc.)
 - Detect unavailable or unknown entity states
 - Detect stale devices (no state report within threshold)
-- Per-device persistent notifications with auto-clear
-  on recovery
-- Include/exclude integration filtering (empty include
-  means all integrations)
+- Per-device persistent notifications with auto-clear on recovery
+- Include/exclude integration filtering (empty include means all integrations)
 - Regex-based device and entity exclusion filters
 - Configurable entity domain filtering
 - Configurable check interval and staleness threshold
 - Notification cap to limit per-device notifications
-- Diagnostic entity check: notifies when recommended
-  diagnostic entities (e.g., Last seen, Node status)
-  are disabled
-- Per-check selection so exclusion lists can be scoped
-  per check (instantiate the blueprint once per check)
+- Diagnostic entity check: notifies when recommended diagnostic entities
+  (e.g., Last seen, Node status) are disabled
+- Per-check selection so exclusion lists can be scoped per check (instantiate
+  the blueprint once per check)
 - Optional debug logging
 
 ## Usage
@@ -58,30 +54,28 @@ See the blueprint UI for default values.
 
 ### Notifications
 
-Each device with health issues gets its own persistent
-notification. Notifications are automatically dismissed
-when devices recover.
+Each device with health issues gets its own persistent notification.
+Notifications are automatically dismissed when devices recover.
 
 ### Notification panel ordering
 
-The order of notifications in the HA notification panel
-may change between evaluation runs. This is because each
-run re-creates all active notifications (to update
-content if health changed), which updates their
-timestamps. Since all creates happen within milliseconds,
-the panel's display order is effectively random. The
-same devices are shown -- only the panel ordering varies.
+The order of notifications in the HA notification panel may change between
+evaluation runs. This is because each run re-creates all active notifications
+(to update content if health changed), which updates their timestamps. Since
+all creates happen within milliseconds, the panel's display order is
+effectively random. The same devices are shown -- only the panel ordering
+varies.
 
 ## Developer notes
 
 ### Entity attributes
 
 After each evaluation, attributes are written to
-`blueprint_toolkit.device_watchdog_<slug>_state` where
-`<slug>` derives from the automation entity_id (e.g.
-`blueprint_toolkit.device_watchdog_my_check_state`).
-Search for `blueprint_toolkit.device_watchdog_*_state`
-in Developer Tools > States to find it.
+`blueprint_toolkit.device_watchdog_<slug>_state` where `<slug>` derives from
+the automation entity_id (e.g.
+`blueprint_toolkit.device_watchdog_my_check_state`). Search for
+`blueprint_toolkit.device_watchdog_*_state` in Developer Tools > States to
+find it.
 
 - `last_run`: ISO timestamp of last evaluation
 - `runtime`: Evaluation time in seconds
@@ -97,9 +91,9 @@ in Developer Tools > States to find it.
 
 ### Debug logging
 
-Enable the **Debug Logging** toggle in the blueprint. Debug
-output appears in **Settings > System > Logs**. Uses
-`log.warning` level (HA's default for custom components).
+Enable the **Debug Logging** toggle in the blueprint. Debug output appears in
+**Settings > System > Logs**. Uses `log.warning` level (HA's default for
+custom components).
 
 Example output for an automation named "Device Watchdog":
 

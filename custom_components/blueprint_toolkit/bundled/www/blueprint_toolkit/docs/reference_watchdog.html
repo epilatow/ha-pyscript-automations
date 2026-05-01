@@ -50,53 +50,42 @@ a { color: #0366d6; }
 <body>
 <h1>Reference Watchdog</h1>
 <h2>Summary</h2>
-<p>Scans your Home Assistant configuration for broken entity
-and device references. Every automation, script, template
-helper, config-entry helper, and dashboard is checked
-against the live entity registry and device registry.
-Each source (automation, script, dashboard, helper, YAML
-entry) that holds a broken reference gets its own
-persistent notification with a direct link into HA's UI
-where available, and repair hints when the source can
-only be edited by hand. Notifications are cleared
-automatically when the broken references are fixed.</p>
-<p>Also detects <em>source orphans</em> -- entity-registry entries
-whose backing YAML block or UI-helper record has been
-removed or renamed, leaving the registry entry behind.
-Those are surfaced in a single summary notification with
-links to each orphan's integration-filtered entities
-page for deletion.</p>
+<p>Scans your Home Assistant configuration for broken entity and device
+references. Every automation, script, template helper, config-entry helper,
+and dashboard is checked against the live entity registry and device registry.
+Each source (automation, script, dashboard, helper, YAML entry) that holds a
+broken reference gets its own persistent notification with a direct link into
+HA's UI where available, and repair hints when the source can only be edited
+by hand. Notifications are cleared automatically when the broken references
+are fixed.</p>
+<p>Also detects <em>source orphans</em> -- entity-registry entries whose backing YAML
+block or UI-helper record has been removed or renamed, leaving the registry
+entry behind. Those are surfaced in a single summary notification with links
+to each orphan's integration-filtered entities page for deletion.</p>
 <h2>Features</h2>
 <ul>
-<li>Scans automations, scripts, template helpers, config
-entry helpers, lovelace dashboards, and every other
-YAML file reachable via <code>!include</code> directives from
-<code>configuration.yaml</code> through a single generic-YAML
-catch-all adapter</li>
-<li>Per-owner persistent notifications with clickable
-URLs into the HA config UI where possible (automation
-editor, script editor, helpers page, dashboard path)</li>
-<li>YAML-only helpers are flagged in the notification
-body with a &quot;YAML-only, edit <code>&lt;file&gt;</code>&quot; note so users
-know to open their editor rather than waiting for a
-broken link</li>
-<li>Three complementary detection mechanisms (structural
-walk, Jinja AST, string sniff) with a service-name
-negative truth set to eliminate false positives</li>
-<li>Optional detection of references to disabled-but-
-existing entities (toggleable from the blueprint)</li>
-<li>Detection of <strong>source orphans</strong> -- registry entries
-whose backing YAML or UI-helper record has been
-removed -- with a single summary notification linking
-each entry to its filtered entities page for deletion</li>
-<li>Unified entity exclusion list that applies to both
-sides (source owner and target value)</li>
-<li>Source integration exclusion for bulk-silencing of
-specific config-entry integrations</li>
-<li>Path-glob exclusion for skipping whole files or
-dashboards</li>
-<li>Notification cap to limit the number of per-owner
-notifications</li>
+<li>Scans automations, scripts, template helpers, config entry helpers, lovelace
+dashboards, and every other YAML file reachable via <code>!include</code> directives
+from <code>configuration.yaml</code> through a single generic-YAML catch-all adapter</li>
+<li>Per-owner persistent notifications with clickable URLs into the HA config UI
+where possible (automation editor, script editor, helpers page, dashboard
+path)</li>
+<li>YAML-only helpers are flagged in the notification body with a &quot;YAML-only,
+edit <code>&lt;file&gt;</code>&quot; note so users know to open their editor rather than waiting
+for a broken link</li>
+<li>Three complementary detection mechanisms (structural walk, Jinja AST, string
+sniff) with a service-name negative truth set to eliminate false positives</li>
+<li>Optional detection of references to disabled-but- existing entities
+(toggleable from the blueprint)</li>
+<li>Detection of <strong>source orphans</strong> -- registry entries whose backing YAML or
+UI-helper record has been removed -- with a single summary notification
+linking each entry to its filtered entities page for deletion</li>
+<li>Unified entity exclusion list that applies to both sides (source owner and
+target value)</li>
+<li>Source integration exclusion for bulk-silencing of specific config-entry
+integrations</li>
+<li>Path-glob exclusion for skipping whole files or dashboards</li>
+<li>Notification cap to limit the number of per-owner notifications</li>
 <li>Optional debug logging</li>
 </ul>
 <h2>Usage</h2>
@@ -180,42 +169,35 @@ notifications</li>
 </tr>
 </tbody>
 </table>
-<p><strong>Rule of thumb:</strong> by file -&gt; paths. By config entry domain -&gt;
-integrations. By entity -&gt; entities.</p>
+<p><strong>Rule of thumb:</strong> by file -&gt; paths. By config entry domain -&gt; integrations.
+By entity -&gt; entities.</p>
 <h3>Owner attribution</h3>
-<p>Every finding is attributed to an <strong>owner</strong> -- the
-automation, script, config block, template entity,
-dashboard, or generic YAML entry that holds the broken
-reference. Notifications are one per owner with a header
-that includes:</p>
+<p>Every finding is attributed to an <strong>owner</strong> -- the automation, script, config
+block, template entity, dashboard, or generic YAML entry that holds the broken
+reference. Notifications are one per owner with a header that includes:</p>
 <ul>
-<li>An <code>Owner:</code> line identifying the owner by
-<code>config-block[N][.subkey[M]?]</code> position in its
-file, optionally suffixed with <code>- &lt;friendly-name&gt;</code>
-when a human name is available</li>
-<li>An <code>Entity:</code> line with the registered entity ID
-when one exists</li>
-<li>An <code>Integration:</code> line when the owner belongs to an
-adapter that knows its integration (automation,
-script, template, customize, lovelace, or a config
+<li>An <code>Owner:</code> line identifying the owner by <code>config-block[N][.subkey[M]?]</code>
+position in its file, optionally suffixed with <code>- &lt;friendly-name&gt;</code> when a
+human name is available</li>
+<li>An <code>Entity:</code> line with the registered entity ID when one exists</li>
+<li>An <code>Integration:</code> line when the owner belongs to an adapter that knows its
+integration (automation, script, template, customize, lovelace, or a config
 entry domain)</li>
 <li>A <code>File:</code> line with the source path</li>
 </ul>
 <p>Block-path format:</p>
 <ul>
-<li>Top-level YAML list item (automations, template
-config blocks): <code>config-block[N]</code></li>
-<li>Top-level YAML dict entry (scripts, customize,
-plants, utility meters): <code>config-block[N]</code> using
-dict insertion order</li>
+<li>Top-level YAML list item (automations, template config blocks):
+<code>config-block[N]</code></li>
+<li>Top-level YAML dict entry (scripts, customize, plants, utility meters):
+<code>config-block[N]</code> using dict insertion order</li>
 <li>Sub-key list item inside a template config block:
-<code>config-block[N].&lt;subkey&gt;[M]</code> (e.g.
-<code>config-block[0].sensor[1]</code>,
+<code>config-block[N].&lt;subkey&gt;[M]</code> (e.g. <code>config-block[0].sensor[1]</code>,
 <code>config-block[0].trigger[0]</code>)</li>
-<li>Sub-key dict inside a template config block (only
-<code>variables:</code> today): <code>config-block[N].variables</code></li>
-<li>JSON-backed sources (<code>.storage/*</code>): no block path --
-these aren't hand-edited</li>
+<li>Sub-key dict inside a template config block (only <code>variables:</code> today):
+<code>config-block[N].variables</code></li>
+<li>JSON-backed sources (<code>.storage/*</code>): no block path -- these aren't
+hand-edited</li>
 </ul>
 <p>Owner type -&gt; URL target:</p>
 <table>
@@ -249,63 +231,48 @@ these aren't hand-edited</li>
 </tbody>
 </table>
 <h3>YAML-only helpers</h3>
-<p>Some helpers are visible in HA's <strong>Settings &gt; Helpers</strong>
-page but can only be edited via YAML -- typically when
-they're defined in a YAML block like <code>utility_meter: !include utility_meters.yaml</code> rather than through the
-HA UI's config flow. The watchdog detects these by
-checking the entity registry's <code>config_entry_id</code> field:
-entries with <code>config_entry_id: null</code> are YAML-only.</p>
-<p>When an owner is YAML-only, its notification body
-includes a note like:</p>
+<p>Some helpers are visible in HA's <strong>Settings &gt; Helpers</strong> page but can only be
+edited via YAML -- typically when they're defined in a YAML block like
+<code>utility_meter: !include utility_meters.yaml</code> rather than through the HA UI's
+config flow. The watchdog detects these by checking the entity registry's
+<code>config_entry_id</code> field: entries with <code>config_entry_id: null</code> are YAML-only.</p>
+<p>When an owner is YAML-only, its notification body includes a note like:</p>
 <pre><code class="language-text">Entity: `sensor.air_filters_energy_monthly`
   (YAML-only, edit `utility_meters.yaml`)
 </code></pre>
-<p>No clickable URL is generated because HA has no edit
-page for these helpers. Open the YAML file in your
-editor and fix the reference there, then reload the
+<p>No clickable URL is generated because HA has no edit page for these helpers.
+Open the YAML file in your editor and fix the reference there, then reload the
 integration or restart HA.</p>
 <h3>Plants and other legacy YAML integrations</h3>
-<p>Some legacy YAML integrations -- notably <code>plant</code> -- don't
-register their entities in the entity registry at all,
-so <code>exclude_integrations: plant</code> has no effect on them.
-To silence plant findings:</p>
+<p>Some legacy YAML integrations -- notably <code>plant</code> -- don't register their
+entities in the entity registry at all, so <code>exclude_integrations: plant</code> has
+no effect on them. To silence plant findings:</p>
 <ul>
-<li>Preferred: <code>exclude_paths: plants.yaml</code> -- kills the
-whole scanner for that file</li>
-<li>Alternative: <code>exclude_entity_regex: '^sensor\.plant_sensor_'</code>
--- narrower, keeps scanning the file but suppresses
-specific broken sensor prefixes</li>
+<li>Preferred: <code>exclude_paths: plants.yaml</code> -- kills the whole scanner for that
+file</li>
+<li>Alternative: <code>exclude_entity_regex: '^sensor\.plant_sensor_'</code> -- narrower,
+keeps scanning the file but suppresses specific broken sensor prefixes</li>
 </ul>
 <h3>Source orphans</h3>
-<p>A <em>source orphan</em> is a registry entry whose backing
-YAML block (or UI-helper storage record) has been
-removed or renamed, leaving the registry entry behind.
-These entries are invisible to the broken-reference
-scan because they still resolve -- the dead entity is
-still in <code>entity_ids</code> -- but nothing currently creates
-them.</p>
-<p>The watchdog emits a single summary notification titled
-&quot;Reference watchdog: source orphans (N)&quot;. Orphans are
-grouped by <code>platform</code> (e.g. <code>utility_meter</code>,
-<code>input_boolean</code>, <code>automation</code>); larger groups are shown
-first. Disabled entities are tagged <em>(disabled)</em> next
-to the link.</p>
-<p>Each orphan links to
-<code>/config/entities?domain=&lt;platform&gt;</code> -- HA's entities
-page filtered to that integration's rows. Find your
-orphan in the narrowed list, click it to open the
-settings dialog, and click Delete.</p>
-<p>HA's entities page doesn't support filtering to a
-single <code>entity_id</code> via URL params (<code>?search=</code> isn't
-wired up) and there's no direct entity-settings URL,
-so the integration filter is the closest one-click
-landing available today.</p>
-<p>The detector restricts to registry entries with
-<code>config_entry_id = null</code> -- entries managed via the HA
-config flow are never flagged. The <code>pyscript</code> platform
-is excluded unconditionally because pyscript-created
-entities live in runtime state and don't have a
-file-based definer.</p>
+<p>A <em>source orphan</em> is a registry entry whose backing YAML block (or UI-helper
+storage record) has been removed or renamed, leaving the registry entry
+behind. These entries are invisible to the broken-reference scan because they
+still resolve -- the dead entity is still in <code>entity_ids</code> -- but nothing
+currently creates them.</p>
+<p>The watchdog emits a single summary notification titled &quot;Reference watchdog:
+source orphans (N)&quot;. Orphans are grouped by <code>platform</code> (e.g. <code>utility_meter</code>,
+<code>input_boolean</code>, <code>automation</code>); larger groups are shown first. Disabled
+entities are tagged <em>(disabled)</em> next to the link.</p>
+<p>Each orphan links to <code>/config/entities?domain=&lt;platform&gt;</code> -- HA's entities
+page filtered to that integration's rows. Find your orphan in the narrowed
+list, click it to open the settings dialog, and click Delete.</p>
+<p>HA's entities page doesn't support filtering to a single <code>entity_id</code> via URL
+params (<code>?search=</code> isn't wired up) and there's no direct entity-settings URL,
+so the integration filter is the closest one-click landing available today.</p>
+<p>The detector restricts to registry entries with <code>config_entry_id = null</code> --
+entries managed via the HA config flow are never flagged. The <code>pyscript</code>
+platform is excluded unconditionally because pyscript-created entities live in
+runtime state and don't have a file-based definer.</p>
 <p>To silence specific findings:</p>
 <table>
 <thead>
@@ -325,72 +292,58 @@ file-based definer.</p>
 </tr>
 </tbody>
 </table>
-<p>There's no per-platform silencing toggle -- the full
-set of known UI-helper storage files
-(<code>input_boolean</code>, <code>input_number</code>, <code>input_text</code>,
-<code>input_select</code>, <code>input_datetime</code>, <code>input_button</code>,
-<code>counter</code>, <code>timer</code>, <code>person</code>, <code>zone</code>, <code>schedule</code>,
-and the less-common <code>automation</code> / <code>script</code> /
-<code>scene</code> / <code>group</code> storage records) is loaded
-unconditionally on every run. Missing files are
+<p>There's no per-platform silencing toggle -- the full set of known UI-helper
+storage files (<code>input_boolean</code>, <code>input_number</code>, <code>input_text</code>, <code>input_select</code>,
+<code>input_datetime</code>, <code>input_button</code>, <code>counter</code>, <code>timer</code>, <code>person</code>, <code>zone</code>,
+<code>schedule</code>, and the less-common <code>automation</code> / <code>script</code> / <code>scene</code> / <code>group</code>
+storage records) is loaded unconditionally on every run. Missing files are
 silently skipped.</p>
 <h3>Notification panel ordering</h3>
-<p>The order of notifications in the HA notification panel
-may change between evaluation runs. Each run re-creates
-active notifications (to update content if findings
-changed), which updates their timestamps. Since all
-creates happen within milliseconds, the panel's display
-order is effectively random. The same owners are shown
--- only the panel ordering varies.</p>
+<p>The order of notifications in the HA notification panel may change between
+evaluation runs. Each run re-creates active notifications (to update content
+if findings changed), which updates their timestamps. Since all creates happen
+within milliseconds, the panel's display order is effectively random. The same
+owners are shown -- only the panel ordering varies.</p>
 <h2>Developer notes</h2>
 <h3>Detection mechanisms</h3>
-<p>Three complementary mechanisms run in parallel over
-every parsed source tree. The module-level docstring
-in <code>custom_components/blueprint_toolkit/reference_watchdog/logic.py</code>
-documents the strategy in detail; the summary below is
-for quickly sanity-checking the stat attributes.</p>
+<p>Three complementary mechanisms run in parallel over every parsed source tree.
+The module-level docstring in
+<code>custom_components/blueprint_toolkit/reference_watchdog/logic.py</code> documents
+the strategy in detail; the summary below is for quickly sanity-checking the
+stat attributes.</p>
 <ol>
-<li><strong>Structural walk.</strong> Dict keys in <code>_ENTITY_KEYS</code>
-(<code>entity</code>, <code>entity_id</code>, <code>entities</code>, <code>source</code>,
-<code>target_entity</code>, ...) emit entity references
-directly. Dict keys in <code>_DEVICE_KEYS</code> emit
-device references, validated against a
-32-char-lowercase-hex regex to filter non-HA
-device identifiers (mobile-app UDIDs, DLNA UPnP
-UUIDs, <code>/dev/</code> serial paths).</li>
-<li><strong>Jinja AST extraction.</strong> Any string leaf containing
-<code>{{</code> or <code>{%</code> is parsed as a Jinja template. Constant
-string literals (<code>states('sensor.foo')</code>) and
-attribute chains (<code>states.sensor.foo</code>) are extracted
-and validated. Non-constant expressions
-(<code>states('sensor.' ~ name)</code>) are intentionally
+<li><strong>Structural walk.</strong> Dict keys in <code>_ENTITY_KEYS</code> (<code>entity</code>, <code>entity_id</code>,
+<code>entities</code>, <code>source</code>, <code>target_entity</code>, ...) emit entity references
+directly. Dict keys in <code>_DEVICE_KEYS</code> emit device references, validated
+against a 32-char-lowercase-hex regex to filter non-HA device identifiers
+(mobile-app UDIDs, DLNA UPnP UUIDs, <code>/dev/</code> serial paths).</li>
+<li><strong>Jinja AST extraction.</strong> Any string leaf containing <code>{{</code> or <code>{%</code> is parsed
+as a Jinja template. Constant string literals (<code>states('sensor.foo')</code>) and
+attribute chains (<code>states.sensor.foo</code>) are extracted and validated.
+Non-constant expressions (<code>states('sensor.' ~ name)</code>) are intentionally
 skipped.</li>
-<li><strong>String sniff.</strong> String leaves that are neither
-under a known <code>_ENTITY_KEYS</code> position nor inside a
-<code>_SERVICE_KEYS</code> subtree are checked against the
-entity-id regex with a domain filter. Catches
-blueprint inputs where the parent key name is
-custom (<code>controlled_entities</code>, <code>notification_service</code>).</li>
+<li><strong>String sniff.</strong> String leaves that are neither under a known
+<code>_ENTITY_KEYS</code> position nor inside a <code>_SERVICE_KEYS</code> subtree are checked
+against the entity-id regex with a domain filter. Catches blueprint inputs
+where the parent key name is custom (<code>controlled_entities</code>,
+<code>notification_service</code>).</li>
 </ol>
 <h3>Service-name negative truth set</h3>
-<p>HA service names and entity IDs share the same
-<code>domain.name</code> shape -- <code>light.turn_on</code> is a service,
-<code>light.kitchen</code> is an entity. The string sniff can't
-distinguish them by syntax alone.</p>
-<p>The wrapper pulls HA's service registry
-(<code>hass.services.async_services()</code>) into
-<code>TruthSet.service_names</code>. When a sniff-emitted
-reference matches a service name, the finding is
-dropped before it becomes a notification (tracked as
-<code>refs_service_skipped</code> for coverage reporting). Without
-this backstop, every <code>notification_service: notify.mobile_app_*</code> blueprint input would surface as a
-broken-entity false positive.</p>
+<p>HA service names and entity IDs share the same <code>domain.name</code> shape --
+<code>light.turn_on</code> is a service, <code>light.kitchen</code> is an entity. The string sniff
+can't distinguish them by syntax alone.</p>
+<p>The wrapper pulls HA's service registry (<code>hass.services.async_services()</code>)
+into <code>TruthSet.service_names</code>. When a sniff-emitted reference matches a
+service name, the finding is dropped before it becomes a notification (tracked
+as <code>refs_service_skipped</code> for coverage reporting). Without this backstop,
+every <code>notification_service: notify.mobile_app_*</code> blueprint input would
+surface as a broken-entity false positive.</p>
 <h3>Entity attributes</h3>
 <p>After each evaluation, attributes are written to
 <code>blueprint_toolkit.reference_watchdog_&lt;slug&gt;_state</code> (e.g.,
-<code>blueprint_toolkit.reference_watchdog_reference_watchdog_state</code>).
-Search for <code>blueprint_toolkit.reference_watchdog_*</code> in
-<strong>Developer Tools &gt; States</strong> to find it.</p>
+<code>blueprint_toolkit.reference_watchdog_reference_watchdog_state</code>). Search for
+<code>blueprint_toolkit.reference_watchdog_*</code> in <strong>Developer Tools &gt; States</strong> to
+find it.</p>
 <table>
 <thead>
 <tr>
@@ -482,25 +435,22 @@ Search for <code>blueprint_toolkit.reference_watchdog_*</code> in
 <li><code>owners_total = owners_with_refs + owners_without_refs</code></li>
 <li><code>owners_with_issues is a subset of owners_with_refs</code></li>
 <li><code>total_findings = broken_entity_count + broken_device_count + disabled_entity_count</code></li>
-<li><code>refs_total = refs_structural + refs_jinja + refs_sniff</code>
-(service-skipped sniff hits are not counted)</li>
+<li><code>refs_total = refs_structural + refs_jinja + refs_sniff</code> (service-skipped
+sniff hits are not counted)</li>
 <li><code>paths_included + paths_excluded = paths considered</code></li>
 </ul>
 <h3>Source-orphan detection</h3>
-<p>The detector runs after the main reference scan and
-reuses the parsed YAML tree already produced during
-discovery from <code>configuration.yaml</code>. An entity is
+<p>The detector runs after the main reference scan and reuses the parsed YAML
+tree already produced during discovery from <code>configuration.yaml</code>. An entity is
 classified as a source orphan when:</p>
 <ol>
 <li>Its registry entry has <code>config_entry_id = null</code>.</li>
-<li>Its <code>platform</code> is not in the runtime-excluded set
-(<code>pyscript</code>).</li>
-<li>Neither its object_id (portion after the dot) nor
-its unique_id appears as a <strong>lowercased string</strong>
-in the platform-appropriate <strong>definer pool</strong>.</li>
+<li>Its <code>platform</code> is not in the runtime-excluded set (<code>pyscript</code>).</li>
+<li>Neither its object_id (portion after the dot) nor its unique_id appears as
+a <strong>lowercased string</strong> in the platform-appropriate <strong>definer pool</strong>.</li>
 </ol>
-<p>The definer pool is platform-scoped so that consumer-
-side mentions can't hide orphans:</p>
+<p>The definer pool is platform-scoped so that consumer- side mentions can't hide
+orphans:</p>
 <table>
 <thead>
 <tr>
@@ -527,134 +477,108 @@ side mentions can't hide orphans:</p>
 </tr>
 </tbody>
 </table>
-<p>Where &quot;generic YAML&quot; is every YAML file reachable from
-<code>configuration.yaml</code> via <code>!include</code> <em>except</em>
-<code>customize.yaml</code>, <code>automations.yaml</code>, <code>scripts.yaml</code>,
-and <code>template.yaml</code> (which have dedicated pools above).
-<code>customize.yaml</code> is never a definer -- it's an overlay,
-and treating it as a definer would mask orphans that
-are still being customized.</p>
-<p>The <code>.storage/&lt;helper&gt;</code> file set is a closed list of
-known UI-helper storage files. Adding a new HA-core
-helper that uses a <code>.storage/&lt;name&gt;</code> file means adding
-its filename to <code>_STORAGE_HELPER_DEFINER_FILES</code> in
-<code>custom_components/blueprint_toolkit/reference_watchdog/logic.py</code>.
-A missing
-entry produces systematic false positives for that
-platform; an extra entry that doesn't exist on a given
-host is a no-op.</p>
-<p>Each pool is populated by walking the <strong>parsed</strong> YAML
-or JSON tree of every contributing file and harvesting:</p>
+<p>Where &quot;generic YAML&quot; is every YAML file reachable from <code>configuration.yaml</code>
+via <code>!include</code> <em>except</em> <code>customize.yaml</code>, <code>automations.yaml</code>, <code>scripts.yaml</code>,
+and <code>template.yaml</code> (which have dedicated pools above). <code>customize.yaml</code> is
+never a definer -- it's an overlay, and treating it as a definer would mask
+orphans that are still being customized.</p>
+<p>The <code>.storage/&lt;helper&gt;</code> file set is a closed list of known UI-helper storage
+files. Adding a new HA-core helper that uses a <code>.storage/&lt;name&gt;</code> file means
+adding its filename to <code>_STORAGE_HELPER_DEFINER_FILES</code> in
+<code>custom_components/blueprint_toolkit/reference_watchdog/logic.py</code>. A missing
+entry produces systematic false positives for that platform; an extra entry
+that doesn't exist on a given host is a no-op.</p>
+<p>Each pool is populated by walking the <strong>parsed</strong> YAML or JSON tree of every
+contributing file and harvesting:</p>
 <ul>
 <li>every mapping <strong>key</strong> (strings only, lowercased)</li>
-<li>every <strong>value</strong> whose key is in <code>_DEFINER_ID_KEYS</code>
-(<code>id</code>, <code>unique_id</code>, <code>object_id</code>)</li>
+<li>every <strong>value</strong> whose key is in <code>_DEFINER_ID_KEYS</code> (<code>id</code>, <code>unique_id</code>,
+<code>object_id</code>)</li>
 </ul>
-<p>Walking the parsed tree -- instead of tokenizing raw
-text -- is deliberate. Comments are already stripped
-by the YAML parser, so a stale <code># old id:</code> comment in
-an unrelated file cannot contribute to the pool.
-Free-text fields like <code>description:</code>, <code>alias:</code>, or
-<code>friendly_name:</code> are also ignored, because their keys
-are not in <code>_DEFINER_ID_KEYS</code>. That stops a lingering
-&quot;old name&quot; reference in an automation <code>description</code>
-from falsely marking the dead entity as defined.</p>
-<p>Membership is exact-string, not substring. The YAML
-key <code>garage_central_heater_energy_daily</code> is harvested
-as a single string; looking up the shorter object_id
-<code>central_heater_energy_daily</code> returns no hit, so the
+<p>Walking the parsed tree -- instead of tokenizing raw text -- is deliberate.
+Comments are already stripped by the YAML parser, so a stale <code># old id:</code>
+comment in an unrelated file cannot contribute to the pool. Free-text fields
+like <code>description:</code>, <code>alias:</code>, or <code>friendly_name:</code> are also ignored, because
+their keys are not in <code>_DEFINER_ID_KEYS</code>. That stops a lingering &quot;old name&quot;
+reference in an automation <code>description</code> from falsely marking the dead entity
+as defined.</p>
+<p>Membership is exact-string, not substring. The YAML key
+<code>garage_central_heater_energy_daily</code> is harvested as a single string; looking
+up the shorter object_id <code>central_heater_energy_daily</code> returns no hit, so the
 orphan (left over from a rename) is correctly flagged.</p>
-<p>Identifier values are also kept verbatim, so non-slug
-unique_ids (e.g. MAC-style <code>aa:bb:cc:dd:ee:ff</code> stored
-as <code>&quot;id&quot;: &quot;aa:bb:cc:dd:ee:ff&quot;</code> in <code>.storage/person</code>)
-are matched directly without being split into tokens.</p>
-<p>This works reliably because every HA platform that
-stores definitions in YAML or <code>.storage</code> lays the
-identifier down as either a mapping key or an
+<p>Identifier values are also kept verbatim, so non-slug unique_ids (e.g.
+MAC-style <code>aa:bb:cc:dd:ee:ff</code> stored as <code>&quot;id&quot;: &quot;aa:bb:cc:dd:ee:ff&quot;</code> in
+<code>.storage/person</code>) are matched directly without being split into tokens.</p>
+<p>This works reliably because every HA platform that stores definitions in YAML
+or <code>.storage</code> lays the identifier down as either a mapping key or an
 identifier-field value:</p>
 <ul>
-<li><code>utility_meter</code> YAML uses the top-level dict key as
-the object_id (and as a prefix of the unique_id --
-e.g. object_id <code>central_heater_energy_daily</code>,
-unique_id <code>central_heater_energy_daily_single_tariff</code>).
-The YAML key is harvested.</li>
-<li><code>input_*</code>, <code>counter</code>, <code>timer</code>, <code>person</code> UI helpers
-store <code>&quot;id&quot;: &quot;&lt;value&gt;&quot;</code> in their <code>.storage/&lt;helper&gt;</code>
-file, and that value equals the registry unique_id.</li>
-<li><code>template</code> entities have their <code>unique_id</code> written
-verbatim in YAML, and the <code>name:</code> slug equals the
-object_id (and the YAML dict key structure includes
+<li><code>utility_meter</code> YAML uses the top-level dict key as the object_id (and as a
+prefix of the unique_id -- e.g. object_id <code>central_heater_energy_daily</code>,
+unique_id <code>central_heater_energy_daily_single_tariff</code>). The YAML key is
+harvested.</li>
+<li><code>input_*</code>, <code>counter</code>, <code>timer</code>, <code>person</code> UI helpers store <code>&quot;id&quot;: &quot;&lt;value&gt;&quot;</code>
+in their <code>.storage/&lt;helper&gt;</code> file, and that value equals the registry
+unique_id.</li>
+<li><code>template</code> entities have their <code>unique_id</code> written verbatim in YAML, and the
+<code>name:</code> slug equals the object_id (and the YAML dict key structure includes
 the object_id for legacy-style templates).</li>
-<li><code>automation</code> entries in <code>automations.yaml</code> have
-<code>id: &lt;value&gt;</code> matching the registry unique_id.</li>
+<li><code>automation</code> entries in <code>automations.yaml</code> have <code>id: &lt;value&gt;</code> matching the
+registry unique_id.</li>
 </ul>
-<p>There is no toggle to disable source-orphan detection
-globally. Silence noisy entries via <code>exclude_entities</code>
-(exact match) or <code>exclude_entity_regex</code> (pattern); both
-inputs apply symmetrically to broken references and
-source orphans.</p>
+<p>There is no toggle to disable source-orphan detection globally. Silence noisy
+entries via <code>exclude_entities</code> (exact match) or <code>exclude_entity_regex</code>
+(pattern); both inputs apply symmetrically to broken references and source
+orphans.</p>
 <p><strong>Known limitations:</strong></p>
 <ul>
-<li>Object_ids derived by slugifying a scene/group
-<code>name:</code> (not written verbatim in the YAML) are not
-harvested. A <code>scene:</code> block without an explicit
-<code>id:</code> will appear as a false positive. Fix by giving
-the scene an explicit <code>id:</code> (recommended), or by
-adding the entity to <code>exclude_entities</code>.</li>
-<li>An integration that lays its definer identifier
-down under a key other than <code>id</code>, <code>unique_id</code>, or
-<code>object_id</code> will false-positive. None of the core HA
-integrations do this today, but custom integrations
-might.</li>
+<li>Object_ids derived by slugifying a scene/group <code>name:</code> (not written verbatim
+in the YAML) are not harvested. A <code>scene:</code> block without an explicit <code>id:</code>
+will appear as a false positive. Fix by giving the scene an explicit <code>id:</code>
+(recommended), or by adding the entity to <code>exclude_entities</code>.</li>
+<li>An integration that lays its definer identifier down under a key other than
+<code>id</code>, <code>unique_id</code>, or <code>object_id</code> will false-positive. None of the core HA
+integrations do this today, but custom integrations might.</li>
 </ul>
 <h3>Debug logging</h3>
-<p>Enable the <strong>Debug logging</strong> toggle in the blueprint.
-Debug output appears in <strong>Settings &gt; System &gt; Logs</strong>.
-Uses <code>log.warning</code> level (HA's default for custom
-components).</p>
-<p>Example output for an automation named
-&quot;Reference Watchdog&quot;:</p>
+<p>Enable the <strong>Debug logging</strong> toggle in the blueprint. Debug output appears in
+<strong>Settings &gt; System &gt; Logs</strong>. Uses <code>log.warning</code> level (HA's default for
+custom components).</p>
+<p>Example output for an automation named &quot;Reference Watchdog&quot;:</p>
 <pre><code class="language-text">[RW: Reference Watchdog] owners=338 with_issues=43
   findings=85 refs=819 (struct=641 jinja=59 sniff=119
   svc_skipped=13) orphans=9/184
 </code></pre>
-<p><code>orphans=9/184</code> means 9 of 184 orphan-eligible registry
-entries were flagged as source orphans.</p>
+<p><code>orphans=9/184</code> means 9 of 184 orphan-eligible registry entries were flagged
+as source orphans.</p>
 <h3>Known limitations</h3>
-<p>Documented gaps that won't be fixed in v1 without a
-design change:</p>
+<p>Documented gaps that won't be fixed in v1 without a design change:</p>
 <ul>
-<li><strong>Runtime-computed entity IDs</strong> embedded as string
-literals inside a YAML scalar (e.g. a multi-line
-Python-list-literal <code>monitored_automations: &quot;['automation.foo', 'automation.bar', ...]&quot;</code> that's
-consumed via a runtime <code>in</code> check) aren't caught.
-Neither the sniff nor the Jinja AST pass matches
-substrings inside non-template strings. Catching
-them would require a regex fallback that introduces
-false positives in comments and descriptions -- we
-intentionally draw the line at &quot;constant strings we
+<li><strong>Runtime-computed entity IDs</strong> embedded as string literals inside a YAML
+scalar (e.g. a multi-line Python-list-literal
+<code>monitored_automations: &quot;['automation.foo', 'automation.bar', ...]&quot;</code> that's
+consumed via a runtime <code>in</code> check) aren't caught. Neither the sniff nor the
+Jinja AST pass matches substrings inside non-template strings. Catching them
+would require a regex fallback that introduces false positives in comments
+and descriptions -- we intentionally draw the line at &quot;constant strings we
 can prove statically.&quot;</li>
-<li><strong><code>!include</code> content substitution</strong> is not performed
--- <code>!include</code>/<code>!include_dir_*</code>/<code>!secret</code>/<code>!env_var</code>
-tags are replaced by opaque placeholder strings in
-the parsed tree. However, <code>!include</code> and
-<code>!include_dir_*</code> targets are followed recursively to
-discover and scan the referenced files as their own
-sources.</li>
+<li><strong><code>!include</code> content substitution</strong> is not performed --
+<code>!include</code>/<code>!include_dir_*</code>/<code>!secret</code>/<code>!env_var</code> tags are replaced by opaque
+placeholder strings in the parsed tree. However, <code>!include</code> and
+<code>!include_dir_*</code> targets are followed recursively to discover and scan the
+referenced files as their own sources.</li>
 </ul>
 <h3>Follow-ups</h3>
 <p>Features worth adding in a later pass:</p>
 <ul>
 <li><strong>Label and area reference validation.</strong> Walk
-<code>label_id:</code>/<code>labels:</code>/<code>area_id:</code>/<code>areas:</code> keys and
-validate against the respective registries.</li>
-<li><strong>Per-view dashboard attribution.</strong> Drill down
-inside lovelace configs to attribute findings to the
-specific view rather than the whole dashboard.</li>
-<li><strong>File Editor integration URLs.</strong> If the File Editor
-addon URL pattern can be constructed deterministically,
-generate clickable &quot;open in editor&quot; links for
-YAML-only owners.</li>
+<code>label_id:</code>/<code>labels:</code>/<code>area_id:</code>/<code>areas:</code> keys and validate against the
+respective registries.</li>
+<li><strong>Per-view dashboard attribution.</strong> Drill down inside lovelace configs to
+attribute findings to the specific view rather than the whole dashboard.</li>
+<li><strong>File Editor integration URLs.</strong> If the File Editor addon URL pattern can
+be constructed deterministically, generate clickable &quot;open in editor&quot; links
+for YAML-only owners.</li>
 </ul>
 </body>
 </html>

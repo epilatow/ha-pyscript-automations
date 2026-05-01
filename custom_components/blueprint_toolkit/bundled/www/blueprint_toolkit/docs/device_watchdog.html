@@ -50,30 +50,26 @@ a { color: #0366d6; }
 <body>
 <h1>Device Watchdog</h1>
 <h2>Summary</h2>
-<p>Monitors device health across Home Assistant integrations. Raises
-a persistent notification whenever monitored devices have
-unavailable entities or stop reporting state within a
-configurable window. Clears notifications automatically when
-devices recover.</p>
+<p>Monitors device health across Home Assistant integrations. Raises a persistent
+notification whenever monitored devices have unavailable entities or stop
+reporting state within a configurable window. Clears notifications
+automatically when devices recover.</p>
 <h2>Features</h2>
 <ul>
-<li>Monitor devices across multiple integrations (Z-Wave,
-Matter, BLE, Shelly, etc.)</li>
+<li>Monitor devices across multiple integrations (Z-Wave, Matter, BLE, Shelly,
+etc.)</li>
 <li>Detect unavailable or unknown entity states</li>
 <li>Detect stale devices (no state report within threshold)</li>
-<li>Per-device persistent notifications with auto-clear
-on recovery</li>
-<li>Include/exclude integration filtering (empty include
-means all integrations)</li>
+<li>Per-device persistent notifications with auto-clear on recovery</li>
+<li>Include/exclude integration filtering (empty include means all integrations)</li>
 <li>Regex-based device and entity exclusion filters</li>
 <li>Configurable entity domain filtering</li>
 <li>Configurable check interval and staleness threshold</li>
 <li>Notification cap to limit per-device notifications</li>
-<li>Diagnostic entity check: notifies when recommended
-diagnostic entities (e.g., Last seen, Node status)
-are disabled</li>
-<li>Per-check selection so exclusion lists can be scoped
-per check (instantiate the blueprint once per check)</li>
+<li>Diagnostic entity check: notifies when recommended diagnostic entities
+(e.g., Last seen, Node status) are disabled</li>
+<li>Per-check selection so exclusion lists can be scoped per check (instantiate
+the blueprint once per check)</li>
 <li>Optional debug logging</li>
 </ul>
 <h2>Usage</h2>
@@ -138,25 +134,23 @@ per check (instantiate the blueprint once per check)</li>
 <p>See the blueprint UI for default values.</p>
 <h2>Usage notes</h2>
 <h3>Notifications</h3>
-<p>Each device with health issues gets its own persistent
-notification. Notifications are automatically dismissed
-when devices recover.</p>
+<p>Each device with health issues gets its own persistent notification.
+Notifications are automatically dismissed when devices recover.</p>
 <h3>Notification panel ordering</h3>
-<p>The order of notifications in the HA notification panel
-may change between evaluation runs. This is because each
-run re-creates all active notifications (to update
-content if health changed), which updates their
-timestamps. Since all creates happen within milliseconds,
-the panel's display order is effectively random. The
-same devices are shown -- only the panel ordering varies.</p>
+<p>The order of notifications in the HA notification panel may change between
+evaluation runs. This is because each run re-creates all active notifications
+(to update content if health changed), which updates their timestamps. Since
+all creates happen within milliseconds, the panel's display order is
+effectively random. The same devices are shown -- only the panel ordering
+varies.</p>
 <h2>Developer notes</h2>
 <h3>Entity attributes</h3>
 <p>After each evaluation, attributes are written to
-<code>blueprint_toolkit.device_watchdog_&lt;slug&gt;_state</code> where
-<code>&lt;slug&gt;</code> derives from the automation entity_id (e.g.
-<code>blueprint_toolkit.device_watchdog_my_check_state</code>).
-Search for <code>blueprint_toolkit.device_watchdog_*_state</code>
-in Developer Tools &gt; States to find it.</p>
+<code>blueprint_toolkit.device_watchdog_&lt;slug&gt;_state</code> where <code>&lt;slug&gt;</code> derives from
+the automation entity_id (e.g.
+<code>blueprint_toolkit.device_watchdog_my_check_state</code>). Search for
+<code>blueprint_toolkit.device_watchdog_*_state</code> in Developer Tools &gt; States to
+find it.</p>
 <ul>
 <li><code>last_run</code>: ISO timestamp of last evaluation</li>
 <li><code>runtime</code>: Evaluation time in seconds</li>
@@ -171,9 +165,9 @@ in Developer Tools &gt; States to find it.</p>
 <li><code>device_stale_issues</code>: Devices flagged as stale</li>
 </ul>
 <h3>Debug logging</h3>
-<p>Enable the <strong>Debug Logging</strong> toggle in the blueprint. Debug
-output appears in <strong>Settings &gt; System &gt; Logs</strong>. Uses
-<code>log.warning</code> level (HA's default for custom components).</p>
+<p>Enable the <strong>Debug Logging</strong> toggle in the blueprint. Debug output appears in
+<strong>Settings &gt; System &gt; Logs</strong>. Uses <code>log.warning</code> level (HA's default for
+custom components).</p>
 <p>Example output for an automation named &quot;Device Watchdog&quot;:</p>
 <pre><code class="language-text">[DW: Device Watchdog] integrations=12 devices=45
   entities=320 device_issues=2 entity_issues=5

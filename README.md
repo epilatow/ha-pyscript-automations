@@ -1,74 +1,58 @@
 # Blueprint Toolkit
 
-Home Assistant automations built as HA blueprints that dispatch
-to a custom integration's service handlers. Business logic lives
-in Python modules with no Home Assistant dependencies in the
-logic layer, making it fully testable with pytest.
+Home Assistant automations built as HA blueprints that dispatch to a custom
+integration's service handlers. Business logic lives in Python modules with no
+Home Assistant dependencies in the logic layer, making it fully testable with
+pytest.
 
 ## Automations
 
-- [Sensor Threshold Switch Controller][stsc] -
-  Controls a switch based on sensor value spikes (e.g., humidity
-  for a bathroom fan). Includes manual override protection,
-  double-off disable, and auto-off timer.
+- [Sensor Threshold Switch Controller][stsc] - Controls a switch based on
+  sensor value spikes (e.g., humidity for a bathroom fan). Includes manual
+  override protection, double-off disable, and auto-off timer.
 
-[stsc]: docs/sensor_threshold_switch_controller.md
+- [Device Watchdog](docs/device_watchdog.md) - Monitors device health across
+  integrations. Raises persistent notifications for unavailable or stale
+  devices, clears them automatically on recovery.
 
-- [Device Watchdog](docs/device_watchdog.md) -
-  Monitors device health across integrations. Raises persistent
-  notifications for unavailable or stale devices, clears them
-  automatically on recovery.
+- [Entity Defaults Watchdog](docs/entity_defaults_watchdog.md) - Detects
+  entity IDs and names that have drifted from their defaults. Creates
+  persistent notifications per device with repair instructions, clears them
+  automatically when drift is resolved.
 
-- [Entity Defaults Watchdog](docs/entity_defaults_watchdog.md) -
-  Detects entity IDs and names that have drifted from their
-  defaults. Creates persistent notifications per device with
-  repair instructions, clears them automatically when drift
-  is resolved.
+- [Trigger Entity Controller](docs/trigger_entity_controller.md) - Controls
+  entities (lights, switches, fans, etc.) with optional trigger-based
+  activation and auto-off timer. Supports time-of-day gating, trigger
+  disabling, force-on, and configurable notifications.
 
-- [Trigger Entity Controller](docs/trigger_entity_controller.md) -
-  Controls entities (lights, switches, fans, etc.) with optional
-  trigger-based activation and auto-off timer. Supports
-  time-of-day gating, trigger disabling, force-on, and
-  configurable notifications.
+- [Reference Watchdog](docs/reference_watchdog.md) - Scans HA config (YAML
+  includes and `.storage` JSON) for broken entity and device references.
+  Per-owner persistent notifications with clickable links into the HA config
+  UI where available, YAML-only helper marking, and a negative service-name
+  truth set to eliminate false positives. Also detects source orphans --
+  registry entries whose backing YAML block or UI-helper record has been
+  removed -- and lists them in a single summary notification for cleanup.
 
-- [Reference Watchdog](docs/reference_watchdog.md) -
-  Scans HA config (YAML includes and `.storage` JSON) for
-  broken entity and device references. Per-owner persistent
-  notifications with clickable links into the HA config UI
-  where available, YAML-only helper marking, and a
-  negative service-name truth set to eliminate false
-  positives. Also detects source orphans -- registry
-  entries whose backing YAML block or UI-helper record
-  has been removed -- and lists them in a single summary
-  notification for cleanup.
-
-- [Z-Wave Route Manager](docs/zwave_route_manager.md) -
-  Reconciles Z-Wave priority routes against a declarative
-  YAML config file. Reconciles on HA startup, on manual
-  trigger, when the YAML config is edited, and periodically
-  (default every 5 minutes) to catch out-of-band route
-  changes. Failed reconciles retry automatically on the next
-  minute-granularity tick. Auto-resolves route speed to the
-  slowest hop's `maxDataRate`. Optional clear-unmanaged mode
-  makes the config file the single source of truth. Requires
-  the `core_zwave_js` addon.
+- [Z-Wave Route Manager](docs/zwave_route_manager.md) - Reconciles Z-Wave
+  priority routes against a declarative YAML config file. Reconciles on HA
+  startup, on manual trigger, when the YAML config is edited, and periodically
+  (default every 5 minutes) to catch out-of-band route changes. Failed
+  reconciles retry automatically on the next minute-granularity tick.
+  Auto-resolves route speed to the slowest hop's `maxDataRate`. Optional
+  clear-unmanaged mode makes the config file the single source of truth.
+  Requires the `core_zwave_js` addon.
 
 ## Scripts
 
-Standalone diagnostic and inspection tools that ship alongside
-the automations. Live in the bundled payload and run from the
-HA host.
+Standalone diagnostic and inspection tools that ship alongside the
+automations. Live in the bundled payload and run from the HA host.
 
-- [Z-Wave Network Info][zni] -
-  Tabular per-node view of the Z-Wave mesh: protocol (Mesh/LR),
-  signal-strength quality, configured priority routes, and
-  opt-in stat columns (RX/TX counts, drop counts, drop rates,
-  RTT, battery, status, neighbors, firmware, etc.). Historical
-  columns pull from HA's recorder; current state comes from
-  zwave-js-ui. Self-bootstraps a venv on first run; see `--help`
-  for the full column list and aliases.
-
-[zni]: custom_components/blueprint_toolkit/bundled/cli/zwave_network_info.py
+- [Z-Wave Network Info][zni] - Tabular per-node view of the Z-Wave mesh:
+  protocol (Mesh/LR), signal-strength quality, configured priority routes, and
+  opt-in stat columns (RX/TX counts, drop counts, drop rates, RTT, battery,
+  status, neighbors, firmware, etc.). Historical columns pull from HA's
+  recorder; current state comes from zwave-js-ui. Self-bootstraps a venv on
+  first run; see `--help` for the full column list and aliases.
 
 ## Prerequisites
 
@@ -78,35 +62,34 @@ HA host.
 
 ## Installation
 
-1. In Home Assistant, go to HACS, then the menu in the top right
-   and choose **Custom repositories**. Add this repo's URL with
-   the **Integration** type.
+1. In Home Assistant, go to HACS, then the menu in the top right and choose
+   **Custom repositories**. Add this repo's URL with the **Integration** type.
 
 2. Find **Blueprint Toolkit** in HACS and click **Download**.
 
 3. Restart Home Assistant.
 
-4. Go to **Settings > Devices & Services > Add Integration** and
-   add **Blueprint Toolkit**. The integration installs the
-   bundled blueprints and rendered docs into your `/config/`
-   directory.
+4. Go to **Settings > Devices & Services > Add Integration** and add
+   **Blueprint Toolkit**. The integration installs the bundled blueprints and
+   rendered docs into your `/config/` directory.
 
-5. Optionally, open the integration's **Configure** dialog to set
-   **CLI symlink directory** if you want the
-   `zwave_network_info.py` shell tool symlinked into a directory
-   on your shell's `$PATH`. The path must be writable by the Home
-   Assistant process. On Home Assistant OS and Supervised
-   installs, the integration runs in its own container -- only
-   paths under shared mounts (`/config`, `/share`, `/media`,
-   `/backup`, `/ssl`, `/addons`, `/addon_configs`) are visible
-   from the SSH add-on; e.g. `/config` is a safe default. On
-   Home Assistant Container or Core (no Supervisor), any path
-   the HA process can write to works. Leave blank to skip.
+5. Optionally, open the integration's **Configure** dialog to set **CLI
+   symlink directory** if you want the `zwave_network_info.py` shell tool
+   symlinked into a directory on your shell's `$PATH`. The path must be
+   writable by the Home Assistant process. On Home Assistant OS and Supervised
+   installs, the integration runs in its own container -- only paths under
+   shared mounts (`/config`, `/share`, `/media`, `/backup`, `/ssl`, `/addons`,
+   `/addon_configs`) are visible from the SSH add-on; e.g. `/config` is a safe
+   default. On Home Assistant Container or Core (no Supervisor), any path the
+   HA process can write to works. Leave blank to skip.
 
-6. Go to **Settings > Automations & Scenes > Blueprints** to
-   create automations from the installed blueprints.
+6. Go to **Settings > Automations & Scenes > Blueprints** to create
+   automations from the installed blueprints.
 
 ## Development
 
-See [Development Guide](DEVELOPMENT.md) for architecture, coding
-conventions, and testing instructions.
+See [Development Guide](DEVELOPMENT.md) for architecture, coding conventions,
+and testing instructions.
+
+[stsc]: docs/sensor_threshold_switch_controller.md
+[zni]: custom_components/blueprint_toolkit/bundled/cli/zwave_network_info.py

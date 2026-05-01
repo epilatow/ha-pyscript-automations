@@ -2,29 +2,27 @@
 
 ## Summary
 
-Controls entities (lights, switches, fans, etc.) with optional
-trigger-based activation and auto-off timer. Supports
-time-of-day restrictions, disabling entities, force-on behavior,
-and configurable notifications.
+Controls entities (lights, switches, fans, etc.) with optional trigger-based
+activation and auto-off timer. Supports time-of-day restrictions, disabling
+entities, force-on behavior, and configurable notifications.
 
 ## Features
 
 - Control any entity type (lights, switches, input_booleans, etc.)
-- Optional trigger activation from any binary sensor (motion,
-  door, occupancy, etc.)
-- Auto-off timer that starts when triggers clear (or immediately
-  for manual turn-on)
+- Optional trigger activation from any binary sensor (motion, door, occupancy,
+  etc.)
+- Auto-off timer that starts when triggers clear (or immediately for manual
+  turn-on)
 - Time-of-day gating: restrict triggers to day or night only
-- Trigger disabling: suppress triggers when a boolean entity is
-  on (e.g., "bedroom occupied")
-- Auto-off disabling: suppress auto-off for full manual control
-  (e.g., when a room is occupied)
-- Force-on: re-enable controlled entities if turned off while
-  triggers are active
-- Configurable notifications for turn-on, force-on, and auto-off
-  events
-- Entity validation: alerts via persistent notification if
-  configured entities are missing or renamed
+- Trigger disabling: suppress triggers when a boolean entity is on (e.g.,
+  "bedroom occupied")
+- Auto-off disabling: suppress auto-off for full manual control (e.g., when a
+  room is occupied)
+- Force-on: re-enable controlled entities if turned off while triggers are
+  active
+- Configurable notifications for turn-on, force-on, and auto-off events
+- Entity validation: alerts via persistent notification if configured entities
+  are missing or renamed
 - Optional debug logging
 
 ## Usage
@@ -66,8 +64,8 @@ See the blueprint UI for default values.
 
 ### Example: Hallway Motion Light
 
-A hallway light that always turns on with motion, except at
-night when the bedroom is occupied:
+A hallway light that always turns on with motion, except at night when the
+bedroom is occupied:
 
 - **Controlled entities**: `light.hallway`
 - **Auto-off delay**: 2 minutes
@@ -84,11 +82,10 @@ Result:
 
 ### Example: Motion Keep-Alive (no auto turn-on)
 
-A device you turn on manually, but you want auto-off to
-pause while a room is occupied and resume its countdown
-after motion clears. Configure the motion sensor as an
-auto-off disabling entity (not a trigger entity), so it
-resets the timer without also turning the device on:
+A device you turn on manually, but you want auto-off to pause while a room is
+occupied and resume its countdown after motion clears. Configure the motion
+sensor as an auto-off disabling entity (not a trigger entity), so it resets
+the timer without also turning the device on:
 
 - **Controlled entities**: `switch.office_fan`
 - **Auto-off delay**: 10 minutes
@@ -98,27 +95,24 @@ resets the timer without also turning the device on:
 Result:
 
 - Manual on while motion is active: timer stays paused
-- Manual on while motion is inactive: timer starts
-  immediately
+- Manual on while motion is inactive: timer starts immediately
 - Motion becomes active mid-countdown: timer is cleared
 - Motion clears: fresh 10-minute countdown starts
-- Motion returns mid-countdown: timer is cleared again,
-  then restarts when motion next clears
+- Motion returns mid-countdown: timer is cleared again, then restarts when
+  motion next clears
 
-This pattern uses `auto_off_disabling_entities` as a
-keep-alive: while any listed entity is "on", auto-off is
-held off; the timer (re)starts when they all return to
-"off".
+This pattern uses `auto_off_disabling_entities` as a keep-alive: while any
+listed entity is "on", auto-off is held off; the timer (re)starts when they
+all return to "off".
 
 ## Developer notes
 
 ### Diagnostic state entity
 
 After each evaluation, a diagnostic state entry is written at
-`blueprint_toolkit.trigger_entity_controller_<slug>_state`,
-where `<slug>` is the automation's entity_id stripped of its
-`automation.` prefix. The state value is the decision name
-(NONE, TURN_ON, or TURN_OFF); attributes:
+`blueprint_toolkit.trigger_entity_controller_<slug>_state`, where `<slug>` is
+the automation's entity_id stripped of its `automation.` prefix. The state
+value is the decision name (NONE, TURN_ON, or TURN_OFF); attributes:
 
 Common attributes:
 
@@ -128,20 +122,19 @@ Common attributes:
 
 TEC-specific attributes:
 
-- `last_event`: TRIGGER_ON, TRIGGER_OFF, CONTROLLED_ON,
-  CONTROLLED_OFF, DISABLING_CHANGED, or TIMER
+- `last_event`: TRIGGER_ON, TRIGGER_OFF, CONTROLLED_ON, CONTROLLED_OFF,
+  DISABLING_CHANGED, or TIMER
 - `last_reason`: human-readable reason for the decision
 - `auto_off_at`: ISO timestamp of pending auto-off, or null
 
-View in **Developer Tools > States** (filter on
-`blueprint_toolkit.`), query from templates, or surface on a
-dashboard via the entity card.
+View in **Developer Tools > States** (filter on `blueprint_toolkit.`), query
+from templates, or surface on a dashboard via the entity card.
 
 ### Debug logging
 
-Enable the **Debug Logging** toggle in the blueprint. Debug
-output appears in **Settings > System > Logs**. Uses
-`log.warning` level (HA's default for custom components).
+Enable the **Debug Logging** toggle in the blueprint. Debug output appears in
+**Settings > System > Logs**. Uses `log.warning` level (HA's default for
+custom components).
 
 Example output for an automation named "Hallway Motion Light":
 
