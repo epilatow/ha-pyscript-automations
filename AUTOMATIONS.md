@@ -31,7 +31,8 @@ custom_components/blueprint_toolkit/
 +-- helpers.py                 # all shared helpers (see below)
 +-- const.py                   # DOMAIN, OPTION_*, STORAGE_*
 +-- <service>/                 # one subpackage per automation
-|   +-- __init__.py            # docstring; no exports
+|   +-- __init__.py            # minimal shim: marker + one-line
+|   |                          # docstring; no exports
 |   +-- logic.py               # decision tree, no HA imports
 |   +-- handler.py             # HA wiring (vol.Schema, service
 |                              # handlers, lifecycle mutators,
@@ -40,6 +41,13 @@ custom_components/blueprint_toolkit/
     +-- blueprints/automation/blueprint_toolkit/<service>.yaml
     +-- docs/<service>.md
 ```
+
+Per-subpackage `__init__.py` files are minimal shims (see any of the existing
+subpackages for the canonical shape). Per-port orientation (module layout,
+public surface, behaviour summary) lives in `bundled/docs/<service>.md`
+(user-facing) and the `logic.py` / `handler.py` module docstrings
+(developer-facing). The subpackage `__init__.py` deliberately doesn't repeat
+that content.
 
 ### Three-layer dispatch
 
