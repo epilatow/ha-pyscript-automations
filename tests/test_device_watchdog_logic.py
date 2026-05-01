@@ -358,7 +358,7 @@ class TestEvaluateDevice:
             entities=[_entity(state="unavailable")],
         )
         result = _evaluate_device(cfg, device, T0)
-        assert result.notification_title == ("Device watchdog: Kitchen Sensor")
+        assert result.notification_title == "Kitchen Sensor"
 
     def test_no_entities_not_stale(self) -> None:
         cfg = _config()

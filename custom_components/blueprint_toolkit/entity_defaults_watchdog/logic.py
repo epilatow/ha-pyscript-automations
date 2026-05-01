@@ -684,7 +684,9 @@ def _evaluate_device(
     title = ""
     message = ""
     if has_issue:
-        title = f"Entity defaults watchdog: {device.de.name}"
+        # Title carries just the per-device category; the
+        # dispatcher prepends ``<automation_name>: ``.
+        title = device.de.name
         message = _build_notification_message(
             device,
             drifted,
@@ -877,7 +879,7 @@ def _evaluate_deviceless(
     title = ""
     message = ""
     if has_issue:
-        title = "Entity defaults watchdog: deviceless entity drift"
+        title = "Deviceless entity drift"
         message = _build_deviceless_notification_message(
             drift_items,
             stale_items,
@@ -972,7 +974,7 @@ def run_evaluation(
         results,
         max_notifications=max_notifications,
         cap_notification_id=f"{config.notification_prefix}cap",
-        cap_title="Entity defaults watchdog: notification cap reached",
+        cap_title="Notification cap reached",
         cap_item_label="devices with drift",
         instance_id=config.instance_id,
     )

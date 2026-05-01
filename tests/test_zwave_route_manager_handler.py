@@ -476,7 +476,6 @@ class TestConfigErrorNotification:
         bullets = [handler._format_config_error(e) for e in errors]
         return make_config_error_notification(
             service=handler._SERVICE,
-            service_tag=handler._SERVICE_TAG,
             instance_id=instance_id,
             errors=bullets,
         )
@@ -486,7 +485,9 @@ class TestConfigErrorNotification:
         assert notif.active is False
         assert notif.message == ""
 
-    def test_title_includes_service_tag_and_instance_id(self) -> None:
+    def test_title_is_bare_category(self) -> None:
+        # The dispatcher prepends ``<friendly_name>: `` so
+        # the spec carries only the category descriptor.
         notif = self._build(
             [
                 logic.ConfigError(
@@ -495,10 +496,7 @@ class TestConfigErrorNotification:
             ],
             instance_id="automation.zrm_test",
         )
-        assert (
-            notif.title
-            == "Blueprint Toolkit -- ZRM config error: automation.zrm_test"
-        )
+        assert notif.title == "Config Error"
 
     def test_multiple_errors_all_listed(self) -> None:
         errors = [
@@ -550,7 +548,7 @@ class TestApiNotification:
         notif = handler._api_notification(
             "zrm__", "automation.zrm", "connection refused"
         )
-        assert notif.title == "Z-Wave Route Manager: API unavailable"
+        assert notif.title == "API unavailable"
 
     def test_brackets_escaped(self) -> None:
         notif = handler._api_notification(
@@ -576,7 +574,7 @@ class TestApplyNotification:
             _make_action(node_id=42),
             _make_api_result("timeout"),
         )
-        assert notif.title == "Z-Wave Route Manager: apply failed for node 42"
+        assert notif.title == "Apply failed for node 42"
 
     def test_server_response_brackets_escaped(self) -> None:
         notif = handler._apply_notification(

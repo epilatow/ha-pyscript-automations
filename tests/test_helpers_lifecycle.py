@@ -411,21 +411,20 @@ class TestMakeConfigErrorNotification:
     def test_with_errors_is_active(self) -> None:
         n = helpers.make_config_error_notification(
             service="trigger_entity_controller",
-            service_tag="TEC",
             instance_id="automation.x",
             errors=["bad", "worse"],
         )
         assert n.active is True
         assert n.notification_id == _EXPECTED_CFG_ERR_ID
-        assert "TEC config error" in n.title
-        assert "automation.x" in n.title
+        # Builder carries just the category; dispatcher
+        # prepends ``<friendly_name>: ``.
+        assert n.title == "Config Error"
         assert "- bad" in n.message
         assert "- worse" in n.message
 
     def test_empty_errors_yields_dismiss_spec(self) -> None:
         n = helpers.make_config_error_notification(
             service="trigger_entity_controller",
-            service_tag="TEC",
             instance_id="automation.x",
             errors=[],
         )
@@ -441,7 +440,6 @@ class TestMakeConfigErrorNotification:
         # knows which automation to look up.
         n = helpers.make_config_error_notification(
             service="trigger_entity_controller",
-            service_tag="TEC",
             instance_id="automation.x",
             errors=["bad"],
         )
@@ -457,7 +455,6 @@ class TestMakeConfigErrorNotification:
         # so those don't render as a markdown link.
         n = helpers.make_config_error_notification(
             service="trigger_entity_controller",
-            service_tag="TEC",
             instance_id="automation.x",
             errors=[
                 "expected list, got '[evil](http://evil)'",
@@ -706,6 +703,34 @@ class TestProcessPersistentNotifications:
             ],
         )
         assert hass.services.calls[0][2]["message"] == "m"
+
+    @pytest.mark.asyncio
+    async def test_prepends_friendly_name_to_title(self) -> None:
+        # The dispatcher takes per-handler titles (just the
+        # category descriptor, e.g. ``"Config Error"``) and
+        # leads them with the user-facing automation name
+        # so every notification reads
+        # ``<automation>: <category>`` in the panel.
+        hass = _MockHass()
+        hass.states.stub_state(
+            "automation.foo",
+            "on",
+            friendly_name="My Auto",
+            id="1234",
+        )
+        await helpers.process_persistent_notifications(
+            hass,  # type: ignore[arg-type]
+            [
+                helpers.PersistentNotification(
+                    active=True,
+                    notification_id="x",
+                    title="Config Error",
+                    message="m",
+                    instance_id="automation.foo",
+                ),
+            ],
+        )
+        assert hass.services.calls[0][2]["title"] == "My Auto: Config Error"
 
     @pytest.mark.asyncio
     async def test_md_escape_applied_to_friendly_name(self) -> None:

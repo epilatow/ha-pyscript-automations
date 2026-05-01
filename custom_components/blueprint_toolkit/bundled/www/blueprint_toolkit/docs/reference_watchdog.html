@@ -259,8 +259,9 @@ storage record) has been removed or renamed, leaving the registry entry
 behind. These entries are invisible to the broken-reference scan because they
 still resolve -- the dead entity is still in <code>entity_ids</code> -- but nothing
 currently creates them.</p>
-<p>The watchdog emits a single summary notification titled &quot;Reference watchdog:
-source orphans (N)&quot;. Orphans are grouped by <code>platform</code> (e.g. <code>utility_meter</code>,
+<p>The watchdog emits a single summary notification titled &quot;Source orphans
+(N)&quot; (the dispatcher prepends the automation's friendly name). Orphans are
+grouped by <code>platform</code> (e.g. <code>utility_meter</code>,
 <code>input_boolean</code>, <code>automation</code>); larger groups are shown first. Disabled
 entities are tagged <em>(disabled)</em> next to the link.</p>
 <p>Each orphan links to <code>/config/entities?domain=&lt;platform&gt;</code> -- HA's entities

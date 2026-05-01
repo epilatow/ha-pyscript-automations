@@ -451,6 +451,31 @@ def _automation_link_prefix(
     )
 
 
+def _automation_title_prefix(
+    hass: HomeAssistant,
+    instance_id: str | None,
+) -> str:
+    """Render the ``<friendly_name>: `` title prefix.
+
+    Returns ``""`` when ``instance_id`` is ``None`` or the
+    automation entity isn't in the state machine (the test
+    harnesses + Developer-Tools service-call paths land
+    here). Notifications titles use this to lead with the
+    user-facing automation name so the panel shows
+    ``<automation>: <category>`` consistently across every
+    handler -- the dispatcher prepends so per-handler
+    builders only carry the category descriptor.
+    """
+    if not instance_id:
+        return ""
+    if hass.states.get(instance_id) is None:
+        return ""
+    name = automation_friendly_name(hass, instance_id)
+    if not name:
+        return ""
+    return f"{name}: "
+
+
 async def process_persistent_notifications(
     hass: HomeAssistant,
     notifications: list[PersistentNotification],
@@ -465,11 +490,20 @@ async def process_persistent_notifications(
     always safe to fire).
 
     For ``active`` specs whose ``instance_id`` is set,
-    the dispatcher prepends an
-    ``Automation: [name](edit-link)\\n`` header to the
-    message body so users can click through to the
-    associated automation. Inactive (dismiss) specs are
-    not prefixed -- nothing's being shown.
+    the dispatcher prepends two things:
+
+    1. ``<friendly_name>: `` to the spec's ``title``.
+       Per-handler notification builders supply just the
+       category descriptor (e.g. ``"Config Error"``,
+       ``"API unavailable"``) and the dispatcher leads
+       every active notification with the user-facing
+       automation name uniformly.
+    2. ``Automation: [name](edit-link)\\n`` to the
+       message body so users can click through to the
+       associated automation.
+
+    Inactive (dismiss) specs aren't prefixed -- nothing's
+    being shown.
 
     Use this bare form when the caller is touching a
     single known notification ID (``emit_config_error``
@@ -482,13 +516,14 @@ async def process_persistent_notifications(
     """
     for n in notifications:
         if n.active:
+            title_prefix = _automation_title_prefix(hass, n.instance_id)
             link_prefix = _automation_link_prefix(hass, n.instance_id)
             await hass.services.async_call(
                 "persistent_notification",
                 "create",
                 {
                     "notification_id": n.notification_id,
-                    "title": n.title,
+                    "title": f"{title_prefix}{n.title}",
                     "message": f"{link_prefix}{n.message}",
                 },
             )
@@ -606,7 +641,6 @@ def _config_error_notification_id(service: str, instance_id: str) -> str:
 def make_config_error_notification(
     *,
     service: str,
-    service_tag: str,
     instance_id: str,
     errors: list[str],
 ) -> PersistentNotification:
@@ -623,7 +657,9 @@ def make_config_error_notification(
     ``process_persistent_notifications`` prepends an
     ``Automation: [name](edit-link)\\n`` header when it
     dispatches (driven by the ``instance_id`` field on
-    the spec).
+    the spec). The same dispatcher prepends
+    ``<friendly_name>: `` to the title, so this builder
+    only sets the bare ``"Config Error"`` category.
 
     Every interpolated user-controlled string -- each
     entry of ``errors`` -- is ``md_escape``-d here.
@@ -640,12 +676,11 @@ def make_config_error_notification(
             message="",
             instance_id=instance_id,
         )
-    title = f"Blueprint Toolkit -- {service_tag} config error: {instance_id}"
     message = "\n".join(f"- {md_escape(e)}" for e in errors)
     return PersistentNotification(
         active=True,
         notification_id=notif_id,
-        title=title,
+        title="Config Error",
         message=message,
         instance_id=instance_id,
     )
@@ -664,11 +699,12 @@ async def emit_config_error(
     Convenience wrapper -- handlers typically call this
     once per argparse with whatever ``errors`` they
     accumulated (empty list dismisses any prior
-    notification for the same instance).
+    notification for the same instance). ``service_tag``
+    is used in the warning log line; the user-visible
+    title is built by the dispatcher.
     """
     spec = make_config_error_notification(
         service=service,
-        service_tag=service_tag,
         instance_id=instance_id,
         errors=errors,
     )

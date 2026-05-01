@@ -438,7 +438,9 @@ def _evaluate_device(
     message = ""
     title = ""
     if has_issue:
-        title = f"Device watchdog: {device.de.name}"
+        # Title carries just the per-device category; the
+        # dispatcher prepends ``<automation_name>: ``.
+        title = device.de.name
         message = _build_notification_message(
             device,
             unavailable,
@@ -550,7 +552,7 @@ def run_evaluation(
         results,
         max_notifications=max_notifications,
         cap_notification_id=f"{config.notification_prefix}cap",
-        cap_title="Device watchdog: notification cap reached",
+        cap_title="Notification cap reached",
         cap_item_label="devices with issues",
         instance_id=config.instance_id,
     )

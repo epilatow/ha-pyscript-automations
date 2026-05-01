@@ -1568,7 +1568,9 @@ def _build_owner_result(
     title = ""
     message = ""
     if has_issue:
-        title = f"Reference watchdog: {_owner_display_name(owner)}"
+        # Title carries just the per-owner category; the
+        # dispatcher prepends ``<automation_name>: ``.
+        title = _owner_display_name(owner)
         message = _build_notification_body(owner, findings)
     return OwnerResult(
         owner=owner,
@@ -2292,7 +2294,7 @@ def _build_source_orphans_notification(
     return PersistentNotification(
         active=True,
         notification_id=nid,
-        title=f"Reference watchdog: source orphans ({len(orphans)})",
+        title=f"Source orphans ({len(orphans)})",
         message="\n".join(lines).rstrip() + "\n",
         instance_id=config.instance_id,
     )
@@ -2494,7 +2496,7 @@ def run_evaluation(
         results,
         max_notifications=max_notifications,
         cap_notification_id=f"{config.notification_prefix}cap",
-        cap_title="Reference watchdog: notification cap reached",
+        cap_title="Notification cap reached",
         cap_item_label="owners with broken references",
         instance_id=config.instance_id,
     )

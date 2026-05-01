@@ -433,7 +433,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     if config_errors:
         config_error_notif = make_config_error_notification(
             service=_SERVICE,
-            service_tag=_SERVICE_TAG,
             instance_id=instance_id,
             errors=[_format_config_error(e) for e in config_errors],
         )
@@ -628,7 +627,6 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
     if resolve_errors:
         resolve_error_notif = make_config_error_notification(
             service=_SERVICE,
-            service_tag=_SERVICE_TAG,
             instance_id=instance_id,
             errors=[_format_config_error(e) for e in resolve_errors],
         )
@@ -812,7 +810,7 @@ async def _do_reconcile(  # noqa: PLR0912, PLR0913, PLR0915
         [IssueNotification(n) for n in issue_notifications],
         max_notifications=max_notifications,
         cap_notification_id=f"{notif_prefix}cap",
-        cap_title=f"{_SERVICE_NAME}: notification cap reached",
+        cap_title="Notification cap reached",
         cap_item_label="route issues",
         instance_id=instance_id,
     )
@@ -994,7 +992,7 @@ def _api_notification(
     instance_id: str,
     error: str,
 ) -> PersistentNotification:
-    title = f"{_SERVICE_NAME}: API unavailable"
+    title = "API unavailable"
     escaped = md_escape(error)
     body = (
         f"Could not reach or use the Z-Wave JS UI API: {escaped}"
@@ -1025,7 +1023,7 @@ def _circuit_breaker_notification(
         local_resume = open_until.astimezone().strftime("%H:%M")
     except (OverflowError, ValueError):
         local_resume = open_until.isoformat(timespec="minutes")
-    title = f"{_SERVICE_NAME}: controller unresponsive"
+    title = "Controller unresponsive"
     body = (
         "Z-Wave route reconcile paused -- controller is "
         "unresponsive to API queries after "
@@ -1048,7 +1046,7 @@ def _apply_notification(
     action: logic.RouteAction,
     api_result: bridge.ApiResult,
 ) -> PersistentNotification:
-    title = f"{_SERVICE_NAME}: apply failed for node {action.node_id}"
+    title = f"Apply failed for node {action.node_id}"
     lines = [
         f"Action: {action.kind.value}",
         f"Node: {action.node_id}",
@@ -1078,10 +1076,7 @@ def _timeout_notification(
     timeout_count: int,
     pending_timeout_hours: int,
 ) -> PersistentNotification:
-    title = (
-        f"{_SERVICE_NAME}: route pending > "
-        f"{pending_timeout_hours}h for node {node_id}"
-    )
+    title = f"Route pending > {pending_timeout_hours}h for node {node_id}"
     body = (
         f"A {route_type.value} route command sent to node"
         f" {node_id} did not land within {pending_timeout_hours}"

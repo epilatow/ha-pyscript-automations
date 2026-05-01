@@ -158,8 +158,9 @@ behind. These entries are invisible to the broken-reference scan because they
 still resolve -- the dead entity is still in `entity_ids` -- but nothing
 currently creates them.
 
-The watchdog emits a single summary notification titled "Reference watchdog:
-source orphans (N)". Orphans are grouped by `platform` (e.g. `utility_meter`,
+The watchdog emits a single summary notification titled "Source orphans
+(N)" (the dispatcher prepends the automation's friendly name). Orphans are
+grouped by `platform` (e.g. `utility_meter`,
 `input_boolean`, `automation`); larger groups are shown first. Disabled
 entities are tagged *(disabled)* next to the link.
 

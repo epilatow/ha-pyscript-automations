@@ -1251,7 +1251,7 @@ class TestEvaluateSources:
         assert result.has_issue is True
         assert len(result.findings) == 1
         assert result.findings[0].ref.value == "sensor.dead"
-        assert result.notification_title.startswith("Reference watchdog:")
+        assert result.notification_title  # category set; dispatcher prepends
 
     def test_clean_owner_emits_zero_finding_result(self) -> None:
         sources = [
@@ -1538,7 +1538,7 @@ class TestBuildOwnerResult:
         )
         result = _build_owner_result(_config(), owner, findings, stats)
         assert result.has_issue is True
-        assert result.notification_title == ("Reference watchdog: Broken Auto")
+        assert result.notification_title == "Broken Auto"
         assert "sensor.dead" in result.notification_message
         assert result.refs_total == 1
         assert result.refs_broken == 1

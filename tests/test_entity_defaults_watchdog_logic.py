@@ -706,9 +706,7 @@ class TestEvaluateDevice:
             ],
         )
         result = _evaluate_device(cfg, device)
-        assert result.notification_title == (
-            "Entity defaults watchdog: Kitchen Sensor"
-        )
+        assert result.notification_title == "Kitchen Sensor"
 
     def test_no_title_when_clean(self) -> None:
         cfg = _config()
