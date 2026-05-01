@@ -408,3 +408,82 @@ class BlueprintDefaultsRoundTripBase(BlueprintSchemaDriftBase):
         # outside the schema's accepted range, this is the
         # canary.
         self.handler._SCHEMA(payload)
+
+
+class RecoveryEventsIntegrationBase:
+    """Shared restart-recovery + reload-recovery integration tests.
+
+    Subclass per handler integration test file::
+
+        class TestRecoveryEvents(RecoveryEventsIntegrationBase):
+            service_tag = "DW"
+            setup_integration = staticmethod(_setup_integration)
+
+    Inherited tests verify that ``register_blueprint_handler``'s
+    discovery-and-kick wiring fires both at integration setup
+    (the ``hass.is_running`` immediate-call branch -- pytest-HACC
+    has HA up by the time the integration loads) and on every
+    ``EVENT_AUTOMATION_RELOADED``. The deferred
+    ``EVENT_HOMEASSISTANT_STARTED`` branch is covered at the unit
+    level by ``test_helpers_lifecycle.py``, which can simulate
+    ``CoreState.starting`` cleanly.
+    """
+
+    service_tag: str = ""  # subclass override (e.g. "DW")
+    # Subclass override: ``staticmethod(_setup_integration)``
+    # bound to the per-handler integration test file's
+    # module-level ``_setup_integration`` async function.
+    setup_integration: Any = None
+
+    async def test_setup_emits_recovery_log(
+        self,
+        hass: Any,
+        caplog: Any,
+    ) -> None:
+        import logging  # noqa: PLC0415
+
+        with caplog.at_level(
+            logging.INFO,
+            logger="custom_components.blueprint_toolkit.helpers",
+        ):
+            await self.setup_integration(hass)
+
+        tag = f"[{self.service_tag}]"
+        assert any(
+            tag in r.getMessage()
+            and "discovered at startup" in r.getMessage()
+            for r in caplog.records
+        ), (
+            f"expected {tag} startup-recovery log line; "
+            f"saw: {[r.getMessage() for r in caplog.records]}"
+        )
+
+    async def test_automation_reloaded_event_kicks_discovery(
+        self,
+        hass: Any,
+        caplog: Any,
+    ) -> None:
+        import logging  # noqa: PLC0415
+
+        from homeassistant.components.automation import (  # noqa: PLC0415
+            EVENT_AUTOMATION_RELOADED,
+        )
+
+        await self.setup_integration(hass)
+        caplog.clear()
+        with caplog.at_level(
+            logging.INFO,
+            logger="custom_components.blueprint_toolkit.helpers",
+        ):
+            hass.bus.async_fire(EVENT_AUTOMATION_RELOADED, {})
+            await hass.async_block_till_done()
+
+        tag = f"[{self.service_tag}]"
+        assert any(
+            tag in r.getMessage() and "discovered" in r.getMessage()
+            for r in caplog.records
+        ), (
+            f"expected {tag} recovery log line after"
+            " EVENT_AUTOMATION_RELOADED; "
+            f"saw: {[r.getMessage() for r in caplog.records]}"
+        )

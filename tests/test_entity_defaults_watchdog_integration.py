@@ -38,7 +38,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest  # noqa: E402
-from conftest import CodeQualityBase  # noqa: E402
+from conftest import (  # noqa: E402
+    CodeQualityBase,
+    RecoveryEventsIntegrationBase,
+)
 
 # pytest-HACC's plugins refuse to load if any
 # homeassistant.components.* module is already in
@@ -515,6 +518,11 @@ class TestDeviceAttachedDisabledEntityFilter:
             f"expected 1 enabled entity scanned; got "
             f"{state.attributes['entities']}"
         )
+
+
+class TestRecoveryEvents(RecoveryEventsIntegrationBase):
+    service_tag = "EDW"
+    setup_integration = staticmethod(_setup_integration)
 
 
 class TestCodeQuality(CodeQualityBase):

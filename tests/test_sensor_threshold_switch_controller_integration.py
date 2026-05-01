@@ -32,7 +32,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest  # noqa: E402
-from conftest import CodeQualityBase  # noqa: E402
+from conftest import (  # noqa: E402
+    CodeQualityBase,
+    RecoveryEventsIntegrationBase,
+)
 
 DOMAIN = "blueprint_toolkit"
 SERVICE = "sensor_threshold_switch_controller"
@@ -819,6 +822,11 @@ class TestLoadStateBlobMalformed:
         import json
 
         json.loads(state.attributes["data"])
+
+
+class TestRecoveryEvents(RecoveryEventsIntegrationBase):
+    service_tag = "STSC"
+    setup_integration = staticmethod(_setup_integration)
 
 
 class TestCodeQuality(CodeQualityBase):
