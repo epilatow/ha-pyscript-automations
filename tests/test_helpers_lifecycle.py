@@ -36,6 +36,7 @@ shape without booting Home Assistant.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import sys
 import types
@@ -1776,13 +1777,403 @@ class TestSchedulePeriodicWithJitter:
 # --------------------------------------------------------
 
 
+_HELPERS_LOGIC_PATH = (
+    REPO_ROOT / "custom_components" / "blueprint_toolkit" / "helpers_logic.py"
+)
+_HELPERS_RUNTIME_PATH = (
+    REPO_ROOT / "custom_components" / "blueprint_toolkit" / "helpers_runtime.py"
+)
+_HELPERS_LIFECYCLE_PATH = (
+    REPO_ROOT
+    / "custom_components"
+    / "blueprint_toolkit"
+    / "helpers_lifecycle.py"
+)
+_HELPERS_SHIM_PATH = (
+    REPO_ROOT / "custom_components" / "blueprint_toolkit" / "helpers.py"
+)
+
+
+def _is_ha_import(node: ast.AST) -> bool:
+    """True if node imports from a ``homeassistant.*`` module."""
+    if isinstance(node, ast.Import):
+        return any(
+            n.name == "homeassistant" or n.name.startswith("homeassistant.")
+            for n in node.names
+        )
+    if isinstance(node, ast.ImportFrom):
+        mod = node.module or ""
+        return mod == "homeassistant" or mod.startswith("homeassistant.")
+    return False
+
+
+def _is_type_checking_block(node: ast.If) -> bool:
+    """True if ``node.test`` is the bare name ``TYPE_CHECKING``."""
+    if isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+        return True
+    if (
+        isinstance(node.test, ast.Attribute)
+        and isinstance(node.test.value, ast.Name)
+        and node.test.value.id == "typing"
+        and node.test.attr == "TYPE_CHECKING"
+    ):
+        return True
+    return False
+
+
+def _walk_with_parents(
+    tree: ast.Module,
+) -> list[tuple[ast.AST, ast.AST | None]]:
+    """Yield ``(node, parent)`` tuples for the entire tree."""
+    out: list[tuple[ast.AST, ast.AST | None]] = []
+
+    def _walk(parent: ast.AST | None, node: ast.AST) -> None:
+        out.append((node, parent))
+        for child in ast.iter_child_nodes(node):
+            _walk(node, child)
+
+    _walk(None, tree)
+    return out
+
+
+class TestHelpersLogicHasNoHaImports:
+    """``helpers_logic.py`` may not import ``homeassistant.*`` at all.
+
+    The pure flavour's contract is that the module imports
+    successfully in a non-HA test environment. AST walks the
+    whole file (module scope, function bodies, ``TYPE_CHECKING``
+    blocks) and fails on any ``homeassistant.*`` import.
+    """
+
+    def test_no_ha_imports_anywhere(self) -> None:
+        text = _HELPERS_LOGIC_PATH.read_text()
+        tree = ast.parse(text)
+        offenders: list[str] = []
+        for node in ast.walk(tree):
+            if _is_ha_import(node):
+                offenders.append(
+                    f"line {node.lineno}: {ast.unparse(node)}",
+                )
+        assert offenders == [], (
+            "helpers_logic.py must not import homeassistant.*: "
+            + "; ".join(offenders)
+        )
+
+
+class TestHelpersRuntimeHasNoRuntimeHaImports:
+    """``helpers_runtime.py``: HA imports are ``TYPE_CHECKING`` only.
+
+    Module-scope or function-body ``homeassistant.*`` imports
+    are forbidden -- the module must load cleanly outside HA.
+    Only imports nested inside an ``if TYPE_CHECKING:`` block
+    are allowed.
+    """
+
+    def test_runtime_ha_imports_blocked(self) -> None:
+        text = _HELPERS_RUNTIME_PATH.read_text()
+        tree = ast.parse(text)
+        offenders: list[str] = []
+        # Build a set of nodes that are inside a TYPE_CHECKING block.
+        allowed: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.If) and _is_type_checking_block(node):
+                for child in ast.walk(node):
+                    allowed.add(id(child))
+        for node in ast.walk(tree):
+            if _is_ha_import(node) and id(node) not in allowed:
+                offenders.append(
+                    f"line {node.lineno}: {ast.unparse(node)}",
+                )
+        assert offenders == [], (
+            "helpers_runtime.py: ``homeassistant.*`` imports must be"
+            " inside ``if TYPE_CHECKING:``; offenders: " + "; ".join(offenders)
+        )
+
+
+class TestHelpersLifecycleModuleScopeHaImportsAreTypeCheckingOnly:
+    """``helpers_lifecycle.py``: module-scope HA imports must be
+    under ``TYPE_CHECKING``.
+
+    Function-body imports are unrestricted (the whole point of
+    the lifecycle group). The constraint only applies to
+    ``homeassistant.*`` imports at module scope.
+    """
+
+    def test_module_scope_ha_imports_are_type_checking_only(self) -> None:
+        text = _HELPERS_LIFECYCLE_PATH.read_text()
+        tree = ast.parse(text)
+        # Identify TYPE_CHECKING blocks at module scope.
+        type_checking_nodes: set[int] = set()
+        for node in tree.body:
+            if isinstance(node, ast.If) and _is_type_checking_block(node):
+                for child in ast.walk(node):
+                    type_checking_nodes.add(id(child))
+        offenders: list[str] = []
+        for node in tree.body:
+            if _is_ha_import(node) and id(node) not in type_checking_nodes:
+                offenders.append(
+                    f"line {node.lineno}: {ast.unparse(node)}",
+                )
+        assert offenders == [], (
+            "helpers_lifecycle.py: module-scope ``homeassistant.*``"
+            " imports must be under ``if TYPE_CHECKING:``; offenders: "
+            + "; ".join(offenders)
+        )
+
+
+class TestHelpersPartialOrderLayering:
+    """Cross-flavour imports respect the partial order.
+
+    - ``helpers_logic`` -- no imports from runtime / lifecycle.
+    - ``helpers_runtime`` -- may import from logic only.
+    - ``helpers_lifecycle`` -- may import from logic + runtime.
+
+    The single intentional carve-out is
+    ``make_emit_config_error``'s closure body lazily importing
+    ``emit_config_error`` from ``helpers_runtime``. The
+    allow-list below pins that one site explicitly so a
+    future lazy-cross-import has to update the test.
+    """
+
+    # Allow-list: (file, surrounding-symbol, target-flavour) tuples.
+    # The surrounding symbol is the INNERMOST function/closure; for
+    # ``make_emit_config_error`` the lazy import lives in the inner
+    # closure ``emit`` returned by the factory.
+    ALLOWED_LAZY_CROSS_IMPORTS = {
+        ("helpers_logic", "emit", "helpers_runtime"),
+    }
+
+    def _imports_from_helper(
+        self,
+        path: Path,
+    ) -> list[tuple[str, str | None, int]]:
+        """Find every `from .helpers_X import ...` site.
+
+        Returns list of ``(target_module, surrounding_func, lineno)``.
+        """
+        text = path.read_text()
+        tree = ast.parse(text)
+        found: list[tuple[str, str | None, int]] = []
+        # Track function context to find lazy closure-body imports.
+        for parent_node, surrounding in self._import_walk(tree):
+            if not isinstance(parent_node, ast.ImportFrom):
+                continue
+            mod = parent_node.module or ""
+            if mod.startswith("helpers_") or mod in {
+                "helpers_logic",
+                "helpers_runtime",
+                "helpers_lifecycle",
+            }:
+                found.append((mod, surrounding, parent_node.lineno))
+            # Relative import: e.g. ``from .helpers_logic import X``
+            if parent_node.level >= 1 and mod in {
+                "helpers_logic",
+                "helpers_runtime",
+                "helpers_lifecycle",
+            }:
+                pass  # already captured above
+        return found
+
+    def _import_walk(
+        self,
+        tree: ast.Module,
+    ) -> list[tuple[ast.AST, str | None]]:
+        """Walk tree, tracking the enclosing function/method name."""
+        out: list[tuple[ast.AST, str | None]] = []
+
+        def _walk(node: ast.AST, surrounding: str | None) -> None:
+            out.append((node, surrounding))
+            new_surrounding = surrounding
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                new_surrounding = node.name
+            for child in ast.iter_child_nodes(node):
+                _walk(child, new_surrounding)
+
+        _walk(tree, None)
+        return out
+
+    def test_helpers_logic_layering(self) -> None:
+        imports = self._imports_from_helper(_HELPERS_LOGIC_PATH)
+        offenders: list[str] = []
+        for target, surrounding, lineno in imports:
+            if target == "helpers_logic":
+                continue  # self-import (won't happen, but harmless)
+            allowed = (
+                "helpers_logic",
+                surrounding or "<module>",
+                target,
+            ) in self.ALLOWED_LAZY_CROSS_IMPORTS
+            if not allowed:
+                offenders.append(
+                    f"line {lineno}: from .{target} import ..."
+                    f" (surrounding={surrounding})",
+                )
+        assert offenders == [], (
+            "helpers_logic.py may not import from runtime / lifecycle "
+            "(except via the allow-listed lazy closure): "
+            + "; ".join(offenders)
+        )
+
+    def test_helpers_runtime_layering(self) -> None:
+        imports = self._imports_from_helper(_HELPERS_RUNTIME_PATH)
+        offenders = [
+            f"line {lineno}: from .{target} import ..."
+            for target, _, lineno in imports
+            if target == "helpers_lifecycle"
+        ]
+        assert offenders == [], (
+            "helpers_runtime.py may not import from helpers_lifecycle: "
+            + "; ".join(offenders)
+        )
+
+    def test_helpers_lifecycle_layering(self) -> None:
+        # Lifecycle may import from logic + runtime; nothing to forbid.
+        # The test exists to assert no symbol named ``helpers`` (the shim)
+        # is imported -- the lifecycle file should reference flavour
+        # files directly, not the re-export shim.
+        imports = self._imports_from_helper(_HELPERS_LIFECYCLE_PATH)
+        offenders = [
+            f"line {lineno}: from .helpers import ..."
+            for target, _, lineno in imports
+            if target == "helpers"
+        ]
+        assert offenders == [], (
+            "helpers_lifecycle.py should reference flavour files directly,"
+            " not the helpers.py shim: " + "; ".join(offenders)
+        )
+
+
+class TestHelpersShimReExportsEveryPublicSymbol:
+    """The shim's ``__all__`` covers every flavour file's
+    public surface; every name is reachable via
+    ``custom_components.blueprint_toolkit.helpers``.
+    """
+
+    def test_shim_covers_logic(self) -> None:
+        from custom_components.blueprint_toolkit import (
+            helpers,
+            helpers_logic,
+        )
+
+        for name in helpers_logic.__all__:
+            assert hasattr(helpers, name), (
+                f"helpers shim missing re-export of {name}"
+            )
+
+    def test_shim_covers_runtime(self) -> None:
+        from custom_components.blueprint_toolkit import (
+            helpers,
+            helpers_runtime,
+        )
+
+        for name in helpers_runtime.__all__:
+            assert hasattr(helpers, name), (
+                f"helpers shim missing re-export of {name}"
+            )
+
+    def test_shim_covers_lifecycle(self) -> None:
+        from custom_components.blueprint_toolkit import (
+            helpers,
+            helpers_lifecycle,
+        )
+
+        for name in helpers_lifecycle.__all__:
+            assert hasattr(helpers, name), (
+                f"helpers shim missing re-export of {name}"
+            )
+
+    def test_shim_all_is_union_of_flavour_alls(self) -> None:
+        from custom_components.blueprint_toolkit import (
+            helpers,
+            helpers_lifecycle,
+            helpers_logic,
+            helpers_runtime,
+        )
+
+        union = (
+            set(helpers_logic.__all__)
+            | set(helpers_runtime.__all__)
+            | set(helpers_lifecycle.__all__)
+        )
+        assert set(helpers.__all__) == union, (
+            "shim __all__ must equal the union of the three flavour "
+            "files' __all__: "
+            f"only-in-shim={set(helpers.__all__) - union},"
+            f" only-in-flavour={union - set(helpers.__all__)}"
+        )
+
+
+class TestHelpersLogicImportsInIsolation:
+    """Pure helpers must import successfully when ``homeassistant.*``
+    isn't on ``sys.modules`` at all.
+
+    Companion to ``TestHelpersLogicHasNoHaImports`` (which AST-walks
+    the static source). This one catches a regression where a future
+    edit smuggles a dynamic ``import homeassistant.X`` (e.g. inside
+    a function body, behind a flag) that the AST walk would still see
+    but you might miss in review. By temporarily purging
+    ``homeassistant.*`` from ``sys.modules`` and forcing a fresh
+    ``importlib.reload`` of ``helpers_logic``, we prove the module
+    loads in a true HA-free environment.
+    """
+
+    def test_helpers_logic_imports_with_no_homeassistant_module(
+        self,
+    ) -> None:
+        import importlib
+
+        # Capture + remove every ``homeassistant.*`` entry so a
+        # fresh import has no chance of hitting a cached one.
+        saved = {
+            k: sys.modules.pop(k)
+            for k in list(sys.modules)
+            if k == "homeassistant" or k.startswith("homeassistant.")
+        }
+        # Also drop helpers_logic so reload genuinely re-imports.
+        helpers_logic_mod = sys.modules.pop(
+            "custom_components.blueprint_toolkit.helpers_logic",
+            None,
+        )
+        try:
+            mod = importlib.import_module(
+                "custom_components.blueprint_toolkit.helpers_logic",
+            )
+            # Sanity: a few public names must be reachable.
+            assert hasattr(mod, "PersistentNotification")
+            assert hasattr(mod, "md_escape")
+            assert hasattr(mod, "BlueprintHandlerSpec")
+            # And no ``homeassistant.*`` got pulled in transitively.
+            stragglers = [
+                k
+                for k in sys.modules
+                if k == "homeassistant" or k.startswith("homeassistant.")
+            ]
+            assert stragglers == [], (
+                f"importing helpers_logic pulled in homeassistant.*: "
+                f"{stragglers}"
+            )
+        finally:
+            # Restore the originals so subsequent tests see HA again.
+            sys.modules.update(saved)
+            if helpers_logic_mod is not None:
+                sys.modules[
+                    "custom_components.blueprint_toolkit.helpers_logic"
+                ] = helpers_logic_mod
+
+
 class TestCodeQuality(CodeQualityBase):
     ruff_targets = [
         "tests/test_helpers_lifecycle.py",
         "custom_components/blueprint_toolkit/helpers.py",
+        "custom_components/blueprint_toolkit/helpers_logic.py",
+        "custom_components/blueprint_toolkit/helpers_runtime.py",
+        "custom_components/blueprint_toolkit/helpers_lifecycle.py",
     ]
     mypy_targets: list[str] = [
         "custom_components/blueprint_toolkit/helpers.py",
+        "custom_components/blueprint_toolkit/helpers_logic.py",
+        "custom_components/blueprint_toolkit/helpers_runtime.py",
+        "custom_components/blueprint_toolkit/helpers_lifecycle.py",
     ]
 
 

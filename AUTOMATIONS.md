@@ -114,6 +114,18 @@ lives separately at `hass.data[DOMAIN]` because it must survive entry unload.
 All handlers consume these. Don't reimplement; if a new pattern keeps
 recurring, hoist it here.
 
+Behind the shim, helpers live in three flavour files per their HA-dependency
+profile: `helpers_logic.py` (pure -- no HA imports of any kind, including
+`TYPE_CHECKING`), `helpers_runtime.py` (runtime-HA -- takes a runtime `hass`
+argument; HA imports only under `TYPE_CHECKING`, no module-scope or
+function-body HA imports), and `helpers_lifecycle.py` (lifecycle / setup --
+function-body HA imports OK; module-scope HA imports must be `TYPE_CHECKING`).
+Add a new helper to whichever file matches its HA-dependency profile and
+re-export from `helpers.py`. Callers `from .helpers import X` and don't need
+to track the split; the structural tests in `tests/test_helpers_lifecycle.py`
+enforce the no-HA-imports / `TYPE_CHECKING`-only / lifecycle-OK rules and the
+shim re-export contract.
+
 Schema validators:
 
 - `cv_ha_domain_list(value)` -- voluptuous validator for a list-of-string
