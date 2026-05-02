@@ -71,7 +71,7 @@ blueprint:
         entity:
           multiple: true
 
-    exclude_entity_regex:
+    exclude_entity_id_regex:
       name: Exclude entity regex
       description: >
         Regex patterns matched against entity IDs and
@@ -152,7 +152,7 @@ actions:
       exclude_paths_raw: !input exclude_paths
       exclude_integrations_raw: !input exclude_integrations
       exclude_entities_raw: !input exclude_entities
-      exclude_entity_regex_raw: !input exclude_entity_regex
+      exclude_entity_id_regex_raw: !input exclude_entity_id_regex
       check_disabled_entities_raw: !input check_disabled_entities
       check_interval_minutes_raw: !input check_interval_minutes
       max_source_notifications_raw: !input max_source_notifications

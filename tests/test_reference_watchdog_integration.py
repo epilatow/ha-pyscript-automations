@@ -103,7 +103,7 @@ async def _setup_integration(hass: Any) -> Any:
 def _valid_payload(
     *,
     instance_id: str = "automation.rw_test",
-    exclude_entity_regex: str = "",
+    exclude_entity_id_regex: str = "",
     check_interval_minutes: int = 60,
     max_source_notifications: int = 0,
 ) -> dict[str, Any]:
@@ -114,7 +114,7 @@ def _valid_payload(
         "exclude_paths_raw": "",
         "exclude_integrations_raw": [],
         "exclude_entities_raw": [],
-        "exclude_entity_regex_raw": exclude_entity_regex,
+        "exclude_entity_id_regex_raw": exclude_entity_id_regex,
         "check_disabled_entities_raw": False,
         "check_interval_minutes_raw": check_interval_minutes,
         "max_source_notifications_raw": max_source_notifications,
@@ -158,7 +158,7 @@ class TestArgparseEmitsConfigErrorNotification:
         self,
         hass,  # noqa: ANN001
     ) -> None:
-        """A bad ``exclude_entity_regex`` line surfaces as a
+        """A bad ``exclude_entity_id_regex`` line surfaces as a
         per-line config error -- this is the live-host
         version of the regression the user reported.
         """
@@ -166,7 +166,7 @@ class TestArgparseEmitsConfigErrorNotification:
 
         payload = _valid_payload(
             instance_id="automation.rw_bad_regex",
-            exclude_entity_regex="[unclosed",
+            exclude_entity_id_regex="[unclosed",
         )
         await hass.services.async_call(
             DOMAIN,
@@ -187,7 +187,7 @@ class TestArgparseEmitsConfigErrorNotification:
         assert notif_id in notifs
         msg: str = notifs[notif_id]["message"]
         assert "[unclosed" in msg
-        assert "exclude_entity_regex" in msg
+        assert "exclude_entity_id_regex" in msg
 
     async def test_match_all_regex_creates_notification(
         self,
@@ -200,7 +200,7 @@ class TestArgparseEmitsConfigErrorNotification:
 
         payload = _valid_payload(
             instance_id="automation.rw_match_all",
-            exclude_entity_regex=".*",
+            exclude_entity_id_regex=".*",
         )
         await hass.services.async_call(
             DOMAIN,
@@ -320,11 +320,6 @@ class TestArgparseEmitsConfigErrorNotification:
             "__automation.rw_dismiss__config_error"
         )
         assert notif_id not in notifs
-
-
-# --------------------------------------------------------
-# Service layer: scan + diagnostic state
-# --------------------------------------------------------
 
 
 class TestServiceLayerScan:

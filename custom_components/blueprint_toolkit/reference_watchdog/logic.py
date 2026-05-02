@@ -254,7 +254,7 @@ class Config:
     exclude_paths: list[str]
     exclude_integrations: list[str]
     exclude_entities: list[str]
-    exclude_entity_regex: str
+    exclude_entity_id_regex: str
     check_disabled_entities: bool
     # Per-instance notification ID prefix, ending with
     # the canonical ``__`` separator. Every notification
@@ -1326,7 +1326,7 @@ def _collect_findings(
     reference appears. Applies the
     service-name negative truth set (drops sniff hits
     that are registered HA services). Applies the
-    unified ``exclude_entities``/``exclude_entity_regex``
+    unified ``exclude_entities``/``exclude_entity_id_regex``
     on the target side.
     """
     findings: list[Finding] = []
@@ -1343,7 +1343,7 @@ def _collect_findings(
             if _is_entity_excluded(
                 eid,
                 config.exclude_entities,
-                config.exclude_entity_regex,
+                config.exclude_entity_id_regex,
             ):
                 continue
             ref = Ref(
@@ -1389,7 +1389,7 @@ def _collect_findings(
         if _is_entity_excluded(
             ref.value,
             config.exclude_entities,
-            config.exclude_entity_regex,
+            config.exclude_entity_id_regex,
         ):
             continue
 
@@ -1638,7 +1638,7 @@ def _evaluate_sources(
             if owner.entity_id is not None and _is_entity_excluded(
                 owner.entity_id,
                 config.exclude_entities,
-                config.exclude_entity_regex,
+                config.exclude_entity_id_regex,
             ):
                 continue
 
@@ -2145,7 +2145,7 @@ def _find_source_orphans(
     (UI config-flow entries have HA-managed lifecycles and
     are not our concern). Skips platforms in
     ``_SOURCE_ORPHAN_RUNTIME_PLATFORMS`` and applies
-    ``exclude_entities`` / ``exclude_entity_regex``
+    ``exclude_entities`` / ``exclude_entity_id_regex``
     symmetrically.
     """
     pools = _build_orphan_pools(yaml_sources, storage_sources)
@@ -2159,7 +2159,7 @@ def _find_source_orphans(
         if _is_entity_excluded(
             eid,
             config.exclude_entities,
-            config.exclude_entity_regex,
+            config.exclude_entity_id_regex,
         ):
             continue
         object_id = eid.split(".", 1)[1].lower()
@@ -2233,7 +2233,7 @@ def _build_source_orphans_notification(
     orphans don't have a source by definition (their
     backing definer is what's missing). To silence
     specific orphans, use ``exclude_entities`` or
-    ``exclude_entity_regex``.
+    ``exclude_entity_id_regex``.
 
     When ``orphans`` is empty, an inactive notification
     is returned so a previously-active summary gets

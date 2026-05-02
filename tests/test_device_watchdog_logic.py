@@ -48,8 +48,8 @@ T0 = datetime(2024, 1, 15, 12, 0, 0)
 
 def _config(**overrides: object) -> Config:
     defaults: dict[str, object] = {
-        "device_exclude_regex": "",
-        "entity_id_exclude_regex": "",
+        "exclude_device_name_regex": "",
+        "exclude_entity_id_regex": "",
         "monitored_entity_domains": [],
         "dead_threshold_seconds": 86400,
         "enabled_checks": CHECK_ALL,
@@ -115,8 +115,8 @@ class TestFilterEntities:
         assert kept[0].entity_id == "sensor.temp"
         assert len(filtered) == 2
 
-    def test_entity_id_exclude_regex(self) -> None:
-        cfg = _config(entity_id_exclude_regex="battery")
+    def test_exclude_entity_id_regex(self) -> None:
+        cfg = _config(exclude_entity_id_regex="battery")
         entities = [
             _entity("sensor.temp"),
             _entity("sensor.battery_level"),
@@ -128,7 +128,7 @@ class TestFilterEntities:
     def test_domain_and_exclude_combined(self) -> None:
         cfg = _config(
             monitored_entity_domains=["sensor"],
-            entity_id_exclude_regex="battery",
+            exclude_entity_id_regex="battery",
         )
         entities = [
             _entity("sensor.temp"),
@@ -332,7 +332,7 @@ class TestEvaluateDevice:
         assert result.is_stale is True
 
     def test_excluded_device(self) -> None:
-        cfg = _config(device_exclude_regex="Test")
+        cfg = _config(exclude_device_name_regex="Test")
         device = _device(
             device_name="Test Device",
             entities=[

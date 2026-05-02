@@ -110,10 +110,10 @@ _SCHEMA = vol.Schema(
         ),
         vol.Required("include_integrations_raw"): cv_ha_domain_list,
         vol.Required("exclude_integrations_raw"): cv_ha_domain_list,
-        vol.Required("device_exclude_regex_raw"): vol.Coerce(str),
+        vol.Required("exclude_device_name_regex_raw"): vol.Coerce(str),
         vol.Required("exclude_entities_raw"): cv.entity_ids,
-        vol.Required("entity_id_exclude_regex_raw"): vol.Coerce(str),
-        vol.Required("entity_name_exclude_regex_raw"): vol.Coerce(str),
+        vol.Required("exclude_entity_id_regex_raw"): vol.Coerce(str),
+        vol.Required("exclude_entity_name_regex_raw"): vol.Coerce(str),
         vol.Required("check_interval_minutes_raw"): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=10080)
         ),
@@ -204,19 +204,19 @@ async def _async_argparse(
     # rejection, and alternation join behave identically.
     # See ``test_helpers_lifecycle.TestValidateAndJoinRegexPatterns``
     # for the parser contract.
-    device_exclude_regex, dev_errors = validate_and_join_regex_patterns(
-        data["device_exclude_regex_raw"],
-        "device_exclude_regex",
+    exclude_device_name_regex, dev_errors = validate_and_join_regex_patterns(
+        data["exclude_device_name_regex_raw"],
+        "exclude_device_name_regex",
     )
     errors.extend(dev_errors)
-    entity_id_exclude_regex, eid_errors = validate_and_join_regex_patterns(
-        data["entity_id_exclude_regex_raw"],
-        "entity_id_exclude_regex",
+    exclude_entity_id_regex, eid_errors = validate_and_join_regex_patterns(
+        data["exclude_entity_id_regex_raw"],
+        "exclude_entity_id_regex",
     )
     errors.extend(eid_errors)
-    entity_name_exclude_regex, en_errors = validate_and_join_regex_patterns(
-        data["entity_name_exclude_regex_raw"],
-        "entity_name_exclude_regex",
+    exclude_entity_name_regex, en_errors = validate_and_join_regex_patterns(
+        data["exclude_entity_name_regex_raw"],
+        "exclude_entity_name_regex",
     )
     errors.extend(en_errors)
 
@@ -235,10 +235,10 @@ async def _async_argparse(
         drift_checks=drift_checks,
         include_integrations=list(data["include_integrations_raw"]),
         exclude_integrations=list(data["exclude_integrations_raw"]),
-        device_exclude_regex=device_exclude_regex,
+        exclude_device_name_regex=exclude_device_name_regex,
         exclude_entities=list(data["exclude_entities_raw"]),
-        entity_id_exclude_regex=entity_id_exclude_regex,
-        entity_name_exclude_regex=entity_name_exclude_regex,
+        exclude_entity_id_regex=exclude_entity_id_regex,
+        exclude_entity_name_regex=exclude_entity_name_regex,
         check_interval_minutes=data["check_interval_minutes_raw"],
         max_notifications=data["max_device_notifications_raw"],
         debug_logging=data["debug_logging_raw"],
@@ -260,10 +260,10 @@ async def _async_service_layer(
     drift_checks: frozenset[str],
     include_integrations: list[str],
     exclude_integrations: list[str],
-    device_exclude_regex: str,
+    exclude_device_name_regex: str,
     exclude_entities: list[str],
-    entity_id_exclude_regex: str,
-    entity_name_exclude_regex: str,
+    exclude_entity_id_regex: str,
+    exclude_entity_name_regex: str,
     check_interval_minutes: int,
     max_notifications: int,
     debug_logging: bool,
@@ -286,10 +286,10 @@ async def _async_service_layer(
 
     config = logic.Config(
         drift_checks=drift_checks,
-        device_exclude_regex=device_exclude_regex,
+        exclude_device_name_regex=exclude_device_name_regex,
         exclude_entity_ids=exclude_entities,
-        entity_id_exclude_regex=entity_id_exclude_regex,
-        entity_name_exclude_regex=entity_name_exclude_regex,
+        exclude_entity_id_regex=exclude_entity_id_regex,
+        exclude_entity_name_regex=exclude_entity_name_regex,
         notification_prefix=notif_prefix,
         instance_id=instance_id,
     )

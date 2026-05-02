@@ -47,7 +47,7 @@ resolved.
 | Drift checks              | Which checks to run: `device-entity-id`, `device-entity-name`, `entity-id` (deviceless), or any combination. Empty means all.                                                                                       |
 | Include integrations      | Integration IDs to check. Empty means all integrations. Applies to device-backed entities and to registry-backed deviceless entries (e.g. `template`, `rachio`). State-only entities have no platform to filter on. |
 | Exclude integrations      | Integration IDs to skip even if included. Same scope as Include integrations.                                                                                                                                       |
-| Device exclude regex      | Skip devices whose name matches. One pattern per line.                                                                                                                                                              |
+| Device name exclude regex | Skip devices whose name matches. One pattern per line.                                                                                                                                                              |
 | Exclude entities          | Specific entities to exclude from all checks.                                                                                                                                                                       |
 | Entity ID exclude regex   | Skip entities whose ID matches. One pattern per line.                                                                                                                                                               |
 | Entity name exclude regex | Skip entities whose name matches. One pattern per line.                                                                                                                                                             |
@@ -180,7 +180,7 @@ friendly name in plain text followed by the owning integration's name as a
 link to its config page -- scan the integration column to see when several
 flagged entities share a single source (e.g. five rows all tagged
 `-  integration rachio`) and can be suppressed together via
-`exclude_integrations`. State-only entities (YAML blocks without `unique_id:`)
+**Exclude integrations**. State-only entities (YAML blocks without `unique_id:`)
 have no owning integration, so they show a nudge to add one instead.
 
 **Stale collision suffixes** -- entities whose ID ends in `_N` (N >= 2) but no
@@ -221,7 +221,7 @@ intentionally customized names or IDs:
 - **Entity ID exclude regex**: match entity IDs by pattern (e.g., `battery` to
   skip all battery entities).
 - **Entity name exclude regex**: match entity names by pattern.
-- **Device exclude regex**: skip entire devices by name.
+- **Device name exclude regex**: skip entire devices by name.
 
 ## Developer notes
 

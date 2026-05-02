@@ -71,12 +71,12 @@ See the blueprint UI for default values.
 
 Three exclusion axes, each for a specific purpose:
 
-| Want to silence                                        | Use                    |
-| ------------------------------------------------------ | ---------------------- |
-| A specific file (e.g. `plants.yaml`, an old dashboard) | `exclude_paths`        |
-| All config entries from an integration (e.g. `hacs`)   | `exclude_integrations` |
-| A specific entity ID you don't want flagged            | `exclude_entities`     |
-| A family of entity IDs matching a pattern              | `exclude_entity_regex` |
+| Want to silence                                        | Use                      |
+| ------------------------------------------------------ | ------------------------ |
+| A specific file (e.g. `plants.yaml`, an old dashboard) | Exclude paths            |
+| All config entries from an integration (e.g. `hacs`)   | Exclude integrations     |
+| A specific entity ID you don't want flagged            | Exclude entities         |
+| A family of entity IDs matching a pattern              | Entity ID exclude regex  |
 
 **Rule of thumb:** by file -> paths. By config entry domain -> integrations.
 By entity -> entities.
@@ -142,13 +142,14 @@ integration or restart HA.
 ### Plants and other legacy YAML integrations
 
 Some legacy YAML integrations -- notably `plant` -- don't register their
-entities in the entity registry at all, so `exclude_integrations: plant` has
-no effect on them. To silence plant findings:
+entities in the entity registry at all, so adding `plant` to **Exclude
+integrations** has no effect on them. To silence plant findings:
 
-- Preferred: `exclude_paths: plants.yaml` -- kills the whole scanner for that
-  file
-- Alternative: `exclude_entity_regex: '^sensor\.plant_sensor_'` -- narrower,
-  keeps scanning the file but suppresses specific broken sensor prefixes
+- Preferred: add `plants.yaml` to **Exclude paths** -- kills the whole
+  scanner for that file
+- Alternative: add `^sensor\.plant_sensor_` to **Entity ID exclude regex** --
+  narrower, keeps scanning the file but suppresses specific broken sensor
+  prefixes
 
 ### Source orphans
 
@@ -158,11 +159,11 @@ behind. These entries are invisible to the broken-reference scan because they
 still resolve -- the dead entity is still in `entity_ids` -- but nothing
 currently creates them.
 
-The watchdog emits a single summary notification titled "Source orphans
-(N)" (the dispatcher prepends the automation's friendly name). Orphans are
-grouped by `platform` (e.g. `utility_meter`,
-`input_boolean`, `automation`); larger groups are shown first. Disabled
-entities are tagged *(disabled)* next to the link.
+The watchdog emits a single summary notification titled "Source orphans (N)"
+(the dispatcher prepends the automation's friendly name). Orphans are grouped
+by `platform` (e.g. `utility_meter`, `input_boolean`, `automation`); larger
+groups are shown first. Disabled entities are tagged *(disabled)* next to the
+link.
 
 Each orphan links to `/config/entities?domain=<platform>` -- HA's entities
 page filtered to that integration's rows. Find your orphan in the narrowed
@@ -179,10 +180,10 @@ runtime state and don't have a file-based definer.
 
 To silence specific findings:
 
-| Want to silence                        | Use                    |
-| -------------------------------------- | ---------------------- |
-| A single orphan you want to keep       | `exclude_entities`     |
-| A family of orphans matching a pattern | `exclude_entity_regex` |
+| Want to silence                        | Use                     |
+| -------------------------------------- | ----------------------- |
+| A single orphan you want to keep       | Exclude entities        |
+| A family of orphans matching a pattern | Exclude entity regex    |
 
 There's no per-platform silencing toggle -- the full set of known UI-helper
 storage files (`input_boolean`, `input_number`, `input_text`, `input_select`,
@@ -248,8 +249,8 @@ After each evaluation, attributes are written to
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `last_run`                 | ISO timestamp of the most recent successful evaluation                                                                                                         |
 | `runtime`                  | Wall-clock seconds the evaluation took                                                                                                                         |
-| `paths_included`           | Source files actually scanned (after `exclude_paths` filtering)                                                                                                |
-| `paths_excluded`           | Source files skipped by `exclude_paths`                                                                                                                        |
+| `paths_included`           | Source files actually scanned (after **Exclude paths** filtering)                                                                                              |
+| `paths_excluded`           | Source files skipped by **Exclude paths**                                                                                                                      |
 | `owners_total`             | Total owners discovered across scanned sources (including owners with zero refs)                                                                               |
 | `owners_with_refs`         | Owners where at least one reference was detected                                                                                                               |
 | `owners_without_refs`      | Owners scanned but no references detected -- surfaces detection gaps                                                                                           |
@@ -257,7 +258,7 @@ After each evaluation, attributes are written to
 | `total_findings`           | Broken-or-disabled findings across all owners                                                                                                                  |
 | `broken_entity_count`      | Findings where the target entity is missing from the registry + states                                                                                         |
 | `broken_device_count`      | Findings where the target device ID is missing                                                                                                                 |
-| `disabled_entity_count`    | Findings where the target exists but is disabled (only populated when `check_disabled_entities = true`)                                                        |
+| `disabled_entity_count`    | Findings where the target exists but is disabled (only populated when **Check disabled entities** is enabled)                                                  |
 | `refs_total`               | All references detected (valid + broken + disabled)                                                                                                            |
 | `refs_structural`          | References found via the `_ENTITY_KEYS` structural walk                                                                                                        |
 | `refs_jinja`               | References found via the Jinja AST extraction pass                                                                                                             |
@@ -351,7 +352,7 @@ identifier-field value:
   registry unique_id.
 
 There is no toggle to disable source-orphan detection globally. Silence noisy
-entries via `exclude_entities` (exact match) or `exclude_entity_regex`
+entries via **Exclude entities** (exact match) or **Exclude entity regex**
 (pattern); both inputs apply symmetrically to broken references and source
 orphans.
 
@@ -360,7 +361,7 @@ orphans.
 - Object_ids derived by slugifying a scene/group `name:` (not written verbatim
   in the YAML) are not harvested. A `scene:` block without an explicit `id:`
   will appear as a false positive. Fix by giving the scene an explicit `id:`
-  (recommended), or by adding the entity to `exclude_entities`.
+  (recommended), or by adding the entity to **Exclude entities**.
 - An integration that lays its definer identifier down under a key other than
   `id`, `unique_id`, or `object_id` will false-positive. None of the core HA
   integrations do this today, but custom integrations might.

@@ -39,7 +39,7 @@ automatically when devices recover.
 | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Include integrations            | Integration IDs to monitor. Empty means all.                                                             |
 | Exclude integrations            | Integration IDs to skip even if included.                                                                |
-| Device exclude regex            | Skip devices whose name matches. One pattern per line.                                                   |
+| Device name exclude regex       | Skip devices whose name matches. One pattern per line.                                                   |
 | Entity ID exclude regex         | Skip entities whose ID matches. One pattern per line.                                                    |
 | Entity domains to monitor       | Only check entities in these domains                                                                     |
 | Check interval (minutes)        | Minutes between watchdog evaluations                                                                     |

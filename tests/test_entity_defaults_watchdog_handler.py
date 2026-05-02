@@ -270,10 +270,10 @@ def _valid_argparse_payload(**overrides: Any) -> dict[str, Any]:
         "drift_checks_raw": [],
         "include_integrations_raw": [],
         "exclude_integrations_raw": [],
-        "device_exclude_regex_raw": "",
+        "exclude_device_name_regex_raw": "",
         "exclude_entities_raw": [],
-        "entity_id_exclude_regex_raw": "",
-        "entity_name_exclude_regex_raw": "",
+        "exclude_entity_id_regex_raw": "",
+        "exclude_entity_name_regex_raw": "",
         "check_interval_minutes_raw": 5,
         "max_device_notifications_raw": 0,
         "debug_logging_raw": False,
@@ -379,8 +379,8 @@ class TestArgparseDriftChecks(_ArgparseHarness):
 # --------------------------------------------------------
 #
 # EDW has THREE multi-line regex inputs
-# (device_exclude_regex, entity_id_exclude_regex,
-# entity_name_exclude_regex). Each is split on newlines and
+# (exclude_device_name_regex, exclude_entity_id_regex,
+# exclude_entity_name_regex). Each is split on newlines and
 # joined with ``|`` so two patterns on separate lines reach
 # the service layer as a single alternation regex. The
 # split/join + per-line validation lives in the shared
@@ -400,9 +400,9 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
         h = MockHass()
         call = FakeServiceCall(
             _valid_argparse_payload(
-                device_exclude_regex_raw="^Stale-Hub\nold-hub$",
-                entity_id_exclude_regex_raw="sensor\\.foo\nsensor\\.bar",
-                entity_name_exclude_regex_raw="^Custom .*\nKeep this",
+                exclude_device_name_regex_raw="^Stale-Hub\nold-hub$",
+                exclude_entity_id_regex_raw="sensor\\.foo\nsensor\\.bar",
+                exclude_entity_name_regex_raw="^Custom .*\nKeep this",
             ),
         )
         asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
@@ -410,9 +410,9 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
         kw = self.capture.calls[0]
-        assert kw["device_exclude_regex"] == "^Stale-Hub|old-hub$"
-        assert kw["entity_id_exclude_regex"] == "sensor\\.foo|sensor\\.bar"
-        assert kw["entity_name_exclude_regex"] == "^Custom .*|Keep this"
+        assert kw["exclude_device_name_regex"] == "^Stale-Hub|old-hub$"
+        assert kw["exclude_entity_id_regex"] == "sensor\\.foo|sensor\\.bar"
+        assert kw["exclude_entity_name_regex"] == "^Custom .*|Keep this"
 
     def test_helper_errors_emit_config_error_notification(self) -> None:
         # Wiring check: when the shared helper returns
@@ -426,7 +426,7 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
         h = MockHass()
         call = FakeServiceCall(
             _valid_argparse_payload(
-                entity_id_exclude_regex_raw="foo\n[invalid",
+                exclude_entity_id_regex_raw="foo\n[invalid",
             ),
         )
         asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
@@ -447,9 +447,9 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
         kw = self.capture.calls[0]
-        assert kw["device_exclude_regex"] == ""
-        assert kw["entity_id_exclude_regex"] == ""
-        assert kw["entity_name_exclude_regex"] == ""
+        assert kw["exclude_device_name_regex"] == ""
+        assert kw["exclude_entity_id_regex"] == ""
+        assert kw["exclude_entity_name_regex"] == ""
 
     def test_argparse_delegates_to_shared_regex_helper(self) -> None:
         """Lock in that argparse delegates regex parsing to
@@ -487,9 +487,9 @@ class TestArgparseMultilineRegex(_ArgparseHarness):
             h = MockHass()
             call = FakeServiceCall(
                 _valid_argparse_payload(
-                    device_exclude_regex_raw="foo\nbar",
-                    entity_id_exclude_regex_raw="baz",
-                    entity_name_exclude_regex_raw="qux",
+                    exclude_device_name_regex_raw="foo\nbar",
+                    exclude_entity_id_regex_raw="baz",
+                    exclude_entity_name_regex_raw="qux",
                 ),
             )
             asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]

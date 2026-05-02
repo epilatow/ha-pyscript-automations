@@ -101,8 +101,8 @@ def _valid_payload(
     instance_id: str = "automation.dw_test",
     include_integrations: list[str] | None = None,
     exclude_integrations: list[str] | None = None,
-    device_exclude_regex: str = "",
-    entity_id_exclude_regex: str = "",
+    exclude_device_name_regex: str = "",
+    exclude_entity_id_regex: str = "",
     monitored_entity_domains: list[str] | None = None,
     check_interval_minutes: int = 60,
     dead_device_threshold_minutes: int = 1440,
@@ -115,8 +115,8 @@ def _valid_payload(
         "trigger_id": "manual",
         "include_integrations_raw": include_integrations or [],
         "exclude_integrations_raw": exclude_integrations or [],
-        "device_exclude_regex_raw": device_exclude_regex,
-        "entity_id_exclude_regex_raw": entity_id_exclude_regex,
+        "exclude_device_name_regex_raw": exclude_device_name_regex,
+        "exclude_entity_id_regex_raw": exclude_entity_id_regex,
         "monitored_entity_domains_raw": monitored_entity_domains or [],
         "check_interval_minutes_raw": check_interval_minutes,
         "dead_device_threshold_minutes_raw": dead_device_threshold_minutes,
@@ -196,7 +196,7 @@ class TestArgparseEmitsConfigErrorNotification:
 
         payload = _valid_payload(
             instance_id="automation.dw_bad_regex",
-            entity_id_exclude_regex="[unclosed",
+            exclude_entity_id_regex="[unclosed",
         )
         await hass.services.async_call(DOMAIN, SERVICE, payload, blocking=True)
 
@@ -212,7 +212,7 @@ class TestArgparseEmitsConfigErrorNotification:
         assert notif_id in notifs
         msg: str = notifs[notif_id]["message"]
         assert "[unclosed" in msg
-        assert "entity_id_exclude_regex" in msg
+        assert "exclude_entity_id_regex" in msg
 
     async def test_match_all_regex_creates_notification(
         self,
@@ -225,7 +225,7 @@ class TestArgparseEmitsConfigErrorNotification:
 
         payload = _valid_payload(
             instance_id="automation.dw_match_all",
-            device_exclude_regex=".*",
+            exclude_device_name_regex=".*",
         )
         await hass.services.async_call(DOMAIN, SERVICE, payload, blocking=True)
 
@@ -307,11 +307,6 @@ class TestArgparseEmitsConfigErrorNotification:
             "__automation.dw_dismiss__config_error"
         )
         assert notif_id not in notifs
-
-
-# --------------------------------------------------------
-# Service layer: scan + diagnostic state
-# --------------------------------------------------------
 
 
 class TestServiceLayerScan:

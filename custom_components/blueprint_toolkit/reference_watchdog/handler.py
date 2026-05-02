@@ -106,7 +106,7 @@ _SCHEMA = vol.Schema(
         vol.Required("exclude_paths_raw"): vol.Coerce(str),
         vol.Required("exclude_integrations_raw"): cv_ha_domain_list,
         vol.Required("exclude_entities_raw"): cv.entity_ids,
-        vol.Required("exclude_entity_regex_raw"): vol.Coerce(str),
+        vol.Required("exclude_entity_id_regex_raw"): vol.Coerce(str),
         vol.Required("check_disabled_entities_raw"): cv.boolean,
         vol.Required("check_interval_minutes_raw"): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=10080)
@@ -183,9 +183,9 @@ async def _async_argparse(
     # surviving lines with ``|`` so the logic module gets
     # a single alternation regex it can hand to
     # ``re.search``.
-    exclude_entity_regex, regex_errors = validate_and_join_regex_patterns(
-        data["exclude_entity_regex_raw"],
-        "exclude_entity_regex",
+    exclude_entity_id_regex, regex_errors = validate_and_join_regex_patterns(
+        data["exclude_entity_id_regex_raw"],
+        "exclude_entity_id_regex",
     )
     errors.extend(regex_errors)
 
@@ -210,7 +210,7 @@ async def _async_argparse(
         exclude_paths=exclude_paths,
         exclude_integrations=list(data["exclude_integrations_raw"]),
         exclude_entities=list(data["exclude_entities_raw"]),
-        exclude_entity_regex=exclude_entity_regex,
+        exclude_entity_id_regex=exclude_entity_id_regex,
         check_disabled_entities=data["check_disabled_entities_raw"],
         check_interval_minutes=data["check_interval_minutes_raw"],
         max_notifications=data["max_source_notifications_raw"],
@@ -233,7 +233,7 @@ async def _async_service_layer(
     exclude_paths: list[str],
     exclude_integrations: list[str],
     exclude_entities: list[str],
-    exclude_entity_regex: str,
+    exclude_entity_id_regex: str,
     check_disabled_entities: bool,
     check_interval_minutes: int,
     max_notifications: int,
@@ -259,7 +259,7 @@ async def _async_service_layer(
         exclude_paths=exclude_paths,
         exclude_integrations=exclude_integrations,
         exclude_entities=exclude_entities,
-        exclude_entity_regex=exclude_entity_regex,
+        exclude_entity_id_regex=exclude_entity_id_regex,
         check_disabled_entities=check_disabled_entities,
         notification_prefix=notif_prefix,
         instance_id=instance_id,

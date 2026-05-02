@@ -76,7 +76,7 @@ def _config(**overrides: object) -> Config:
         "exclude_paths": [],
         "exclude_integrations": [],
         "exclude_entities": [],
-        "exclude_entity_regex": "",
+        "exclude_entity_id_regex": "",
         "check_disabled_entities": True,
         "notification_prefix": "reference_watchdog_test__",
     }
@@ -950,7 +950,7 @@ class TestCollectFindings:
         owner = Owner(source_file="x.yaml", friendly_name="t")
         ts = _ts()  # sensor.legacy_thing not in truth set -> broken
         findings, _ = _collect_findings(
-            _config(exclude_entity_regex=r"^sensor\.legacy_"),
+            _config(exclude_entity_id_regex=r"^sensor\.legacy_"),
             owner,
             tree,
             ts,
@@ -2265,7 +2265,7 @@ class TestFindSourceOrphans:
         )
         assert orphans == []
 
-    def test_exclude_entity_regex_suppresses_orphan(self) -> None:
+    def test_exclude_entity_id_regex_suppresses_orphan(self) -> None:
         reg = _reg_entry(
             "sensor.legacy_one",
             platform="utility_meter",
@@ -2274,7 +2274,7 @@ class TestFindSourceOrphans:
         )
         ts = _ts(registry={reg.entity_id: reg})
         orphans = _find_source_orphans(
-            _config(exclude_entity_regex=r"^sensor\.legacy_"),
+            _config(exclude_entity_id_regex=r"^sensor\.legacy_"),
             ts,
             [],
             [],

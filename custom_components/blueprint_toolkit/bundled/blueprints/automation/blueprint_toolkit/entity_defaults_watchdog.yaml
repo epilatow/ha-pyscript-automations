@@ -53,8 +53,8 @@ blueprint:
           custom_value: true
           options: []
 
-    device_exclude_regex:
-      name: Device exclude regex
+    exclude_device_name_regex:
+      name: Device name exclude regex
       description: >
         Devices whose name matches any of these regular
         expressions are ignored. Enter one pattern per
@@ -76,7 +76,7 @@ blueprint:
         entity:
           multiple: true
 
-    entity_id_exclude_regex:
+    exclude_entity_id_regex:
       name: Entity ID exclude regex
       description: >
         Entities whose ID matches any of these regular
@@ -88,7 +88,7 @@ blueprint:
         text:
           multiline: true
 
-    entity_name_exclude_regex:
+    exclude_entity_name_regex:
       name: Entity name exclude regex
       description: >
         Entities whose friendly name matches any of
@@ -156,10 +156,10 @@ actions:
       drift_checks_raw: !input drift_checks
       include_integrations_raw: !input include_integrations
       exclude_integrations_raw: !input exclude_integrations
-      device_exclude_regex_raw: !input device_exclude_regex
+      exclude_device_name_regex_raw: !input exclude_device_name_regex
       exclude_entities_raw: !input exclude_entities
-      entity_id_exclude_regex_raw: !input entity_id_exclude_regex
-      entity_name_exclude_regex_raw: !input entity_name_exclude_regex
+      exclude_entity_id_regex_raw: !input exclude_entity_id_regex
+      exclude_entity_name_regex_raw: !input exclude_entity_name_regex
       check_interval_minutes_raw: !input check_interval_minutes
       max_device_notifications_raw: !input max_device_notifications
       debug_logging_raw: !input debug_logging

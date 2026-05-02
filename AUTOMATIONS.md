@@ -696,6 +696,12 @@ minimum:
 - `_raw` suffix applied to schema-validated input fields whose parsed form is
   rebound without the suffix in argparse, e.g. `default_route_speed_raw` ->
   `default_route_speed`.
+- Watchdog include / exclude blueprint inputs use the prefix-style
+  `include_<thing>` / `exclude_<thing>` naming (NOT
+  `<thing>_exclude_<thing>`). When two blueprints take a directive that
+  matches the same underlying thing -- entity IDs, regex patterns, integration
+  names -- they use the SAME variable name (e.g. DW, EDW, and RW all use
+  `exclude_entity_id_regex`).
 
 Booleans use `helpers`-side coercion via `cv.boolean`; never hand-roll string
 comparison.

@@ -92,10 +92,10 @@ class Config:
     """Configuration parameters (set per-instance)."""
 
     drift_checks: frozenset[str]
-    device_exclude_regex: str
+    exclude_device_name_regex: str
     exclude_entity_ids: list[str]
-    entity_id_exclude_regex: str
-    entity_name_exclude_regex: str
+    exclude_entity_id_regex: str
+    exclude_entity_name_regex: str
     # Per-instance notification ID prefix, ending with
     # the canonical ``__`` separator. Every notification
     # this module mints must start with this string so
@@ -381,12 +381,12 @@ def _is_excluded(
         return True
     if helpers.matches_pattern(
         entity_id,
-        config.entity_id_exclude_regex,
+        config.exclude_entity_id_regex,
     ):
         return True
     if helpers.matches_pattern(
         friendly_name,
-        config.entity_name_exclude_regex,
+        config.exclude_entity_name_regex,
     ):
         return True
     return False
@@ -650,7 +650,7 @@ def _evaluate_device(
     # Skip excluded devices
     if helpers.matches_pattern(
         device.de.name,
-        config.device_exclude_regex,
+        config.exclude_device_name_regex,
     ):
         return DeviceResult(
             device_id=device.de.id,

@@ -107,10 +107,10 @@ def _valid_payload(
     drift_checks: list[str] | None = None,
     include_integrations: list[str] | None = None,
     exclude_integrations: list[str] | None = None,
-    device_exclude_regex: str = "",
+    exclude_device_name_regex: str = "",
     exclude_entities: list[str] | None = None,
-    entity_id_exclude_regex: str = "",
-    entity_name_exclude_regex: str = "",
+    exclude_entity_id_regex: str = "",
+    exclude_entity_name_regex: str = "",
     check_interval_minutes: int = 60,
     max_device_notifications: int = 0,
 ) -> dict[str, Any]:
@@ -121,10 +121,10 @@ def _valid_payload(
         "drift_checks_raw": drift_checks or [],
         "include_integrations_raw": include_integrations or [],
         "exclude_integrations_raw": exclude_integrations or [],
-        "device_exclude_regex_raw": device_exclude_regex,
+        "exclude_device_name_regex_raw": exclude_device_name_regex,
         "exclude_entities_raw": exclude_entities or [],
-        "entity_id_exclude_regex_raw": entity_id_exclude_regex,
-        "entity_name_exclude_regex_raw": entity_name_exclude_regex,
+        "exclude_entity_id_regex_raw": exclude_entity_id_regex,
+        "exclude_entity_name_regex_raw": exclude_entity_name_regex,
         "check_interval_minutes_raw": check_interval_minutes,
         "max_device_notifications_raw": max_device_notifications,
         "debug_logging_raw": False,
@@ -201,7 +201,7 @@ class TestArgparseEmitsConfigErrorNotification:
 
         payload = _valid_payload(
             instance_id="automation.edw_bad_regex",
-            entity_id_exclude_regex="[unclosed",
+            exclude_entity_id_regex="[unclosed",
         )
         await hass.services.async_call(DOMAIN, SERVICE, payload, blocking=True)
 
@@ -217,7 +217,7 @@ class TestArgparseEmitsConfigErrorNotification:
         assert notif_id in notifs
         msg: str = notifs[notif_id]["message"]
         assert "[unclosed" in msg
-        assert "entity_id_exclude_regex" in msg
+        assert "exclude_entity_id_regex" in msg
 
     async def test_match_all_regex_creates_notification(
         self,
@@ -230,7 +230,7 @@ class TestArgparseEmitsConfigErrorNotification:
 
         payload = _valid_payload(
             instance_id="automation.edw_match_all",
-            device_exclude_regex=".*",
+            exclude_device_name_regex=".*",
         )
         await hass.services.async_call(DOMAIN, SERVICE, payload, blocking=True)
 
@@ -312,11 +312,6 @@ class TestArgparseEmitsConfigErrorNotification:
             "__automation.edw_dismiss__config_error"
         )
         assert notif_id not in notifs
-
-
-# --------------------------------------------------------
-# Service layer: scan + diagnostic state
-# --------------------------------------------------------
 
 
 class TestServiceLayerScan:

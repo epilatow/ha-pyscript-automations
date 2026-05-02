@@ -109,7 +109,7 @@ device name + ID drift)</li>
 <td>Integration IDs to skip even if included. Same scope as Include integrations.</td>
 </tr>
 <tr>
-<td>Device exclude regex</td>
+<td>Device name exclude regex</td>
 <td>Skip devices whose name matches. One pattern per line.</td>
 </tr>
 <tr>
@@ -240,7 +240,7 @@ friendly name in plain text followed by the owning integration's name as a
 link to its config page -- scan the integration column to see when several
 flagged entities share a single source (e.g. five rows all tagged
 <code>-  integration rachio</code>) and can be suppressed together via
-<code>exclude_integrations</code>. State-only entities (YAML blocks without <code>unique_id:</code>)
+<strong>Exclude integrations</strong>. State-only entities (YAML blocks without <code>unique_id:</code>)
 have no owning integration, so they show a nudge to add one instead.</p>
 <p><strong>Stale collision suffixes</strong> -- entities whose ID ends in <code>_N</code> (N &gt;= 2) but no
 un-suffixed or lower-<code>_N</code> peer exists:</p>
@@ -273,7 +273,7 @@ intentionally customized names or IDs:</p>
 <li><strong>Entity ID exclude regex</strong>: match entity IDs by pattern (e.g., <code>battery</code> to
 skip all battery entities).</li>
 <li><strong>Entity name exclude regex</strong>: match entity names by pattern.</li>
-<li><strong>Device exclude regex</strong>: skip entire devices by name.</li>
+<li><strong>Device name exclude regex</strong>: skip entire devices by name.</li>
 </ul>
 <h2>Developer notes</h2>
 <h3>Entity attributes</h3>

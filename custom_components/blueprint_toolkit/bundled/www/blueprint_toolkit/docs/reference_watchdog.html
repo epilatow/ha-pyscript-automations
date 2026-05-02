@@ -153,19 +153,19 @@ integrations</li>
 <tbody>
 <tr>
 <td>A specific file (e.g. <code>plants.yaml</code>, an old dashboard)</td>
-<td><code>exclude_paths</code></td>
+<td>Exclude paths</td>
 </tr>
 <tr>
 <td>All config entries from an integration (e.g. <code>hacs</code>)</td>
-<td><code>exclude_integrations</code></td>
+<td>Exclude integrations</td>
 </tr>
 <tr>
 <td>A specific entity ID you don't want flagged</td>
-<td><code>exclude_entities</code></td>
+<td>Exclude entities</td>
 </tr>
 <tr>
 <td>A family of entity IDs matching a pattern</td>
-<td><code>exclude_entity_regex</code></td>
+<td>Entity ID exclude regex</td>
 </tr>
 </tbody>
 </table>
@@ -245,13 +245,14 @@ Open the YAML file in your editor and fix the reference there, then reload the
 integration or restart HA.</p>
 <h3>Plants and other legacy YAML integrations</h3>
 <p>Some legacy YAML integrations -- notably <code>plant</code> -- don't register their
-entities in the entity registry at all, so <code>exclude_integrations: plant</code> has
-no effect on them. To silence plant findings:</p>
+entities in the entity registry at all, so adding <code>plant</code> to <strong>Exclude
+integrations</strong> has no effect on them. To silence plant findings:</p>
 <ul>
-<li>Preferred: <code>exclude_paths: plants.yaml</code> -- kills the whole scanner for that
-file</li>
-<li>Alternative: <code>exclude_entity_regex: '^sensor\.plant_sensor_'</code> -- narrower,
-keeps scanning the file but suppresses specific broken sensor prefixes</li>
+<li>Preferred: add <code>plants.yaml</code> to <strong>Exclude paths</strong> -- kills the whole
+scanner for that file</li>
+<li>Alternative: add <code>^sensor\.plant_sensor_</code> to <strong>Entity ID exclude regex</strong> --
+narrower, keeps scanning the file but suppresses specific broken sensor
+prefixes</li>
 </ul>
 <h3>Source orphans</h3>
 <p>A <em>source orphan</em> is a registry entry whose backing YAML block (or UI-helper
@@ -259,11 +260,11 @@ storage record) has been removed or renamed, leaving the registry entry
 behind. These entries are invisible to the broken-reference scan because they
 still resolve -- the dead entity is still in <code>entity_ids</code> -- but nothing
 currently creates them.</p>
-<p>The watchdog emits a single summary notification titled &quot;Source orphans
-(N)&quot; (the dispatcher prepends the automation's friendly name). Orphans are
-grouped by <code>platform</code> (e.g. <code>utility_meter</code>,
-<code>input_boolean</code>, <code>automation</code>); larger groups are shown first. Disabled
-entities are tagged <em>(disabled)</em> next to the link.</p>
+<p>The watchdog emits a single summary notification titled &quot;Source orphans (N)&quot;
+(the dispatcher prepends the automation's friendly name). Orphans are grouped
+by <code>platform</code> (e.g. <code>utility_meter</code>, <code>input_boolean</code>, <code>automation</code>); larger
+groups are shown first. Disabled entities are tagged <em>(disabled)</em> next to the
+link.</p>
 <p>Each orphan links to <code>/config/entities?domain=&lt;platform&gt;</code> -- HA's entities
 page filtered to that integration's rows. Find your orphan in the narrowed
 list, click it to open the settings dialog, and click Delete.</p>
@@ -285,11 +286,11 @@ runtime state and don't have a file-based definer.</p>
 <tbody>
 <tr>
 <td>A single orphan you want to keep</td>
-<td><code>exclude_entities</code></td>
+<td>Exclude entities</td>
 </tr>
 <tr>
 <td>A family of orphans matching a pattern</td>
-<td><code>exclude_entity_regex</code></td>
+<td>Exclude entity regex</td>
 </tr>
 </tbody>
 </table>
@@ -361,11 +362,11 @@ surface as a broken-entity false positive.</p>
 </tr>
 <tr>
 <td><code>paths_included</code></td>
-<td>Source files actually scanned (after <code>exclude_paths</code> filtering)</td>
+<td>Source files actually scanned (after <strong>Exclude paths</strong> filtering)</td>
 </tr>
 <tr>
 <td><code>paths_excluded</code></td>
-<td>Source files skipped by <code>exclude_paths</code></td>
+<td>Source files skipped by <strong>Exclude paths</strong></td>
 </tr>
 <tr>
 <td><code>owners_total</code></td>
@@ -397,7 +398,7 @@ surface as a broken-entity false positive.</p>
 </tr>
 <tr>
 <td><code>disabled_entity_count</code></td>
-<td>Findings where the target exists but is disabled (only populated when <code>check_disabled_entities = true</code>)</td>
+<td>Findings where the target exists but is disabled (only populated when <strong>Check disabled entities</strong> is enabled)</td>
 </tr>
 <tr>
 <td><code>refs_total</code></td>
@@ -526,7 +527,7 @@ the object_id for legacy-style templates).</li>
 registry unique_id.</li>
 </ul>
 <p>There is no toggle to disable source-orphan detection globally. Silence noisy
-entries via <code>exclude_entities</code> (exact match) or <code>exclude_entity_regex</code>
+entries via <strong>Exclude entities</strong> (exact match) or <strong>Exclude entity regex</strong>
 (pattern); both inputs apply symmetrically to broken references and source
 orphans.</p>
 <p><strong>Known limitations:</strong></p>
@@ -534,7 +535,7 @@ orphans.</p>
 <li>Object_ids derived by slugifying a scene/group <code>name:</code> (not written verbatim
 in the YAML) are not harvested. A <code>scene:</code> block without an explicit <code>id:</code>
 will appear as a false positive. Fix by giving the scene an explicit <code>id:</code>
-(recommended), or by adding the entity to <code>exclude_entities</code>.</li>
+(recommended), or by adding the entity to <strong>Exclude entities</strong>.</li>
 <li>An integration that lays its definer identifier down under a key other than
 <code>id</code>, <code>unique_id</code>, or <code>object_id</code> will false-positive. None of the core HA
 integrations do this today, but custom integrations might.</li>

@@ -46,10 +46,10 @@ from custom_components.blueprint_toolkit.entity_defaults_watchdog.logic import (
 def _config(**overrides: object) -> Config:
     defaults: dict[str, object] = {
         "drift_checks": CHECK_ALL,
-        "device_exclude_regex": "",
+        "exclude_device_name_regex": "",
         "exclude_entity_ids": [],
-        "entity_id_exclude_regex": "",
-        "entity_name_exclude_regex": "",
+        "exclude_entity_id_regex": "",
+        "exclude_entity_name_regex": "",
         "notification_prefix": "entity_defaults_watchdog_test__",
     }
     defaults.update(overrides)
@@ -142,20 +142,20 @@ class TestIsExcluded:
         assert _is_excluded(cfg, "sensor.temp", "Temp") is True
 
     def test_excluded_by_entity_id_regex(self) -> None:
-        cfg = _config(entity_id_exclude_regex="battery")
+        cfg = _config(exclude_entity_id_regex="battery")
         assert _is_excluded(cfg, "sensor.battery_level", "Battery") is True
         assert _is_excluded(cfg, "sensor.temp", "Temp") is False
 
     def test_excluded_by_entity_name_regex(self) -> None:
-        cfg = _config(entity_name_exclude_regex="Battery")
+        cfg = _config(exclude_entity_name_regex="Battery")
         assert _is_excluded(cfg, "sensor.bat", "Battery Level") is True
         assert _is_excluded(cfg, "sensor.bat", "Temperature") is False
 
     def test_multiple_exclusions(self) -> None:
         cfg = _config(
             exclude_entity_ids=["sensor.a"],
-            entity_id_exclude_regex="b$",
-            entity_name_exclude_regex="^Ignore",
+            exclude_entity_id_regex="b$",
+            exclude_entity_name_regex="^Ignore",
         )
         assert _is_excluded(cfg, "sensor.a", "A") is True
         assert _is_excluded(cfg, "sensor.b", "B") is True
@@ -682,7 +682,7 @@ class TestEvaluateDevice:
         assert len(result.drifted_entities) == 1
 
     def test_excluded_device(self) -> None:
-        cfg = _config(device_exclude_regex="Test")
+        cfg = _config(exclude_device_name_regex="Test")
         device = _device(
             device_name="Test Device",
             entities=[
@@ -1277,7 +1277,7 @@ class TestEvaluateDeviceless:
         assert result.entities_excluded == 1
 
     def test_entity_id_regex_exclusion(self) -> None:
-        cfg = _config(entity_id_exclude_regex="^sensor\\.")
+        cfg = _config(exclude_entity_id_regex="^sensor\\.")
         entities = [
             _deviceless(
                 "sensor.foo",

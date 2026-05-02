@@ -108,8 +108,8 @@ _SCHEMA = vol.Schema(
         vol.Required("trigger_id"): vol.Coerce(str),
         vol.Required("include_integrations_raw"): cv_ha_domain_list,
         vol.Required("exclude_integrations_raw"): cv_ha_domain_list,
-        vol.Required("device_exclude_regex_raw"): vol.Coerce(str),
-        vol.Required("entity_id_exclude_regex_raw"): vol.Coerce(str),
+        vol.Required("exclude_device_name_regex_raw"): vol.Coerce(str),
+        vol.Required("exclude_entity_id_regex_raw"): vol.Coerce(str),
         vol.Required("monitored_entity_domains_raw"): cv_ha_domain_list,
         vol.Required("check_interval_minutes_raw"): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=10080)
@@ -209,14 +209,14 @@ async def _async_argparse(
     # rejection, and alternation join behave identically.
     # See ``test_helpers_lifecycle.TestValidateAndJoinRegexPatterns``
     # for the parser contract.
-    device_exclude_regex, dev_errors = validate_and_join_regex_patterns(
-        data["device_exclude_regex_raw"],
-        "device_exclude_regex",
+    exclude_device_name_regex, dev_errors = validate_and_join_regex_patterns(
+        data["exclude_device_name_regex_raw"],
+        "exclude_device_name_regex",
     )
     errors.extend(dev_errors)
-    entity_id_exclude_regex, eid_errors = validate_and_join_regex_patterns(
-        data["entity_id_exclude_regex_raw"],
-        "entity_id_exclude_regex",
+    exclude_entity_id_regex, eid_errors = validate_and_join_regex_patterns(
+        data["exclude_entity_id_regex_raw"],
+        "exclude_entity_id_regex",
     )
     errors.extend(eid_errors)
 
@@ -238,8 +238,8 @@ async def _async_argparse(
         trigger_id=data["trigger_id"],
         include_integrations=list(data["include_integrations_raw"]),
         exclude_integrations=list(data["exclude_integrations_raw"]),
-        device_exclude_regex=device_exclude_regex,
-        entity_id_exclude_regex=entity_id_exclude_regex,
+        exclude_device_name_regex=exclude_device_name_regex,
+        exclude_entity_id_regex=exclude_entity_id_regex,
         monitored_entity_domains=list(data["monitored_entity_domains_raw"]),
         check_interval_minutes=data["check_interval_minutes_raw"],
         dead_threshold_seconds=dead_threshold_seconds,
@@ -263,8 +263,8 @@ async def _async_service_layer(
     trigger_id: str,
     include_integrations: list[str],
     exclude_integrations: list[str],
-    device_exclude_regex: str,
-    entity_id_exclude_regex: str,
+    exclude_device_name_regex: str,
+    exclude_entity_id_regex: str,
     monitored_entity_domains: list[str],
     check_interval_minutes: int,
     dead_threshold_seconds: int,
@@ -289,8 +289,8 @@ async def _async_service_layer(
     tag = f"[{_SERVICE_TAG}: {automation_friendly_name(hass, instance_id)}]"
 
     config = logic.Config(
-        device_exclude_regex=device_exclude_regex,
-        entity_id_exclude_regex=entity_id_exclude_regex,
+        exclude_device_name_regex=exclude_device_name_regex,
+        exclude_entity_id_regex=exclude_entity_id_regex,
         monitored_entity_domains=monitored_entity_domains,
         dead_threshold_seconds=dead_threshold_seconds,
         enabled_checks=enabled_checks,

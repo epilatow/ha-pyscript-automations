@@ -60,8 +60,8 @@ CHECK_ALL: frozenset[str] = frozenset(
 class Config:
     """Configuration parameters (set per-instance)."""
 
-    device_exclude_regex: str
-    entity_id_exclude_regex: str
+    exclude_device_name_regex: str
+    exclude_entity_id_regex: str
     monitored_entity_domains: list[str]
     dead_threshold_seconds: int
     enabled_checks: frozenset[str]
@@ -287,7 +287,7 @@ def _filter_entities(
 
         if helpers.matches_pattern(
             eid,
-            config.entity_id_exclude_regex,
+            config.exclude_entity_id_regex,
         ):
             filtered_out.append(entity)
             continue
@@ -397,7 +397,7 @@ def _evaluate_device(
     # Skip excluded devices
     device_excluded = helpers.matches_pattern(
         device.de.name,
-        config.device_exclude_regex,
+        config.exclude_device_name_regex,
     )
     if device_excluded:
         return DeviceResult(

@@ -1402,9 +1402,9 @@ class TestMatchesPattern:
 
 class TestValidateAndJoinRegexPatterns:
     """Multi-line regex-input handling for blueprint
-    fields like RW's ``exclude_entity_regex`` (and DW /
-    EDW's ``device_exclude_regex`` /
-    ``entity_id_exclude_regex`` / ``entity_name_exclude_regex``).
+    fields like RW's ``exclude_entity_id_regex`` (and DW /
+    EDW's ``exclude_device_name_regex`` /
+    ``exclude_entity_id_regex`` / ``exclude_entity_name_regex``).
 
     The naive shape of this validation -- a single
     ``re.compile()`` on the joined string -- silently
@@ -1416,7 +1416,7 @@ class TestValidateAndJoinRegexPatterns:
     def test_single_line_passes_through(self) -> None:
         joined, errors = helpers.validate_and_join_regex_patterns(
             "sensor\\.foo",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert joined == "sensor\\.foo"
         assert errors == []
@@ -1427,7 +1427,7 @@ class TestValidateAndJoinRegexPatterns:
         # alternation regex.
         joined, errors = helpers.validate_and_join_regex_patterns(
             "sensor\\.loft_humidifier_energy\nsensor\\.office_humidifier_energy",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert errors == []
         assert (
@@ -1441,7 +1441,7 @@ class TestValidateAndJoinRegexPatterns:
         joined, errors = helpers.validate_and_join_regex_patterns(
             "sensor\\.loft_humidifier_energy\n"
             "sensor\\.office_humidifier_energy",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert errors == []
         assert helpers.matches_pattern("sensor.loft_humidifier_energy", joined)
@@ -1456,7 +1456,7 @@ class TestValidateAndJoinRegexPatterns:
     def test_empty_lines_skipped(self) -> None:
         joined, errors = helpers.validate_and_join_regex_patterns(
             "\n  \nfoo\n\n",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert joined == "foo"
         assert errors == []
@@ -1466,11 +1466,11 @@ class TestValidateAndJoinRegexPatterns:
         # still get joined.
         joined, errors = helpers.validate_and_join_regex_patterns(
             "valid.*\n[invalid\nalso_valid",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert len(errors) == 1
         assert "[invalid" in errors[0]
-        assert "exclude_entity_regex" in errors[0]
+        assert "exclude_entity_id_regex" in errors[0]
         # Valid lines get joined; the invalid one is
         # excluded but error surfaced.
         assert "valid" in joined
@@ -1483,7 +1483,7 @@ class TestValidateAndJoinRegexPatterns:
         # match-everything filter.
         joined, errors = helpers.validate_and_join_regex_patterns(
             ".*",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert joined == ""
         assert len(errors) == 1
@@ -1494,7 +1494,7 @@ class TestValidateAndJoinRegexPatterns:
         # empty" pattern -- also matches everything.
         _joined, errors = helpers.validate_and_join_regex_patterns(
             "|||||",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert any("matches empty string" in e for e in errors)
 
@@ -1502,14 +1502,14 @@ class TestValidateAndJoinRegexPatterns:
         # ``a?`` matches "" too.
         _joined, errors = helpers.validate_and_join_regex_patterns(
             "a?",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert any("matches empty string" in e for e in errors)
 
     def test_empty_input_returns_empty(self) -> None:
         joined, errors = helpers.validate_and_join_regex_patterns(
             "",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert joined == ""
         assert errors == []
@@ -1517,7 +1517,7 @@ class TestValidateAndJoinRegexPatterns:
     def test_only_whitespace_returns_empty(self) -> None:
         joined, errors = helpers.validate_and_join_regex_patterns(
             "  \n\t\n   ",
-            "exclude_entity_regex",
+            "exclude_entity_id_regex",
         )
         assert joined == ""
         assert errors == []
@@ -1533,6 +1533,60 @@ def _reset_timer_capture() -> None:
     _track_cancel_calls.clear()
     _call_later_calls.clear()
     _call_later_cancel_calls.clear()
+
+
+class TestStaleInputKeyReferences:
+    """Repo-wide grep test pinning the renamed-input
+    convention.
+
+    Catches a future refactor that re-introduces one of
+    the four blueprint-input names retired by the cross-
+    handler-consistency rename. Each old key is searched
+    in its ``_raw``-suffixed service-data form (e.g.
+    ``device_exclude_regex_raw``); the suffix is what
+    distinguishes the old keys from the substring-
+    overlapping new ones (``entity_id_exclude_regex`` is
+    a substring of the new ``exclude_entity_id_regex``,
+    so a bare-name grep would false-positive -- the
+    ``_raw`` suffix is unique to the schema-side keys).
+
+    The retired ``_raw``-suffixed strings should appear
+    nowhere outside this test file (the strings ARE the
+    test's grep needles).
+    """
+
+    OLD_KEYS_RAW = (
+        "device_exclude_regex_raw",
+        "entity_id_exclude_regex_raw",
+        "entity_name_exclude_regex_raw",
+        "exclude_entity_regex_raw",
+    )
+
+    def test_old_keys_only_in_allowlisted_locations(self) -> None:
+        repo_root = Path(__file__).parent.parent
+        allowed_path_suffixes = (
+            "test_helpers_lifecycle.py",  # this file
+        )
+
+        for old_key in self.OLD_KEYS_RAW:
+            for src_dir in ("custom_components", "tests"):
+                for path in (repo_root / src_dir).rglob("*.py"):
+                    if "tmp/" in str(path):
+                        continue
+                    text = path.read_text()
+                    if old_key not in text:
+                        continue
+                    rel = str(path.relative_to(repo_root))
+                    if not any(
+                        rel.endswith(s) or s in rel
+                        for s in allowed_path_suffixes
+                    ):
+                        msg = (
+                            f"Old input key {old_key!r} found in {rel}"
+                            " -- expected only in allow-listed locations"
+                            f" ({allowed_path_suffixes})."
+                        )
+                        raise AssertionError(msg)
 
 
 class TestSchedulePeriodicWithJitter:

@@ -86,8 +86,8 @@ failures, pending timeouts</li>
 Configuration below).</li>
 <li>Go to <strong>Settings -&gt; Automations &amp; Scenes -&gt; Create Automation -&gt; From
 blueprint -&gt; Z-Wave Route Manager</strong>.</li>
-<li>Fill in the inputs. Most installations only need to set
-<code>clear_unmanaged_routes</code> if you want manually-set routes to persist.</li>
+<li>Fill in the inputs. Most installations only need to set <strong>Clear routes not
+in config</strong> if you want manually-set routes to persist.</li>
 <li>Save the automation. The next reconcile tick picks up your config and
 applies routes.</li>
 </ol>
@@ -206,19 +206,19 @@ locks wake every second, so commands typically apply within seconds.</p>
 revert: we can't see the queued UI command, so only after the device wakes and
 accepts the new route do we notice the drift and issue another update. That
 update then has to wait for the next wake.</p>
-<h3><code>clear_unmanaged_routes</code> caveat</h3>
-<p>When <code>clear_unmanaged_routes</code> is enabled, the reconcile iterates <strong>every</strong>
-Z-Wave node and removes any application route and any SUC return route that
-isn't covered by your config.</p>
+<h3>Clear routes not in config caveat</h3>
+<p>When <strong>Clear routes not in config</strong> is enabled, the reconcile iterates
+<strong>every</strong> Z-Wave node and removes any application route and any SUC return
+route that isn't covered by your config.</p>
 <p><strong>Important:</strong> The zwave-js-ui API for clearing SUC return routes
 (<code>deleteSUCReturnRoutes</code>) is blunt -- it clears <strong>all</strong> SUC return routes on
 the node, including custom routes you set manually via the Z-Wave JS UI's
-<em>Return routes -&gt; ADD</em> button. Once you commit to
-<code>clear_unmanaged_routes=true</code>, treat the config file as the single source of
-truth and stop using the UI panels to set routes.</p>
-<p>If you need to temporarily edit routes via the UI, disable
-<code>clear_unmanaged_routes</code> first, edit, then re-enable once you've mirrored your
-changes in the config file.</p>
+<em>Return routes -&gt; ADD</em> button. Once you commit to <strong>Clear routes not in
+config</strong>, treat the config file as the single source of truth and stop using
+the UI panels to set routes.</p>
+<p>If you need to temporarily edit routes via the UI, disable <strong>Clear routes not
+in config</strong> first, edit, then re-enable once you've mirrored your changes in
+the config file.</p>
 <h3>Notification categories</h3>
 <p>Four distinct categories of persistent notification:</p>
 <ul>
@@ -332,11 +332,11 @@ per-direction state alive across reconciles:</p>
 <p>The same node can appear in both <code>pending</code> and <code>applied</code> when only one of
 the two directions has landed. Once a set lands, <code>timeout_count</code> carries
 forward into the applied entry so you can see how many retries it took.</p>
-<p><code>pending</code> also carries <em>clear</em> requests issued by the
-<code>clear_unmanaged_routes</code> path. A clear entry has an empty <code>repeaters</code> list
-and <code>speed: &quot;-&quot;</code>. Clears fall out of <code>pending</code> entirely once they land --
-they do not enter <code>applied</code>, since <code>applied</code> tracks only routes currently at
-a specific non-default value.</p>
+<p><code>pending</code> also carries <em>clear</em> requests issued by the <strong>Clear routes not in
+config</strong> path. A clear entry has an empty <code>repeaters</code> list and <code>speed: &quot;-&quot;</code>.
+Clears fall out of <code>pending</code> entirely once they land -- they do not enter
+<code>applied</code>, since <code>applied</code> tracks only routes currently at a specific
+non-default value.</p>
 </li>
 <li>
 <p>Error-state diagnostic fields (zeroed/empty on a successful reconcile):
@@ -393,7 +393,7 @@ System -&gt; Logs with the tag <code>[ZRM: &lt;automation alias&gt;]</code>.</p>
 and recovery. Periodic reconciles are scheduled via
 <code>helpers.schedule_periodic_with_jitter</code> (entry-scoped, with per-instance
 jitter to avoid thundering-herd ticks across instances) keyed off the
-<code>reconcile_interval_minutes</code> input, and fire <code>automation.trigger</code> with the
+<strong>Reconcile interval (minutes)</strong> input, and fire <code>automation.trigger</code> with the
 override variable <code>trigger_id == &quot;periodic&quot;</code>. Manual triggers from developer
 tools, the integration's restart-recovery kick
 (<code>EVENT_HOMEASSISTANT_STARTED</code>), and its reload-recovery kick
@@ -418,7 +418,7 @@ decides whether each call warrants a full reconcile:</p>
 <td>Reconcile</td>
 </tr>
 <tr>
-<td><code>now - last_reconcile &gt; reconcile_interval_minutes</code></td>
+<td>Time since last reconcile exceeds the configured interval</td>
 <td>Reconcile</td>
 </tr>
 <tr>

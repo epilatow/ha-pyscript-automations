@@ -41,8 +41,8 @@ Home Assistant **Z-Wave JS** addon (`core_zwave_js`), which bundles
    Configuration below).
 3. Go to **Settings -> Automations & Scenes -> Create Automation -> From
    blueprint -> Z-Wave Route Manager**.
-4. Fill in the inputs. Most installations only need to set
-   `clear_unmanaged_routes` if you want manually-set routes to persist.
+4. Fill in the inputs. Most installations only need to set **Clear routes not
+   in config** if you want manually-set routes to persist.
 5. Save the automation. The next reconcile tick picks up your config and
    applies routes.
 
@@ -141,22 +141,22 @@ revert: we can't see the queued UI command, so only after the device wakes and
 accepts the new route do we notice the drift and issue another update. That
 update then has to wait for the next wake.
 
-### `clear_unmanaged_routes` caveat
+### Clear routes not in config caveat
 
-When `clear_unmanaged_routes` is enabled, the reconcile iterates **every**
-Z-Wave node and removes any application route and any SUC return route that
-isn't covered by your config.
+When **Clear routes not in config** is enabled, the reconcile iterates
+**every** Z-Wave node and removes any application route and any SUC return
+route that isn't covered by your config.
 
 **Important:** The zwave-js-ui API for clearing SUC return routes
 (`deleteSUCReturnRoutes`) is blunt -- it clears **all** SUC return routes on
 the node, including custom routes you set manually via the Z-Wave JS UI's
-*Return routes -> ADD* button. Once you commit to
-`clear_unmanaged_routes=true`, treat the config file as the single source of
-truth and stop using the UI panels to set routes.
+*Return routes -> ADD* button. Once you commit to **Clear routes not in
+config**, treat the config file as the single source of truth and stop using
+the UI panels to set routes.
 
-If you need to temporarily edit routes via the UI, disable
-`clear_unmanaged_routes` first, edit, then re-enable once you've mirrored your
-changes in the config file.
+If you need to temporarily edit routes via the UI, disable **Clear routes not
+in config** first, edit, then re-enable once you've mirrored your changes in
+the config file.
 
 ### Notification categories
 
@@ -265,11 +265,11 @@ the automation's entity_id stripped of its `automation.` prefix:
   the two directions has landed. Once a set lands, `timeout_count` carries
   forward into the applied entry so you can see how many retries it took.
 
-  `pending` also carries *clear* requests issued by the
-  `clear_unmanaged_routes` path. A clear entry has an empty `repeaters` list
-  and `speed: "-"`. Clears fall out of `pending` entirely once they land --
-  they do not enter `applied`, since `applied` tracks only routes currently at
-  a specific non-default value.
+  `pending` also carries *clear* requests issued by the **Clear routes not in
+  config** path. A clear entry has an empty `repeaters` list and `speed: "-"`.
+  Clears fall out of `pending` entirely once they land -- they do not enter
+  `applied`, since `applied` tracks only routes currently at a specific
+  non-default value.
 
 - Error-state diagnostic fields (zeroed/empty on a successful reconcile):
   `config_errors`, `resolve_errors`, `api_error`, `bridge_error`. Useful for
@@ -332,7 +332,7 @@ The blueprint has no triggers of its own -- the integration owns scheduling
 and recovery. Periodic reconciles are scheduled via
 `helpers.schedule_periodic_with_jitter` (entry-scoped, with per-instance
 jitter to avoid thundering-herd ticks across instances) keyed off the
-`reconcile_interval_minutes` input, and fire `automation.trigger` with the
+**Reconcile interval (minutes)** input, and fire `automation.trigger` with the
 override variable `trigger_id == "periodic"`. Manual triggers from developer
 tools, the integration's restart-recovery kick
 (`EVENT_HOMEASSISTANT_STARTED`), and its reload-recovery kick
@@ -341,13 +341,13 @@ integration kicks pass it explicitly; dev-tools calls fall through to the
 blueprint action's `default('manual', true)`). The service handler's gate then
 decides whether each call warrants a full reconcile:
 
-| Signal                                                | Action                       |
-| ----------------------------------------------------- | ---------------------------- |
-| `trigger_id == "manual"` (dev tools, startup, reload) | Reconcile                    |
-| Config file mtime changed since last run              | Reconcile                    |
-| `now - last_reconcile > reconcile_interval_minutes`   | Reconcile                    |
-| `reconcile_pending == true` from prior tick           | Reconcile                    |
-| Otherwise                                             | Update `last_run` only, exit |
+| Signal                                                    | Action                       |
+| --------------------------------------------------------- | ---------------------------- |
+| `trigger_id == "manual"` (dev tools, startup, reload)     | Reconcile                    |
+| Config file mtime changed since last run                  | Reconcile                    |
+| Time since last reconcile exceeds the configured interval | Reconcile                    |
+| `reconcile_pending == true` from prior tick               | Reconcile                    |
+| Otherwise                                                 | Update `last_run` only, exit |
 
 ### Why zwave-js-ui and not zwave-js-server directly?
 

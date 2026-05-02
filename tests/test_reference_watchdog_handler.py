@@ -260,10 +260,10 @@ class TestEnsureTimer:
 
 
 # --------------------------------------------------------
-# Argparse: multi-line exclude_entity_regex
+# Argparse: multi-line exclude_entity_id_regex
 # --------------------------------------------------------
 #
-# Argparse splits multi-line ``exclude_entity_regex`` input
+# Argparse splits multi-line ``exclude_entity_id_regex`` input
 # on newlines and joins valid lines with ``|`` so two
 # patterns on separate lines reach the service layer as a
 # single alternation regex (instead of being passed verbatim
@@ -285,7 +285,7 @@ def _valid_argparse_payload(**overrides: Any) -> dict[str, Any]:
         "exclude_paths_raw": "",
         "exclude_integrations_raw": [],
         "exclude_entities_raw": [],
-        "exclude_entity_regex_raw": "",
+        "exclude_entity_id_regex_raw": "",
         "check_disabled_entities_raw": False,
         "check_interval_minutes_raw": 60,
         "max_source_notifications_raw": 0,
@@ -331,7 +331,7 @@ class TestArgparseMultilineRegex:
         h = MockHass()
         call = FakeServiceCall(
             _valid_argparse_payload(
-                exclude_entity_regex_raw=(
+                exclude_entity_id_regex_raw=(
                     "sensor\\.loft_humidifier_energy\n"
                     "sensor\\.office_humidifier_energy"
                 ),
@@ -343,7 +343,7 @@ class TestArgparseMultilineRegex:
             f"argparse should produce no errors; got {self.config_errors}"
         )
         assert len(self.capture.calls) == 1
-        joined = self.capture.calls[0]["exclude_entity_regex"]
+        joined = self.capture.calls[0]["exclude_entity_id_regex"]
         assert (
             joined == "sensor\\.loft_humidifier_energy"
             "|sensor\\.office_humidifier_energy"
@@ -361,7 +361,7 @@ class TestArgparseMultilineRegex:
         h = MockHass()
         call = FakeServiceCall(
             _valid_argparse_payload(
-                exclude_entity_regex_raw="foo\n[invalid",
+                exclude_entity_id_regex_raw="foo\n[invalid",
             ),
         )
         asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]
@@ -381,7 +381,7 @@ class TestArgparseMultilineRegex:
 
         assert self.config_errors == [[]]
         assert len(self.capture.calls) == 1
-        assert self.capture.calls[0]["exclude_entity_regex"] == ""
+        assert self.capture.calls[0]["exclude_entity_id_regex"] == ""
 
     def test_argparse_delegates_to_shared_regex_helper(self) -> None:
         """Lock in that argparse delegates regex parsing to
@@ -412,7 +412,7 @@ class TestArgparseMultilineRegex:
             h = MockHass()
             call = FakeServiceCall(
                 _valid_argparse_payload(
-                    exclude_entity_regex_raw="foo\nbar",
+                    exclude_entity_id_regex_raw="foo\nbar",
                 ),
             )
             asyncio.run(handler._async_argparse(h, call, now=FrozenNow.value))  # type: ignore[arg-type]

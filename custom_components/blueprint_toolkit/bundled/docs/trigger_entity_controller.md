@@ -101,9 +101,9 @@ Result:
 - Motion returns mid-countdown: timer is cleared again, then restarts when
   motion next clears
 
-This pattern uses `auto_off_disabling_entities` as a keep-alive: while any
-listed entity is "on", auto-off is held off; the timer (re)starts when they
-all return to "off".
+This pattern uses **Auto-Off Disabling Entities (optional)** as a keep-alive:
+while any listed entity is "on", auto-off is held off; the timer (re)starts
+when they all return to "off".
 
 ## Developer notes
 
