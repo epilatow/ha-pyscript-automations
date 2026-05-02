@@ -224,6 +224,86 @@ class TestArgparseEmitsConfigErrorNotification:
         assert notif_id in notifs
         assert "does not exist" in notifs[notif_id]["message"]
 
+    async def test_uncontrollable_controlled_entity_creates_notification(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        """A controlled entity in a non-on/off domain (e.g.
+        ``sensor``) trips the shared
+        ``validate_controlled_entity_domains`` guard; the
+        config-error notification fires with the per-entity
+        bullet so the user sees both the field name and the
+        valid-domain hint.
+        """
+        await _setup_integration(hass)
+        bad = "sensor.foo"
+        # Seed both the bad controlled entity AND the trigger
+        # entity so the existence check passes and we
+        # exercise the domain check.
+        hass.states.async_set(bad, "42", {})
+        hass.states.async_set(MOTION, "off", {})
+        payload = _valid_payload(instance_id="automation.tec_baddomain")
+        payload["controlled_entities_raw"] = [bad]
+        await hass.services.async_call(DOMAIN, SERVICE, payload, blocking=True)
+
+        from homeassistant.components.persistent_notification import (
+            _async_get_or_create_notifications,
+        )
+
+        notifs: dict[str, Any] = _async_get_or_create_notifications(hass)
+        notif_id = (
+            "blueprint_toolkit_trigger_entity_controller"
+            "__automation.tec_baddomain__config_error"
+        )
+        assert notif_id in notifs
+        body = notifs[notif_id]["message"]
+        assert "controlled_entities" in body
+        assert "'sensor.foo'" in body
+        assert "does not support on/off" in body
+
+    async def test_uncontrollable_trigger_entity_does_not_flag(
+        self,
+        hass,  # noqa: ANN001
+    ) -> None:
+        """``binary_sensor.motion`` is a perfectly valid trigger
+        source even though ``binary_sensor`` isn't in the
+        on/off-controllable set. The validator must scope to
+        ``controlled_entities`` only -- trigger /
+        disabling entities are observed, not actuated.
+        Locks down that scope so a future refactor doesn't
+        silently extend the check.
+        """
+        from pytest_homeassistant_custom_component.common import (
+            async_mock_service,
+        )
+
+        await _setup_integration(hass)
+        hass.states.async_set(LIGHT, "off", {})
+        hass.states.async_set(MOTION, "off", {})
+        # The service-layer's ``homeassistant.turn_on`` /
+        # ``turn_off`` dispatch needs a registered target;
+        # we only care here that no config-error
+        # notification fires.
+        async_mock_service(hass, "homeassistant", "turn_on")
+        async_mock_service(hass, "homeassistant", "turn_off")
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE,
+            _valid_payload(instance_id="automation.tec_trigger_ok"),
+            blocking=True,
+        )
+
+        from homeassistant.components.persistent_notification import (
+            _async_get_or_create_notifications,
+        )
+
+        notifs: dict[str, Any] = _async_get_or_create_notifications(hass)
+        notif_id = (
+            "blueprint_toolkit_trigger_entity_controller"
+            "__automation.tec_trigger_ok__config_error"
+        )
+        assert notif_id not in notifs
+
     async def test_notification_includes_automation_link_when_known(
         self,
         hass,  # noqa: ANN001

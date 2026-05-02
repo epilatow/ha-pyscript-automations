@@ -122,6 +122,15 @@ Schema validators:
   leading/trailing underscores, and double-underscores; accepts leading-digit
   names like `3_day_blinds`. Produces a config-error message that names the
   offending value(s) and explains the charset.
+- `CONTROLLABLE_DOMAINS` (frozenset) -- the shared set of HA domains that
+  respond to `homeassistant.turn_on` / `turn_off` (switch / fan / light /
+  input_boolean / climate / cover / etc.). Authoritative argparse-time guard
+  for every on/off-driving handler.
+- `validate_controlled_entity_domains(entity_ids, field_name)` -- per-entity
+  validator that returns one config-error bullet per offender (each bullet
+  names the field and lists the valid domains). Called from any on/off-driving
+  handler's argparse to reject selector-bypassing YAML edits before the
+  service layer dispatches a silent no-op against an unsupported entity.
 
 Cross-handler accessors:
 
@@ -498,11 +507,15 @@ against that field).
   any entity. Argparse must independently validate the domain of every entity
   input -- either via `vol.In([...])` against the expected domain set in the
   schema, or via a cross-field check that walks `hass.states.get(entity_id)`
-  and inspects its domain. STSC uses an explicit `_CONTROLLABLE_DOMAINS`
+  and inspects its domain. For on/off-driving handlers (anything that
+  dispatches `homeassistant.turn_on` / `turn_off`), call
+  `helpers.validate_controlled_entity_domains(entity_ids, field_name)` which
+  checks each entity against the shared `helpers.CONTROLLABLE_DOMAINS`
   frozenset (switch / fan / light / input_boolean / climate / cover / etc.)
-  and rejects out-of-set entities with a "does not support on/off"
-  config-error message. Skipping the runtime check means a YAML-edited entity
-  gets passed through to `homeassistant.turn_on` and silently no-ops.
+  and returns a per-entity config-error bullet for each offender. Trigger /
+  disabling / observed entities are NOT subject to this check (they're
+  observed, not actuated). Skipping the runtime check means a YAML-edited
+  entity gets passed through to `homeassistant.turn_on` and silently no-ops.
 
 ## Notifications
 

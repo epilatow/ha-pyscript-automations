@@ -480,6 +480,75 @@ class TestPersistentNotificationDataclass:
         )
 
 
+class TestValidateControlledEntityDomains:
+    def test_supported_domain_passes_silently(self) -> None:
+        assert (
+            helpers.validate_controlled_entity_domains(
+                ["switch.foo"], "controlled_entities"
+            )
+            == []
+        )
+
+    def test_unsupported_domain_emits_bullet(self) -> None:
+        bullets = helpers.validate_controlled_entity_domains(
+            ["sensor.foo"], "controlled_entities"
+        )
+        assert len(bullets) == 1
+        assert "controlled_entities" in bullets[0]
+        assert "'sensor.foo'" in bullets[0]
+        assert "does not support on/off" in bullets[0]
+        # Sorted, comma-separated valid domains list.
+        assert ", ".join(sorted(helpers.CONTROLLABLE_DOMAINS)) in bullets[0]
+
+    def test_empty_list_passes_silently(self) -> None:
+        assert (
+            helpers.validate_controlled_entity_domains(
+                [], "controlled_entities"
+            )
+            == []
+        )
+
+    def test_mixed_list_one_bullet_per_offender(self) -> None:
+        bullets = helpers.validate_controlled_entity_domains(
+            ["switch.ok", "sensor.bad", "light.ok", "binary_sensor.bad"],
+            "controlled_entities",
+        )
+        assert len(bullets) == 2
+        assert any("'sensor.bad'" in b for b in bullets)
+        assert any("'binary_sensor.bad'" in b for b in bullets)
+
+    def test_field_name_reflected_in_bullet(self) -> None:
+        # STSC + TEC pass different field names; the
+        # attribution prefix in each bullet keeps the
+        # config-error notification readable when both
+        # handlers fire on the same upgrade-day.
+        stsc = helpers.validate_controlled_entity_domains(
+            ["sensor.foo"], "target_switch_entity"
+        )
+        tec = helpers.validate_controlled_entity_domains(
+            ["sensor.foo"], "controlled_entities"
+        )
+        assert stsc[0].startswith("target_switch_entity:")
+        assert tec[0].startswith("controlled_entities:")
+
+    def test_no_per_handler_constants_remain(self) -> None:
+        # Locks down the lift-not-copy intent: no handler
+        # subpackage should carry its own
+        # ``_CONTROLLABLE_DOMAINS`` constant after the lift.
+        repo_root = Path(__file__).parent.parent
+        cc_root = repo_root / "custom_components" / "blueprint_toolkit"
+        leftovers = []
+        for path in cc_root.rglob("*.py"):
+            if path.name == "helpers.py":
+                continue
+            text = path.read_text()
+            if "_CONTROLLABLE_DOMAINS" in text:
+                leftovers.append(str(path.relative_to(repo_root)))
+        assert leftovers == [], (
+            f"Stale ``_CONTROLLABLE_DOMAINS`` reference(s): {leftovers}"
+        )
+
+
 class TestDeviceHeaderLine:
     def test_renders_canonical_shape(self) -> None:
         line = helpers.device_header_line(

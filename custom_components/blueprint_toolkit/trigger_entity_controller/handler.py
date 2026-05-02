@@ -73,6 +73,7 @@ from ..helpers import (
     spec_bucket,
     unregister_blueprint_handler,
     update_instance_state,
+    validate_controlled_entity_domains,
     validate_payload_or_emit_config_error,
 )
 from . import logic
@@ -298,6 +299,18 @@ async def _async_argparse(
     for eid in sorted(ctrl | trig | all_dis):
         if hass.states.get(eid) is None:
             errors.append(f"entity {eid} does not exist")
+
+    # --- Cross-field: controlled entities must respond to
+    # ``homeassistant.turn_on`` / ``turn_off``. Trigger /
+    # disabling entities are observed, not actuated, so
+    # their domains are unconstrained (e.g. ``binary_sensor``
+    # is a perfectly valid trigger source).
+    errors.extend(
+        validate_controlled_entity_domains(
+            sorted(ctrl),
+            "controlled_entities",
+        ),
+    )
 
     # --- HA state: notification service exists ---
     notif = data["notification_service"]

@@ -68,6 +68,7 @@ from ..helpers import (
     spec_bucket,
     unregister_blueprint_handler,
     update_instance_state,
+    validate_controlled_entity_domains,
     validate_payload_or_emit_config_error,
 )
 
@@ -98,31 +99,6 @@ _PERIODIC_INTERVAL = timedelta(minutes=1)
 # module's ``determine_event_type`` recognises
 # ``"timer"`` as the canonical sentinel.
 _TIMER_TRIGGER_ENTITY = "timer"
-
-# Domains that respond to ``homeassistant.turn_on`` /
-# ``turn_off``. The blueprint's selector restricts
-# ``target_switch_entity`` to a subset (switch / fan /
-# light / input_boolean), but a hand-edited automation
-# YAML can bypass the selector. Argparse rejects out-of-
-# set domains so the user gets an explanatory
-# notification instead of a silent no-op when the service
-# layer dispatches against an unsupported entity.
-_CONTROLLABLE_DOMAINS = frozenset(
-    {
-        "automation",
-        "climate",
-        "cover",
-        "fan",
-        "humidifier",
-        "input_boolean",
-        "light",
-        "lock",
-        "media_player",
-        "switch",
-        "vacuum",
-        "water_heater",
-    },
-)
 
 
 # --------------------------------------------------------
@@ -246,13 +222,12 @@ async def _async_argparse(
             " is not a known entity",
         )
     else:
-        domain = target_switch_entity.split(".", 1)[0]
-        if domain not in _CONTROLLABLE_DOMAINS:
-            errors.append(
-                f"target_switch_entity: {target_switch_entity!r}"
-                " does not support on/off (pick an entity in one of:"
-                f" {', '.join(sorted(_CONTROLLABLE_DOMAINS))})",
-            )
+        errors.extend(
+            validate_controlled_entity_domains(
+                [target_switch_entity],
+                "target_switch_entity",
+            ),
+        )
 
     # Cross-field: notification_service must be registered.
     # Empty string is a valid "no notifications" sentinel.

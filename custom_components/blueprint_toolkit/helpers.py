@@ -10,8 +10,10 @@ Three flavours of symbol live here:
 - **Pure** (no HA imports anywhere): ``notification_prefix``,
   ``resolve_target_integrations``, ``format_timestamp``,
   ``format_notification``, ``parse_notification_service``,
-  ``md_escape``, ``slugify``, ``matches_pattern``,
-  ``validate_and_join_regex_patterns``,
+  ``md_escape``, ``device_header_line``, ``slugify``,
+  ``matches_pattern``, ``validate_and_join_regex_patterns``,
+  ``CONTROLLABLE_DOMAINS``,
+  ``validate_controlled_entity_domains``,
   ``PersistentNotification``,
   ``make_config_error_notification``,
   ``instance_id_for_config_error``,
@@ -121,6 +123,69 @@ def cv_ha_domain_list(value: object) -> list[str]:
         )
         raise vol.Invalid(msg)
     return items
+
+
+# --------------------------------------------------------
+# Cross-handler argparse validators
+# --------------------------------------------------------
+
+
+# Domains that respond to ``homeassistant.turn_on`` /
+# ``turn_off``. Used by every on/off-driving controller's
+# argparse to reject selector-bypassing YAML edits before
+# the service layer dispatches a silent no-op against an
+# unsupported entity. Per-blueprint selector ``domain:``
+# lists are UI hints only; this set is the authoritative
+# argparse-time guard.
+CONTROLLABLE_DOMAINS: frozenset[str] = frozenset(
+    {
+        "automation",
+        "climate",
+        "cover",
+        "fan",
+        "humidifier",
+        "input_boolean",
+        "light",
+        "lock",
+        "media_player",
+        "switch",
+        "vacuum",
+        "water_heater",
+    },
+)
+
+
+def validate_controlled_entity_domains(
+    entity_ids: list[str],
+    field_name: str,
+) -> list[str]:
+    """Return one config-error bullet per uncontrollable entity.
+
+    Each bullet matches the canonical
+    ``"<field_name>: '<eid>' does not support on/off (pick
+    an entity in one of: <sorted-domains>)"`` shape so
+    every on/off-driving handler surfaces the same wording.
+    Empty list when every entity is in
+    ``CONTROLLABLE_DOMAINS``.
+
+    Domain extraction is the everything-before-the-first-
+    dot of each entity_id; entity_ids without a dot are
+    treated as zero-length-domain (which is not in the set
+    and so flags). Caller is expected to have already run
+    state-existence checks if it cares about typos vs
+    domain mismatches.
+    """
+    bullets: list[str] = []
+    valid = ", ".join(sorted(CONTROLLABLE_DOMAINS))
+    for eid in entity_ids:
+        domain = eid.split(".", 1)[0] if "." in eid else ""
+        if domain not in CONTROLLABLE_DOMAINS:
+            bullets.append(
+                f"{field_name}: {eid!r}"
+                f" does not support on/off (pick an entity in one of:"
+                f" {valid})",
+            )
+    return bullets
 
 
 # --------------------------------------------------------
