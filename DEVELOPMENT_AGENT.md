@@ -93,6 +93,12 @@ flagging them again here:
   ephemeral agent-facing scratch (followups files, tmp/ scopes, code-review
   threads). None of that survives in `git log`. If a constraint matters,
   restate it inline.
+- **No plan references.** Sentences like "Two divergences from the plan's
+  classification", "as the plan calls for", "the plan put X in Y" are dangling
+  pointers -- plan files live in `tmp/` (gitignored), so a future reader of
+  `git log` has no document to compare against. State what the commit does on
+  its own terms; if a non-obvious choice matters, explain the choice itself,
+  not what an unwritten alternative would have been.
 
 Numbered step comments in code (`# 1. Parse input`, `# 2. Validate`, ...) are
 forbidden by `DEVELOPMENT.md`'s "Comments" subsection. Adding or removing a
@@ -114,6 +120,7 @@ Concretely, never write comments like:
 - `# Wrappers have all been deleted; the dispatcher derives this directly.`
 - `# This used to live in module_x.py; lifted to shared.py in the cleanup.`
 - `# Replaced the per-call-site try/except with the shared guard.`
+- `# Per the plan, this lives in helpers_runtime instead of helpers_lifecycle.`
 
 The diff and commit message capture migrations. The comment captures the
 *current* code only -- describe what the function does now and the constraint
