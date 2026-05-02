@@ -856,6 +856,58 @@ class TestCheckDisabledDiagnostics:
         )
         assert result == ["Wi-Fi signal strength"]
 
+    def test_zwave_js_signal_strength_flagged(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Signal strength",
+                platform="zwave_js",
+                disabled=True,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == ["Signal strength"]
+
+    def test_zwave_js_signal_strength_clean(self) -> None:
+        entries = [
+            _reg_entry(
+                original_name="Signal strength",
+                platform="zwave_js",
+                disabled=False,
+            ),
+        ]
+        result = check_disabled_diagnostics(
+            "zwave_js",
+            entries,
+        )
+        assert result == []
+
+    def test_per_platform_isolation(self) -> None:
+        # bthome: "Signal strength" IS in the platform list,
+        # so a disabled match flags.
+        bthome = _reg_entry(
+            original_name="Signal strength",
+            platform="bthome",
+            disabled=True,
+        )
+        assert check_disabled_diagnostics("bthome", [bthome]) == [
+            "Signal strength",
+        ]
+
+        # shelly: "Signal strength" is NOT in shelly's list
+        # ("RSSI" is). Disabled match must NOT flag, even
+        # though the same string flags on bthome / zwave_js.
+        # Locks down per-platform scoping after the shared
+        # string was added to multiple lists.
+        shelly = _reg_entry(
+            original_name="Signal strength",
+            platform="shelly",
+            disabled=True,
+        )
+        assert check_disabled_diagnostics("shelly", [shelly]) == []
+
 
 class TestEvaluateDiagnostics:
     def _diag_device(
@@ -894,6 +946,25 @@ class TestEvaluateDiagnostics:
         assert len(results) == 1
         assert results[0].active is True
         assert "Last seen" in results[0].message
+        assert "Front Door Lock" in results[0].title
+
+    def test_zwave_js_signal_strength_end_to_end(
+        self,
+    ) -> None:
+        device = self._diag_device(
+            device_name="Front Door Lock",
+            registry_entries=[
+                _reg_entry(
+                    original_name="Signal strength",
+                    platform="zwave_js",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics(_config(), [device])
+        assert len(results) == 1
+        assert results[0].active is True
+        assert "Signal strength" in results[0].message
         assert "Front Door Lock" in results[0].title
 
     def test_device_all_enabled_dismisses(

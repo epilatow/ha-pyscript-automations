@@ -25,7 +25,8 @@ blueprint:
             threshold.
           - disabled-diagnostics: flag devices whose
             recommended diagnostic entities (e.g., Last
-            seen, Node status) are disabled.
+            seen, Node status, Signal strength) are
+            disabled.
       default: []
       selector:
         select:

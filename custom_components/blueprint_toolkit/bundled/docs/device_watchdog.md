@@ -20,7 +20,7 @@ automatically when devices recover.
 - Configurable check interval and staleness threshold
 - Notification cap to limit per-device notifications
 - Diagnostic entity check: notifies when recommended diagnostic entities
-  (e.g., Last seen, Node status) are disabled
+  (e.g., Last seen, Node status, Signal strength) are disabled
 - Per-check selection so exclusion lists can be scoped per check (instantiate
   the blueprint once per check)
 - Optional debug logging
