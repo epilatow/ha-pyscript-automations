@@ -17,6 +17,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from conftest import CodeQualityBase  # noqa: E402
 
+from custom_components.blueprint_toolkit import helpers  # noqa: E402
 from custom_components.blueprint_toolkit.entity_defaults_watchdog.logic import (  # noqa: E402, E501
     CHECK_ALL,
     DRIFT_CHECK_DEVICE_ENTITY_ID,
@@ -369,6 +370,33 @@ class TestComputeRecommendedOverride:
 
 
 class TestBuildNotificationMessage:
+    def test_edw_device_emit_uses_shared_helper(self) -> None:
+        # Locks down the lift-not-copy intent: the device
+        # header line at the top of every per-device EDW
+        # body must be byte-identical to the helper's
+        # rendering so the format stays consistent across
+        # DW + EDW handlers.
+        device = _device(
+            device_id="abc",
+            device_name="Kitchen Sensor",
+        )
+        drifted = [
+            DriftDetail(
+                entity_id="sensor.kitchen_temp",
+                id_drifted=False,
+                name_drifted=True,
+                current_name="Old Temp",
+                expected_name="Temperature",
+            ),
+        ]
+        msg = _build_notification_message(device, drifted)
+        body_lines = msg.split("\n")
+        assert body_lines[0] == helpers.device_header_line(
+            "Kitchen Sensor",
+            "/config/devices/device/abc",
+        )
+        assert body_lines[1] == ""
+
     def test_name_overrides_section(self) -> None:
         device = _device(device_name="Kitchen Sensor")
         drifted = [

@@ -582,6 +582,29 @@ class TestBuildNotificationMessage:
                 _config(),
             )
 
+    def test_unavailable_body_keeps_device_header_with_blank_line(
+        self,
+    ) -> None:
+        device = _device(device_id="abc", device_name="My Device")
+        msg = _build_notification_message(
+            device,
+            [_entity("sensor.temp", state="unavailable")],
+            False,
+            None,
+            None,
+            _config(),
+        )
+        body_lines = msg.split("\n")
+        assert body_lines[0] == (
+            "Device: [My Device](/config/devices/device/abc)"
+        )
+        assert body_lines[1] == ""
+        # Body content (Integrations: ..., Unavailable
+        # entity: ...) follows after the blank-line.
+        assert any(
+            line.startswith("Unavailable entity") for line in body_lines[2:]
+        )
+
     def test_device_name_with_brackets_is_escaped(self) -> None:
         # A literal "[" in a device name would otherwise
         # form a bogus markdown link with a later "](" in
@@ -966,6 +989,57 @@ class TestEvaluateDiagnostics:
         assert results[0].active is True
         assert "Signal strength" in results[0].message
         assert "Front Door Lock" in results[0].title
+
+    def test_disabled_diagnostics_body_includes_device_header(
+        self,
+    ) -> None:
+        device = self._diag_device(
+            device_id="abc",
+            device_name="Front Door Lock",
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics(_config(), [device])
+        body_lines = results[0].message.split("\n")
+        assert body_lines[0] == (
+            "Device: [Front Door Lock](/config/devices/device/abc)"
+        )
+        assert body_lines[1] == ""
+
+    def test_disabled_diagnostics_body_drops_settings_link(
+        self,
+    ) -> None:
+        device = self._diag_device(
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics(_config(), [device])
+        body = results[0].message
+        assert "Enable in [Settings > Devices]" not in body
+        assert "for better health monitoring" not in body
+
+    def test_disabled_diagnostics_title_drops_suffix(
+        self,
+    ) -> None:
+        device = self._diag_device(
+            device_name="Front Door Lock",
+            registry_entries=[
+                _reg_entry(
+                    original_name="Last seen",
+                    disabled=True,
+                ),
+            ],
+        )
+        results = evaluate_diagnostics(_config(), [device])
+        assert results[0].title == "Front Door Lock"
 
     def test_device_all_enabled_dismisses(
         self,

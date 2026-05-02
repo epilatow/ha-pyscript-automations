@@ -487,10 +487,10 @@ def _build_notification_message(
     name section -- the ID will be addressed after the name
     is fixed.
     """
-    lines: list[str] = []
-    lines.append(
-        f"Device: [{helpers.md_escape(device.de.name)}]({device.de.url})",
-    )
+    lines: list[str] = [
+        helpers.device_header_line(device.de.name, device.de.url),
+        "",
+    ]
     integrations = sorted(
         device.de.integration_entities.keys(),
     )

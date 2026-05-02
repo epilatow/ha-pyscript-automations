@@ -232,17 +232,20 @@ def evaluate_diagnostics(
             entity_list = "\n- ".join(
                 helpers.md_escape(eid) for eid in disabled
             )
+            header = helpers.device_header_line(
+                device.de.name,
+                device.de.url,
+            )
             message = (
-                "Recommended diagnostic entities"
-                f" are disabled:\n\n- {entity_list}\n\nEnable in"
-                f" [Settings > Devices]({device.de.url})"
-                " for better health monitoring."
+                f"{header}\n\n"
+                f"Recommended diagnostic entities are disabled:"
+                f"\n\n- {entity_list}"
             )
             results.append(
                 helpers.PersistentNotification(
                     active=True,
                     notification_id=notification_id,
-                    title=f"{device.de.name}: Disabled Diagnostics",
+                    title=device.de.name,
                     message=message,
                     instance_id=config.instance_id,
                 ),
@@ -338,10 +341,10 @@ def _build_notification_message(
     config: Config,
 ) -> str:
     """Build the notification body for an unhealthy device."""
-    lines: list[str] = []
-    lines.append(
-        f"Device: [{helpers.md_escape(device.de.name)}]({device.de.url})",
-    )
+    lines: list[str] = [
+        helpers.device_header_line(device.de.name, device.de.url),
+        "",
+    ]
     integrations = sorted(
         device.de.integration_entities.keys(),
     )
@@ -372,11 +375,11 @@ def _build_notification_message(
             )
 
     # Guard the contract: callers must only invoke this when
-    # there's actual content to render. Stripped under
-    # ``python -O`` if expressed as ``assert``; promoted to
-    # an explicit ``ValueError`` so the invariant holds in
-    # every interpreter mode.
-    if len(lines) <= 1:
+    # there's actual content past the always-present
+    # ``[Device: header, blank-line]`` prefix. Explicit
+    # ``ValueError`` (not ``assert``) so the invariant
+    # holds under ``python -O`` too.
+    if len(lines) <= 2:
         msg = "Expected unavailable or stale content but got none"
         raise ValueError(msg)
 

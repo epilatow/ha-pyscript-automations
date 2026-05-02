@@ -480,6 +480,29 @@ class TestPersistentNotificationDataclass:
         )
 
 
+class TestDeviceHeaderLine:
+    def test_renders_canonical_shape(self) -> None:
+        line = helpers.device_header_line(
+            "Front Door Lock",
+            "/config/devices/device/abc123",
+        )
+        assert line == (
+            "Device: [Front Door Lock](/config/devices/device/abc123)"
+        )
+
+    def test_md_escapes_brackets_in_name(self) -> None:
+        # A literal ``[`` in a device name would otherwise
+        # form a bogus markdown link with the trailing
+        # ``](`` of the URL portion. Escape so the rendered
+        # markdown stays safe.
+        line = helpers.device_header_line(
+            "Sensor [foo]",
+            "/config/devices/device/x",
+        )
+        assert "[Sensor \\[foo\\]]" in line
+        assert "[Sensor [foo]]" not in line
+
+
 # --------------------------------------------------------
 # Per-instance diagnostic state
 # --------------------------------------------------------

@@ -288,6 +288,18 @@ def md_escape(s: str) -> str:
     )
 
 
+def device_header_line(name: str, url: str) -> str:
+    """Render the canonical ``Device: [<name>](<url>)`` header line.
+
+    Used as the first body line in every per-device watchdog
+    notification (DW unavailable / stale, DW disabled-
+    diagnostics, EDW per-device drift). Centralised so the
+    line shape stays consistent across handlers; tests pin
+    the format.
+    """
+    return f"Device: [{md_escape(name)}]({url})"
+
+
 # --------------------------------------------------------
 # Slugify + regex helpers
 # --------------------------------------------------------

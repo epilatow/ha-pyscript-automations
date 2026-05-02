@@ -148,6 +148,10 @@ Notification + formatting:
   `(domain, name)`.
 - `md_escape(s)` -- escape `\\`, `[`, `]` for safe interpolation into
   notification bodies; apply to every user-controlled string.
+- `device_header_line(name, url)` -- render the canonical
+  `Device: [<name>](<url>)` header line used as the first body line of every
+  per-device watchdog notification (DW unavailable / stale, DW
+  disabled-diagnostics, EDW per-device drift).
 - `slugify(text)` -- derive an HA-safe slug from arbitrary text (used to build
   state-entity IDs).
 - `matches_pattern(text, pattern)` -- case-insensitive substring or regex
