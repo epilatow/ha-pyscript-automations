@@ -6,8 +6,9 @@ dispatch (see ``DEVELOPMENT.md`` for the universal
 pattern):
 
 - Periodic reconcile timer per instance via
-  ``async_track_time_interval`` (replaces the
-  ``time_pattern`` blueprint trigger).
+  ``helpers.schedule_periodic_with_jitter`` (replaces the
+  ``time_pattern`` blueprint trigger; entry-scoped so an
+  unload mid-tick cancels the in-flight reconcile).
 - Async bridge calls (no thread offloading; ``socketio`` is
   already async).
 - File-mtime change detection for the YAML config so the
@@ -55,7 +56,6 @@ from homeassistant.helpers import (
 from homeassistant.helpers import (
     entity_registry as er,
 )
-from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN
@@ -64,6 +64,7 @@ from ..helpers import (
     IssueNotification,
     PersistentNotification,
     automation_friendly_name,
+    entry_for_domain,
     make_config_error_notification,
     make_emit_config_error,
     make_lifecycle_mutators,
@@ -74,6 +75,7 @@ from ..helpers import (
     process_persistent_notifications,
     process_persistent_notifications_with_sweep,
     register_blueprint_handler,
+    schedule_periodic_with_jitter,
     spec_bucket,
     unregister_blueprint_handler,
     update_instance_state,
@@ -355,8 +357,12 @@ async def _async_service_layer(
     # double-issuing route commands.
     async with state.lock:
         # First call bootstraps the timer; subsequent calls
-        # re-arm only when the interval changes.
-        _ensure_timer(hass, state, reconcile_interval_minutes)
+        # re-arm only when the interval changes. Entry-scope
+        # the periodic task so an entry unload mid-tick
+        # cancels the in-flight reconcile.
+        entry = entry_for_domain(hass)
+        if entry is not None:
+            _ensure_timer(hass, entry, state, reconcile_interval_minutes)
         await _do_reconcile(
             hass,
             state,
@@ -1495,6 +1501,7 @@ def _build_entity_to_resolution(
 
 def _ensure_timer(
     hass: HomeAssistant,
+    entry: ConfigEntry,
     state: ZrmInstanceState,
     interval_minutes: int,
 ) -> None:
@@ -1508,16 +1515,18 @@ def _ensure_timer(
         state.cancel_timer()
         state.cancel_timer = None
     state.armed_interval_minutes = interval_minutes
-    state.cancel_timer = async_track_time_interval(
+    state.cancel_timer = schedule_periodic_with_jitter(
         hass,
-        make_periodic_trigger_callback(
+        entry,
+        interval=timedelta(minutes=interval_minutes),
+        instance_id=state.instance_id,
+        action=make_periodic_trigger_callback(
             hass,
             state.instance_id,
             instances_getter=_instances,
             service_tag=_SERVICE_TAG,
             logger=_LOGGER,
         ),
-        timedelta(minutes=interval_minutes),
     )
 
 

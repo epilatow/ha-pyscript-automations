@@ -54,31 +54,7 @@ from conftest import (  # noqa: E402
     HandlerArgparseGuardsBase,
 )
 
-_stubs = install_homeassistant_stubs(frozen_now=FrozenNow.value)
-
-# Capture every async_track_time_interval invocation; tests
-# inspect.
-_ATI_CALLS: list[tuple[timedelta, Callable[..., Any]]] = []
-_ATI_CANCEL_CALLS: list[int] = []
-
-
-def _async_track_time_interval(
-    _hass: Any,
-    cb: Callable[..., Any],
-    interval: timedelta,
-) -> Callable[[], None]:
-    handle_index = len(_ATI_CALLS)
-    _ATI_CALLS.append((interval, cb))
-
-    def _cancel() -> None:
-        _ATI_CANCEL_CALLS.append(handle_index)
-
-    return _cancel
-
-
-_stubs.event.async_track_time_interval = (  # type: ignore[attr-defined]
-    _async_track_time_interval
-)
+install_homeassistant_stubs(frozen_now=FrozenNow.value)
 
 from custom_components.blueprint_toolkit.helpers import (  # noqa: E402
     make_config_error_notification,
@@ -89,19 +65,9 @@ from custom_components.blueprint_toolkit.zwave_route_manager import (  # noqa: E
     logic,
 )
 
-# Re-bind so the handler module sees the test module's
-# capture lists (see TEC handler test for the same dance).
-handler.async_track_time_interval = _async_track_time_interval  # type: ignore[attr-defined]
-
-
 # --------------------------------------------------------
 # Mock hass surface
 # --------------------------------------------------------
-
-
-def _reset_capture_state() -> None:
-    _ATI_CALLS.clear()
-    _ATI_CANCEL_CALLS.clear()
 
 
 def _make_state(
@@ -137,7 +103,6 @@ def _hass_with_instances(
 
 class TestOnReload:
     def test_cancels_pending_timers(self) -> None:
-        _reset_capture_state()
         canceled: list[int] = []
 
         def _cancel() -> None:
@@ -164,7 +129,6 @@ class TestOnReload:
 
 class TestOnEntityRemove:
     def test_drops_state_and_cancels_timer(self) -> None:
-        _reset_capture_state()
         canceled: list[int] = []
 
         def _cancel() -> None:
@@ -185,7 +149,6 @@ class TestOnEntityRemove:
         assert set(bucket["instances"]) == {"automation.b"}
 
     def test_unknown_id_is_noop(self) -> None:
-        _reset_capture_state()
         h = _hass_with_instances({"automation.a": _make_state("automation.a")})
         # Should not raise.
         handler._on_entity_remove(h, "automation.unknown")  # type: ignore[arg-type]
@@ -193,7 +156,6 @@ class TestOnEntityRemove:
 
 class TestOnEntityRename:
     def test_moves_state_to_new_id(self) -> None:
-        _reset_capture_state()
         s = _make_state("automation.old")
         h = _hass_with_instances({"automation.old": s})
 
@@ -207,14 +169,12 @@ class TestOnEntityRename:
         assert s.instance_id == "automation.new"
 
     def test_unknown_old_id_is_noop(self) -> None:
-        _reset_capture_state()
         h = _hass_with_instances({"automation.a": _make_state("automation.a")})
         handler._on_entity_rename(h, "automation.unknown", "automation.x")  # type: ignore[arg-type]
 
 
 class TestOnTeardown:
     def test_cancels_all_and_clears(self) -> None:
-        _reset_capture_state()
         canceled: list[int] = []
         s1 = _make_state("automation.a", armed_interval_minutes=5)
         s1.cancel_timer = lambda: canceled.append(1)
@@ -237,41 +197,73 @@ class TestOnTeardown:
 
 
 class TestEnsureTimer:
+    def setup_method(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.unsub_called: list[int] = []
+
+        def _fake_schedule(
+            _hass: Any,
+            entry: Any,
+            *,
+            interval: timedelta,
+            instance_id: str,
+            action: Any,
+        ) -> Callable[[], None]:
+            handle_index = len(self.calls)
+            self.calls.append(
+                {
+                    "entry": entry,
+                    "interval": interval,
+                    "instance_id": instance_id,
+                    "action": action,
+                }
+            )
+
+            def _unsub() -> None:
+                self.unsub_called.append(handle_index)
+
+            return _unsub
+
+        self._real_schedule = handler.schedule_periodic_with_jitter
+        handler.schedule_periodic_with_jitter = _fake_schedule  # type: ignore[assignment]
+
+    def teardown_method(self) -> None:
+        handler.schedule_periodic_with_jitter = self._real_schedule  # type: ignore[assignment]
+
     def test_first_call_arms(self) -> None:
-        _reset_capture_state()
-        s = _make_state("automation.a")
-        h = _hass_with_instances({"automation.a": s})
+        h = _hass_with_instances({})
+        s = _make_state("automation.zrm")
+        e = object()
 
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
 
-        assert len(_ATI_CALLS) == 1
-        interval, _cb = _ATI_CALLS[0]
-        assert interval == timedelta(minutes=5)
+        assert len(self.calls) == 1
+        assert self.calls[0]["entry"] is e
+        assert self.calls[0]["interval"] == timedelta(minutes=5)
+        assert self.calls[0]["instance_id"] == "automation.zrm"
         assert s.armed_interval_minutes == 5
         assert s.cancel_timer is not None
 
     def test_same_interval_does_not_re_arm(self) -> None:
-        _reset_capture_state()
-        s = _make_state("automation.a")
-        h = _hass_with_instances({"automation.a": s})
+        h = _hass_with_instances({})
+        s = _make_state("automation.zrm")
+        e = object()
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
 
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
-
-        assert len(_ATI_CALLS) == 1
+        assert len(self.calls) == 1
+        assert self.unsub_called == []
 
     def test_changed_interval_re_arms(self) -> None:
-        _reset_capture_state()
-        s = _make_state("automation.a")
-        h = _hass_with_instances({"automation.a": s})
+        h = _hass_with_instances({})
+        s = _make_state("automation.zrm")
+        e = object()
+        handler._ensure_timer(h, e, s, 5)  # type: ignore[arg-type]
+        handler._ensure_timer(h, e, s, 10)  # type: ignore[arg-type]
 
-        handler._ensure_timer(h, s, 5)  # type: ignore[arg-type]
-        handler._ensure_timer(h, s, 10)  # type: ignore[arg-type]
-
-        assert len(_ATI_CALLS) == 2
-        assert _ATI_CALLS[1][0] == timedelta(minutes=10)
-        # First timer was canceled.
-        assert _ATI_CANCEL_CALLS == [0]
+        assert self.unsub_called == [0]
+        assert len(self.calls) == 2
+        assert self.calls[1]["interval"] == timedelta(minutes=10)
         assert s.armed_interval_minutes == 10
 
 

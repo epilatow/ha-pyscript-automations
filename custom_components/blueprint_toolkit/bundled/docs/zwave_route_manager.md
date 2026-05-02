@@ -213,9 +213,8 @@ types fall into this category.)
 
 ### Entity attributes
 
-Attributes written to `blueprint_toolkit.zrm_<slug>_state`,
-where `<slug>` is the automation's entity_id stripped of its `automation.`
-prefix:
+Attributes written to `blueprint_toolkit.zrm_<slug>_state`, where `<slug>` is
+the automation's entity_id stripped of its `automation.` prefix:
 
 - `instance_id`: the automation entity_id
 
@@ -331,15 +330,16 @@ Example:
 
 The blueprint has no triggers of its own -- the integration owns scheduling
 and recovery. Periodic reconciles are scheduled via
-`async_track_time_interval` keyed off the `reconcile_interval_minutes` input,
-and fire `automation.trigger` with the override variable
-`trigger_id == "periodic"`. Manual triggers from developer tools, the
-integration's restart-recovery kick (`EVENT_HOMEASSISTANT_STARTED`), and its
-reload-recovery kick (`EVENT_AUTOMATION_RELOADED`) all arrive as
-`trigger_id == "manual"` (the integration kicks pass it explicitly; dev-tools
-calls fall through to the blueprint action's `default('manual', true)`). The
-service handler's gate then decides whether each call warrants a full
-reconcile:
+`helpers.schedule_periodic_with_jitter` (entry-scoped, with per-instance
+jitter to avoid thundering-herd ticks across instances) keyed off the
+`reconcile_interval_minutes` input, and fire `automation.trigger` with the
+override variable `trigger_id == "periodic"`. Manual triggers from developer
+tools, the integration's restart-recovery kick
+(`EVENT_HOMEASSISTANT_STARTED`), and its reload-recovery kick
+(`EVENT_AUTOMATION_RELOADED`) all arrive as `trigger_id == "manual"` (the
+integration kicks pass it explicitly; dev-tools calls fall through to the
+blueprint action's `default('manual', true)`). The service handler's gate then
+decides whether each call warrants a full reconcile:
 
 | Signal                                                | Action                       |
 | ----------------------------------------------------- | ---------------------------- |

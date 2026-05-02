@@ -406,12 +406,18 @@ Use `entry.async_create_background_task(hass, coro, name)` so HA cancels
 in-flight work on entry unload; never `hass.async_create_task(coro)` (which
 leaves work running detached against a torn-down service registration).
 
-When arming `async_track_time_interval` directly, pass a sync `@callback`
-wrapper that creates the entry-scoped task -- passing the async action
-directly routes subsequent ticks through HA's internal
+Every native handler with a periodic timer (DW, EDW, RW, STSC, ZRM) arms it
+via `helpers.schedule_periodic_with_jitter`, which both wraps each tick in
+`entry.async_create_background_task` (so an entry unload mid-tick cancels the
+in-flight call) and adds per-instance jitter (so multiple instances on the
+same configured interval don't fire on the exact same wall-clock tick after HA
+boot or an integration reload). TEC has no periodic timer -- only a one-shot
+`async_call_later` auto-off wakeup. Reaching for raw
+`async_track_time_interval` is **not** the canonical pattern -- the helper is.
+If a future case genuinely needs the raw call (none today), pass a sync
+`@callback` wrapper that creates the entry-scoped task yourself -- passing the
+async action directly routes subsequent ticks through HA's internal
 `hass.async_create_task`, defeating the scoping.
-`helpers.schedule_periodic_with_jitter` already does the wrapping; if you
-reach for `async_track_time_interval` directly, do it yourself.
 
 ## Spec + lifecycle
 
@@ -428,11 +434,11 @@ reach for `async_track_time_interval` directly, do it yourself.
   `helpers.make_periodic_trigger_callback(...)` (kwargs:
   `instances_getter=_instances`, `service_tag=_SERVICE_TAG`, `logger=_LOGGER`,
   optional `extra_variables=`) inside `_ensure_timer` and hand the result to
-  `helpers.schedule_periodic_with_jitter` (or `async_track_time_interval` for
-  non-jittered cases). The helper bakes in the swallow-and-WARN-log behavior
-  for transient `automation.trigger` failures (a single failed tick is
-  self-healing -- the next tick fires anyway). Per-handler
-  `_make_periodic_callback` shims have been removed; call the helper directly.
+  `helpers.schedule_periodic_with_jitter`. The helper bakes in the
+  swallow-and-WARN-log behavior for transient `automation.trigger` failures (a
+  single failed tick is self-healing -- the next tick fires anyway).
+  Per-handler `_make_periodic_callback` shims have been removed; call the
+  helper directly.
 - **Restart-recovery kick** -- handlers that need restart-recovery set
   `kick_variables=` on `_SPEC` to a flat `automation.trigger` variables dict
   (e.g. `{"trigger_id": "manual"}` for the watchdogs, TEC's synthetic TIMER
@@ -466,10 +472,9 @@ against that field).
 
 ## Blueprint YAML
 
-- **Periodic scheduling is integration-owned, not blueprint- owned.** Don't
-  add `time_pattern` / `time` triggers to the blueprint -- the handler arms
-  its own periodic timer via `helpers.schedule_periodic_with_jitter` (or
-  `async_track_time_interval` directly for non-jittered cases). When a
+- **Periodic scheduling is integration-owned, not blueprint-owned.** Don't add
+  `time_pattern` / `time` triggers to the blueprint -- the handler arms its
+  own periodic timer via `helpers.schedule_periodic_with_jitter`. When a
   blueprint has only synthetic triggers (no reactive `state` / `event` / etc.
   triggers), still emit an empty `triggers: []` block: a blueprint with no
   `triggers:` key at all parses but HA renders the resulting automations as
