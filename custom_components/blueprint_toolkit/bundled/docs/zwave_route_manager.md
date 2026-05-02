@@ -58,7 +58,7 @@ Home Assistant **Z-Wave JS** addon (`core_zwave_js`), which bundles
 | Reconcile interval (minutes) | How often to check for out-of-band route drift (e.g. someone editing a route via the zwave-js-ui web UI). Lower values catch drift sooner. |
 | Pending timeout (hours)      | Time before raising a notification on a node whose route hasn't been reflected                                                             |
 | Default route speed          | `auto`, `100k`, `40k`, or `9600` (used when neither repeater nor client specifies one)                                                     |
-| Max notifications            | Cap on per-run issue notifications; 0 = unlimited                                                                                          |
+| Max notifications            | Cap on per-run issue notifications. Default 10. 0 = unlimited                                                                              |
 | Debug logging                | Per-reconcile log.warning line under `[ZRM: ...]`                                                                                          |
 
 ## Usage notes

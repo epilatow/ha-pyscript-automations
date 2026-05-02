@@ -45,7 +45,7 @@ automatically when devices recover.
 | Check interval (minutes)        | Minutes between watchdog evaluations                                                                     |
 | Dead device threshold (minutes) | Staleness threshold for state reports                                                                    |
 | Enabled checks                  | Which checks to run (`unavailable-entities`, `device-updates`, `disabled-diagnostics`). Empty means all. |
-| Max device notifications        | Cap on per-device notifications. 0 = unlimited.                                                          |
+| Max device notifications        | Cap on per-device notifications. Default 10. 0 = unlimited.                                              |
 | Debug logging                   | Log debug info to HA logs                                                                                |
 
 See the blueprint UI for default values.

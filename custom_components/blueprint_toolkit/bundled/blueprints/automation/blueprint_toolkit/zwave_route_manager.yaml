@@ -120,9 +120,9 @@ blueprint:
     max_notifications:
       name: Max notifications
       description: >
-        Cap on per-run issue notifications (apply errors
-        and pending timeouts). 0 = unlimited.
-      default: 0
+        Default 10. Cap on per-run issue notifications
+        (apply errors and pending timeouts). 0 = unlimited.
+      default: 10
       selector:
         number:
           min: 0

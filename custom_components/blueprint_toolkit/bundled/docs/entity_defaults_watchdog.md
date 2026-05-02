@@ -52,6 +52,7 @@ resolved.
 | Entity ID exclude regex   | Skip entities whose ID matches. One pattern per line.                                                                                                                                                               |
 | Entity name exclude regex | Skip entities whose name matches. One pattern per line.                                                                                                                                                             |
 | Check interval (minutes)  | Minutes between drift evaluations.                                                                                                                                                                                  |
+| Max device notifications  | Cap on per-device notifications. Default 10. 0 = unlimited.                                                                                                                                                         |
 | Debug Logging             | Log debug info to HA logs.                                                                                                                                                                                          |
 
 See the blueprint UI for default values.

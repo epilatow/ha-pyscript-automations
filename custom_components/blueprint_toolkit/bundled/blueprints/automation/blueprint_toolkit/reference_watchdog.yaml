@@ -113,12 +113,12 @@ blueprint:
     max_source_notifications:
       name: Max source notifications
       description: >
-        Maximum number of per-source (per-owner)
-        notifications. Set to 0 for unlimited. When the
-        cap is reached, a summary notification indicates
-        how many additional notifications were
+        Default 10. Maximum number of per-source
+        (per-owner) notifications. Set to 0 for unlimited.
+        When the cap is reached, a summary notification
+        indicates how many additional notifications were
         suppressed.
-      default: 0
+      default: 10
       selector:
         number:
           min: 0

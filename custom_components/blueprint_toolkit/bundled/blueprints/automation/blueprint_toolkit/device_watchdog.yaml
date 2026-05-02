@@ -133,11 +133,11 @@ blueprint:
     max_device_notifications:
       name: Max device notifications
       description: >
-        Maximum number of per-device notifications.
-        Set to 0 for unlimited. When the cap is reached,
-        a summary notification indicates how many
-        additional notifications were suppressed.
-      default: 0
+        Default 10. Maximum number of per-device
+        notifications. Set to 0 for unlimited. When the
+        cap is reached, a summary notification indicates
+        how many additional notifications were suppressed.
+      default: 10
       selector:
         number:
           min: 0
